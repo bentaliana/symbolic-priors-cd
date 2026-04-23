@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "symbolic-priors-cd"
+version = "0.1.0"
+description = "BSc thesis on differentiable causal discovery under uncertain symbolic priors"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+authors = [
+  { name = "Ben Taliana", email = "ben.taliana.23@um.edu.mt" }
+]
+license = { text = "MIT" }
+
+dependencies = [
+  "numpy==2.4.4",
+  "pandas==3.0.2",
+  "scipy==1.17.1",
+  "networkx==3.6.1",
+  "matplotlib==3.10.8",
+  "seaborn==0.13.2",
+  "torch==2.11.0",
+  "dagma==1.1.1",
+  "igraph==1.0.0",
+  "pyyaml==6.0.3",
+  "pydantic==2.13.3",
+  "tqdm==4.67.3",
+  "wandb==0.26.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.0.3",
+  "pytest-cov==7.1.0",
+  "ipykernel==7.2.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["symbolic_priors_cd*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]    
