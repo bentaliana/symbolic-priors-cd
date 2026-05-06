@@ -316,20 +316,22 @@ def test_sid_validation_self_loop_in_true():
         sid_score(_empty_dag(3), B)
 
 
-@pytest.mark.skip(reason="SID not yet implemented, pre-registered expected result")
+@pytest.mark.skip(reason="SID not yet implemented — expected value is provisional scaffolding only")
 def test_sid_preregistered_hand_computed():
-    """Pre-registered SID result for a 3-node chain vs empty graph.
+    """Pre-registered SID test for a 3-node chain vs empty graph.
 
     true: 0->1->2 (chain)
     predicted: empty (no edges)
 
-    The empty DAG has every node in the same Markov equivalence class, 
-    yielding the maximum SID against a connected DAG.
-    Expected value to be confirmed from the reference implementation.
+    IMPORTANT: ``expected_sid`` below is provisional scaffolding only.
+    It has NOT been computed from a reference implementation.
+    Before unskipping this test, replace ``None`` with the hand-verified
+    SID value and remove this warning.
     """
     true = np.array([[False, True,  False],
                      [False, False, True],
                      [False, False, False]])
     predicted = _empty_dag(3)
+    expected_sid: int | None = None  # must be replaced before unskipping
     result = sid_score(predicted, true)
-    assert result == 6  # placeholder , confirm against reference before unskipping
+    assert result == expected_sid
