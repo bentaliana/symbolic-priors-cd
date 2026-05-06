@@ -1,13 +1,15 @@
-"""Interventional distribution metrics for causal discovery evaluation.
+"""Interventional adequacy metrics for causal discovery evaluation.
 
-All functions operate on sample matrices of shape (n_samples, n_features).
-They do not perform thresholding or graph inference, those steps belong
+Contains sample-based metrics (MMD) and graph-based metrics (SID stub).
+Does not perform thresholding or graph inference; those steps belong
 upstream in the evaluation harness.
 """
 
 from __future__ import annotations
 
 import numpy as np
+
+from symbolic_priors_cd.metrics._graph_validation import _validate_adjacency
 
 
 def _validate_sample_matrix(arr: np.ndarray, name: str) -> None:
@@ -174,3 +176,48 @@ def mmd_sensitivity_sweep(
         mult: mmd_rbf_unbiased(x, y, bandwidth=base_bandwidth * mult)
         for mult in bandwidth_multipliers
     }
+
+
+def sid_score(predicted_dag: np.ndarray, true_dag: np.ndarray) -> int:
+    """Compute the Structural Intervention Distance between two DAG adjacency matrices.
+
+    SID measures how many interventional distributions are incorrect under
+    the predicted graph relative to the true graph. Unlike SHD, SID directly
+    quantifies intervention mistakes rather than edge-edit distance.
+
+    Inputs must be strict boolean DAG adjacency matrices with no self-loops.
+    The function does not verify acyclicity or the absence of bidirected edges;
+    behaviour on such malformed inputs is undefined.
+
+    Parameters
+    ----------
+    predicted_dag : np.ndarray, square, dtype bool
+        Estimated DAG adjacency matrix. ``predicted_dag[i, j] = True`` means
+        directed edge i->j.
+    true_dag : np.ndarray, square, dtype bool
+        Ground-truth DAG adjacency matrix, same shape as ``predicted_dag``.
+
+    Returns
+    -------
+    int
+        SID score. Zero means every interventional distribution is correct.
+
+    Raises
+    ------
+    TypeError
+        If either input is not dtype bool.
+    ValueError
+        If inputs are not square, shapes differ, or self-loops are present.
+    NotImplementedError
+        Always , SID computation is deferred pending explicit verification.
+    """
+    _validate_adjacency(predicted_dag, "predicted_dag")
+    _validate_adjacency(true_dag, "true_dag")
+    if predicted_dag.shape != true_dag.shape:
+        raise ValueError(
+            f"predicted_dag and true_dag must have the same shape, "
+            f"got {predicted_dag.shape} and {true_dag.shape}"
+        )
+    raise NotImplementedError(
+        "SID implementation is deferred pending explicit verification."
+    )

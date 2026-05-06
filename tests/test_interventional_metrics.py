@@ -8,7 +8,7 @@ fixed seeds and sufficient samples to keep failure probability negligible.
 import numpy as np
 import pytest
 
-from symbolic_priors_cd.metrics import mmd_rbf_unbiased, mmd_sensitivity_sweep
+from symbolic_priors_cd.metrics import mmd_rbf_unbiased, mmd_sensitivity_sweep, sid_score
 
 
 # ---------------------------------------------------------------------------
@@ -253,3 +253,83 @@ def test_mmd_sensitivity_sweep_degenerate_median_raises():
     identical = np.ones((5, 2))
     with pytest.raises(ValueError, match="non-positive bandwidth"):
         mmd_sensitivity_sweep(identical, identical)
+
+
+# ---------------------------------------------------------------------------
+# sid_score , stub validation and NotImplementedError contract
+# ---------------------------------------------------------------------------
+
+
+def _empty_dag(n: int) -> np.ndarray:
+    return np.zeros((n, n), dtype=bool)
+
+
+def test_sid_valid_inputs_raise_not_implemented():
+    """Valid bool DAG matrices must raise NotImplementedError (implementation deferred)."""
+    A = np.array([[False, True], [False, False]])
+    B = _empty_dag(2)
+    with pytest.raises(NotImplementedError):
+        sid_score(A, B)
+
+
+def test_sid_not_implemented_message_content():
+    """NotImplementedError message must state that SID is deferred."""
+    A = _empty_dag(3)
+    with pytest.raises(NotImplementedError, match="SID implementation is deferred"):
+        sid_score(A, A)
+
+
+def test_sid_validation_shape_mismatch():
+    """Shape mismatch must raise ValueError, not NotImplementedError."""
+    A = _empty_dag(3)
+    B = _empty_dag(4)
+    with pytest.raises(ValueError, match="same shape"):
+        sid_score(A, B)
+
+
+def test_sid_validation_non_square():
+    with pytest.raises(ValueError, match="square"):
+        sid_score(np.zeros((3, 4), dtype=bool), _empty_dag(3))
+
+
+def test_sid_validation_non_bool_predicted():
+    with pytest.raises(TypeError, match="bool"):
+        sid_score(np.zeros((3, 3), dtype=np.uint8), _empty_dag(3))
+
+
+def test_sid_validation_non_bool_true():
+    with pytest.raises(TypeError, match="bool"):
+        sid_score(_empty_dag(3), np.zeros((3, 3), dtype=np.uint8))
+
+
+def test_sid_validation_self_loop_in_predicted():
+    A = _empty_dag(3)
+    A[1, 1] = True
+    with pytest.raises(ValueError, match="self-loops"):
+        sid_score(A, _empty_dag(3))
+
+
+def test_sid_validation_self_loop_in_true():
+    B = _empty_dag(3)
+    B[0, 0] = True
+    with pytest.raises(ValueError, match="self-loops"):
+        sid_score(_empty_dag(3), B)
+
+
+@pytest.mark.skip(reason="SID not yet implemented, pre-registered expected result")
+def test_sid_preregistered_hand_computed():
+    """Pre-registered SID result for a 3-node chain vs empty graph.
+
+    true: 0->1->2 (chain)
+    predicted: empty (no edges)
+
+    The empty DAG has every node in the same Markov equivalence class, 
+    yielding the maximum SID against a connected DAG.
+    Expected value to be confirmed from the reference implementation.
+    """
+    true = np.array([[False, True,  False],
+                     [False, False, True],
+                     [False, False, False]])
+    predicted = _empty_dag(3)
+    result = sid_score(predicted, true)
+    assert result == 6  # placeholder , confirm against reference before unskipping

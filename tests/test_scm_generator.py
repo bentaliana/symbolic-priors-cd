@@ -384,7 +384,7 @@ def test_sample_observational_rejects_non_positive_n_samples():
 
 
 # ---------------------------------------------------------------------------
-# LinearGaussianSCM — new validations
+# LinearGaussianSCM : new validations
 # ---------------------------------------------------------------------------
 
 

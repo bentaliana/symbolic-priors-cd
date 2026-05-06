@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from symbolic_priors_cd.metrics._graph_validation import _validate_adjacency
+
 
 def shd(
     predicted: np.ndarray,
@@ -83,17 +85,3 @@ def shd(
     return n_reversals * reversal_cost + n_other
 
 
-def _validate_adjacency(matrix: np.ndarray, name: str) -> None:
-    """Raise informatively if ``matrix`` is not a valid boolean DAG adjacency."""
-    if matrix.dtype != bool:
-        raise TypeError(
-            f"{name} must have dtype bool, got {matrix.dtype}"
-        )
-    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
-        raise ValueError(
-            f"{name} must be a square 2D matrix, got shape {matrix.shape}"
-        )
-    if np.any(np.diag(matrix)):
-        raise ValueError(
-            f"{name} must have no self-loops (diagonal must be all False)"
-        )
