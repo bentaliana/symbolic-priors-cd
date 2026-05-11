@@ -1,4 +1,5 @@
-docs/*
+inspection/*
+external/*
 
 # Python
 __pycache__/
