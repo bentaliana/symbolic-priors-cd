@@ -39,3 +39,7 @@ py -3.12 -m venv .venv
 # 10. Verify the package import after switching to src/symbolic_priors_cd layout
 
 .\.venv\Scripts\python.exe -c "import symbolic_priors_cd; print('package import ok')"
+
+
+
+.venv/Scripts/python -m pytest tests/test_dcdi_wrapper_interface.py tests/test_dcdi_wrapper_preprocessing.py -v

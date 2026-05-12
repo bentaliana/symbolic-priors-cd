@@ -1082,3 +1082,10 @@ Two calibration items are folded into the relevant commits:
 
 No further plan-level decisions are pending. Implementation may begin
 with commit 1 after human review once these v0.4 corrections are applied.
+
+Deferred preprocessing hardening for Commit 9 or Commit 12:
+- add read-only mean_ and std_ properties to CentredOnlyTransform and StandardisedTransform;
+- ensure returned arrays are copies, not mutable references;
+- add feature-count validation for transform/inverse_transform;
+- add target-index validation for transform_intervention_value;
+- optionally add training-data standardisation self-check: transformed training data has mean 0 and std 1 with ddof=0.
