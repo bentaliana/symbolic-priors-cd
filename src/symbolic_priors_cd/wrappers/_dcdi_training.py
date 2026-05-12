@@ -10,7 +10,7 @@ usable for threshold robustness reporting and downstream tasks.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional, Sequence
 
 import numpy as np
 import torch
@@ -56,6 +56,11 @@ class TrainingResult:
 
     The continuous edge tensors are detached CPU clones captured at exit;
     they are fully independent of the live model parameter buffers.
+
+    ``gamma_update_iters`` and ``mu_update_iters`` record the 1-indexed
+    iteration at which each Lagrangian coefficient was updated.
+    ``log_alpha_snapshots`` is populated only at iteration indices listed
+    in ``log_alpha_snapshots_at`` and stays empty otherwise.
     """
 
     continuous_log_alpha_pre_threshold: torch.Tensor
@@ -67,6 +72,9 @@ class TrainingResult:
     final_gamma: float
     final_mu: float
     final_h: float
+    gamma_update_iters: list[int]
+    mu_update_iters: list[int]
+    log_alpha_snapshots: dict[int, torch.Tensor]
 
 
 def _is_acyclic_bool(adj: np.ndarray) -> bool:
@@ -169,6 +177,8 @@ def run_dcdi_training_loop(
     seed: int,
     n_iter: int,
     loss_hook: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+    batch_indices: Optional[Sequence[np.ndarray]] = None,
+    log_alpha_snapshots_at: Optional[Iterable[int]] = None,
 ) -> TrainingResult:
     """Run the DCDI observational training loop.
 
@@ -188,12 +198,21 @@ def run_dcdi_training_loop(
         Tactical hyperparameters.
     seed : int
         Random seed used to reset torch and numpy state and to generate
-        the minibatch index sequence.
+        the minibatch index sequence when ``batch_indices`` is None.
     n_iter : int
         Maximum number of training iterations.
     loss_hook : Optional[Callable[[torch.Tensor], torch.Tensor]]
         Optional additive penalty acting on get_w_adj(); receives the
         continuous (num_vars, num_vars) tensor and returns a scalar tensor.
+    batch_indices : Optional[Sequence[np.ndarray]]
+        Pre-generated minibatch index sequence with at least ``n_iter``
+        entries. If None, the sequence is generated internally from
+        ``seed`` using a private numpy Generator.
+    log_alpha_snapshots_at : Optional[Iterable[int]]
+        Iteration indices at which to capture a detached CPU clone of
+        ``model.gumbel_adjacency.log_alpha`` at the start of the iteration
+        (before that iteration's training step). Returned in
+        ``TrainingResult.log_alpha_snapshots``.
 
     Returns
     -------
@@ -204,16 +223,31 @@ def run_dcdi_training_loop(
 
     torch.manual_seed(seed)
     np.random.seed(seed)
-    rng = np.random.default_rng(seed)
 
     num_vars = model.num_vars
     n_train = X_train.shape[0]
 
     batch_size = min(config.train_batch_size, n_train)
-    batch_indices = [
-        rng.choice(n_train, size=batch_size, replace=False)
-        for _ in range(n_iter)
-    ]
+    if batch_indices is None:
+        rng = np.random.default_rng(seed)
+        batch_indices = [
+            rng.choice(n_train, size=batch_size, replace=False)
+            for _ in range(n_iter)
+        ]
+    elif len(batch_indices) < n_iter:
+        raise ValueError(
+            f"batch_indices length {len(batch_indices)} is smaller than "
+            f"n_iter={n_iter}."
+        )
+
+    snapshot_set = (
+        set(int(i) for i in log_alpha_snapshots_at)
+        if log_alpha_snapshots_at is not None
+        else set()
+    )
+    log_alpha_snapshots: dict[int, torch.Tensor] = {}
+    gamma_update_iters: list[int] = []
+    mu_update_iters: list[int] = []
 
     x_train_t = torch.as_tensor(X_train, dtype=torch.float32)
     x_val_t = torch.as_tensor(X_val, dtype=torch.float32)
@@ -243,6 +277,12 @@ def run_dcdi_training_loop(
 
     for it in range(n_iter):
         iterations_completed = it + 1
+
+        if it in snapshot_set:
+            log_alpha_snapshots[it] = (
+                model.gumbel_adjacency.log_alpha.detach().cpu().clone()
+            )
+
         x_batch = x_train_t[batch_indices[it]]
 
         aug = _compute_augmented_lagrangian(
@@ -294,12 +334,23 @@ def run_dcdi_training_loop(
                 # gamma update; clear improvement leaves coefficients alone.
                 if abs(delta_gamma) < config.omega_gamma or delta_gamma > 0:
                     gamma = gamma + mu * h_value
+                    gamma_update_iters.append(it + 1)
 
                     constraint_violation_list.append(h_value)
                     if len(constraint_violation_list) >= 2:
                         prev_violation = constraint_violation_list[-2]
                         if h_value > prev_violation * config.omega_mu:
                             mu = mu * config.mu_mult_factor
+                            mu_update_iters.append(it + 1)
+
+    # Recompute h on the final post-step model state so final_h is correct
+    # even when n_iter is not a multiple of stop_crit_win (the in-loop
+    # value above only reflects the last stop-check boundary). For loops
+    # that ended on a stop check this is a no-op.
+    with torch.no_grad():
+        final_h = float(
+            (compute_dag_constraint(model.get_w_adj()) / constraint_norm).item()
+        )
 
     return TrainingResult(
         continuous_log_alpha_pre_threshold=snapshot_log_alpha(model),
@@ -311,4 +362,7 @@ def run_dcdi_training_loop(
         final_gamma=float(gamma),
         final_mu=float(mu),
         final_h=final_h,
+        gamma_update_iters=gamma_update_iters,
+        mu_update_iters=mu_update_iters,
+        log_alpha_snapshots=log_alpha_snapshots,
     )
