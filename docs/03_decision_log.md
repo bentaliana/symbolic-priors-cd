@@ -655,3 +655,88 @@ Consequence:
   `docs/04_wrapper_api_contract.md`.
 - The selection study cannot be declared scientifically complete until SID
   is verified and integrated.
+
+
+---
+
+12/05/2026 — DCDI wrapper training-equivalence and graph-status boundary established
+
+1. DCDI training-loop behavioural-equivalence gate
+
+Decision:
+
+- The DCDI wrapper uses the inspected DCDI low-level components rather than importing `dcdi.train`.
+- The wrapper-side observational training loop is treated as scientifically validated for the covered objective and update schedule after passing the behavioural-equivalence gate.
+- The behavioural-equivalence tests compare the wrapper loop against a hand-replicated reference loop derived from the inspected DCDI source.
+- The comparison covers:
+  - early `log_alpha` trajectory checkpoints with bitwise equality;
+  - mid-trajectory checkpoints with documented tolerance;
+  - final `log_alpha` and `get_w_adj`;
+  - loss-history checkpoints;
+  - training metadata;
+  - exact gamma-update and mu-update iteration indices.
+- The calibration artefact for this equivalence test is recorded in `docs/04e_equivalence_calibration_results.md`.
+- The calibrated schedule used `stop_crit_win = 20`, `n_iter = 400`, and recorded:
+  - `gamma_update_iters = [280, 400]`
+  - `mu_update_iters = [400]`
+
+Reason:
+The wrapper deliberately avoids `dcdi.train` because that entry point imports optional `cdt` and R-related dependencies that are not needed for the thesis wrapper. However, avoiding `dcdi.train` creates a scientific risk: the wrapper-side loop could silently diverge from the inspected DCDI optimisation logic. The behavioural-equivalence gate reduces that risk by verifying the wrapper loop against an independently written reference loop over the objective, minibatch schedule, validation timing, gamma/mu schedule, trajectory, and metadata.
+
+2. Continuous native-edge preservation
+
+Decision:
+
+- The DCDI training loop preserves the continuous native edge objects at training exit:
+  - `continuous_log_alpha_pre_threshold`
+  - `continuous_w_adj_pre_threshold`
+- The wrapper does not permanently saturate `log_alpha` to `+/-100` during training.
+- Any future saturation used for sampling-time structural masking must be temporary and restored afterwards.
+- Thresholding and downstream graph-status logic must use the preserved continuous edge probabilities rather than relying on a permanently discretised DCDI state.
+
+Reason:
+The thesis requires access to the native continuous edge representation for three downstream purposes: threshold-robustness reporting, interventional sampling, and eventual soft-prior loss-hook integration. Permanently saturating `log_alpha` would destroy the continuous information needed for those purposes and would make threshold sensitivity impossible to evaluate honestly.
+
+3. DCDI thresholding and graph-status boundary
+
+Decision:
+
+- DCDI thresholding is implemented at the wrapper boundary, not inside metric primitives.
+- The wrapper converts preserved continuous edge probabilities into boolean adjacency matrices using the project convention:
+  - row-source / column-destination
+  - `adjacency[i, j] = True` means edge `i -> j`
+- The default DCDI threshold remains `0.5`, applied to the preserved continuous edge-probability matrix.
+- Graph validity is classified using a priority-ordered status boundary:
+  - `invalid_shape`
+  - `self_loop`
+  - `bidirected`
+  - `cyclic`
+  - `valid_dag`
+- Invalid graphs are classified, not repaired.
+- The sampler-status boundary maps `valid_dag` to `available` and all non-valid graph statuses to `unavailable_invalid_graph`.
+
+Reason:
+Thresholding is a model-wrapper responsibility because it converts model-native continuous outputs into evaluator-facing boolean adjacency matrices. Keeping this logic outside metric primitives protects the metric layer from model-specific assumptions. Explicit graph-status classification also enforces the project policy of no silent graph repair: cyclic, bidirected, malformed, or self-loop-containing outputs are scientifically informative failure modes and must be reported rather than hidden by post-hoc edge deletion.
+
+4. Validation outcome and remaining scope
+
+Decision:
+
+- After the DCDI behavioural-equivalence gate and graph-status boundary were implemented, the full test suite passed with the intentional SID scaffold still skipped.
+- At this milestone, the DCDI wrapper has validated training-loop infrastructure and threshold/graph-status utilities, but the DCDI wrapper is not yet complete.
+- Remaining DCDI wrapper work includes:
+  - structural-mask context manager;
+  - interventional sampler;
+  - raw-unit intervention roundtrip;
+  - sampler-quality validation;
+  - loss-hook integration;
+  - diagnostics assembly;
+  - full-convergence integration test;
+  - final public API stabilisation.
+- Verified SID integration remains deferred and is still required before base-model selection results can be treated as scientifically complete.
+
+Reason:
+This records the distinction between a validated training/thresholding foundation and a complete model-selection wrapper. The project can proceed to the next DCDI wrapper commits, but it must not overclaim: sampler behaviour, loss-hook behaviour, diagnostics, full-convergence behaviour, and verified SID are still separate validation obligations.
+
+Overall rationale:
+This milestone closes the highest-risk part of the DCDI wrapper foundation: whether the project-owned wrapper training loop faithfully matches the inspected DCDI optimisation behaviour while preserving the continuous native edge representation required by the thesis. It also establishes the wrapper-side thresholding and graph-status boundary needed for downstream SID, SHD, MMD, and invalid-output reporting. This keeps the DCDI wrapper aligned with the thesis protocol while avoiding silent dependency, thresholding, or graph-repair assumptions.
