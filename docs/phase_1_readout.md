@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-06  
 **Author:** Ben Taliana  
-**Purpose:** This document orients any new collaborator (human or AI) to the project state at the end of Phase 1 and the start of Phase 2. It is a high-level handoff document, not a substitute for the frozen planning documents or the decision log.
+**Purpose:** This document orients any new collaborator to the project state at the end of Phase 1 and the start of Phase 2. It is a high-level handoff document, not a substitute for the frozen planning documents or the decision log.
 
 ---
 
@@ -202,7 +202,7 @@ This project uses:
 - a decision log for tactical decisions
 - plan-then-implement discipline for each commit
 - atomic commits
-- adversarial review across multiple AI collaborators before accepting important design changes
+
 
 This readout is the orientation point at the end of evaluator construction and the start of wrapper design.
 
