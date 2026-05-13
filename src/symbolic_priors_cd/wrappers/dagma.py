@@ -14,11 +14,45 @@ from typing import Literal, Optional, Union
 import numpy as np
 
 from symbolic_priors_cd.data.interventions import Intervention
+from symbolic_priors_cd.wrappers._graph_status import (
+    classify_graph_status,
+    infer_sampler_status,
+)
 from symbolic_priors_cd.wrappers.preprocessing import (
     CentredOnlyTransform,
     StandardisedTransform,
 )
 from symbolic_priors_cd.wrappers.status import WrapperDiagnostics
+
+
+# ---------------------------------------------------------------------------
+# DAGMA thresholding helper
+# ---------------------------------------------------------------------------
+
+
+def _threshold_continuous_w(
+    continuous_w: np.ndarray, threshold: float
+) -> np.ndarray:
+    """Apply the DAGMA project threshold to a continuous W matrix.
+
+    Returns ``abs(continuous_w) >= threshold`` as a strict bool array.
+    The DAGMA edge object is signed, so the threshold is applied to
+    absolute values. The function never mutates its input.
+
+    Parameters
+    ----------
+    continuous_w : np.ndarray
+        Float array of shape (d, d). Row-source / column-destination
+        convention.
+    threshold : float
+        Edges with ``abs(continuous_w) >= threshold`` survive.
+
+    Returns
+    -------
+    np.ndarray
+        Boolean adjacency of shape (d, d), dtype bool.
+    """
+    return (np.abs(continuous_w) >= threshold).astype(bool)
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +121,10 @@ class DAGMAWrapper:
 
     def __init__(self) -> None:
         self._fitted: bool = False
+        self._graph_status: Optional[str] = None
+        self._graph_invalid_reason: Optional[str] = None
+        self._sampler_status: Optional[str] = None
+        self._sampler_unavailable_reason: Optional[str] = None
 
     def fit(
         self,
@@ -181,6 +219,21 @@ class DAGMAWrapper:
         # Canonical continuous-W field: a copy so that future callers
         # cannot mutate the internal record via _fit_result.W.
         self._continuous_w_pre_threshold: np.ndarray = fit_result.W.copy()
+
+        # Classify the boolean adjacency at the project threshold and
+        # store the resulting graph and sampler status. The continuous
+        # W matrix is never modified; the threshold is applied to a
+        # fresh array. Invalid graphs are reported, not repaired.
+        a_thresh = _threshold_continuous_w(
+            self._continuous_w_pre_threshold, cfg.project_threshold
+        )
+        graph_status, graph_reason = classify_graph_status(a_thresh)
+        sampler_status, sampler_reason = infer_sampler_status(graph_status)
+        self._graph_status = graph_status
+        self._graph_invalid_reason = graph_reason
+        self._sampler_status = sampler_status
+        self._sampler_unavailable_reason = sampler_reason
+
         self._fitted = True
 
     def native_edge_continuous(self) -> np.ndarray:
@@ -213,10 +266,36 @@ class DAGMAWrapper:
     def thresholded_adjacency(self, threshold: float = 0.3) -> np.ndarray:
         """Return ``abs(W_continuous) >= threshold`` as a boolean adjacency.
 
-        Not implemented yet.
+        The default threshold matches the project default. Custom
+        thresholds are supported without retraining. The returned array
+        is a fresh boolean array; the wrapper's internal continuous
+        ``W`` is never modified. No silent repair is applied: invalid
+        graph patterns (self-loops, bidirected pairs, cycles) are
+        preserved in the returned adjacency exactly as they appear.
+
+        Parameters
+        ----------
+        threshold : float
+            Threshold applied to ``abs(W_continuous)``. Defaults to 0.3.
+
+        Returns
+        -------
+        np.ndarray
+            Boolean adjacency of shape ``(n_vars, n_vars)``,
+            row-source / column-destination convention.
+
+        Raises
+        ------
+        RuntimeError
+            If called before a successful fit.
         """
-        raise NotImplementedError(
-            "DAGMAWrapper.thresholded_adjacency is not implemented yet."
+        if not self._fitted:
+            raise RuntimeError(
+                "thresholded_adjacency called on an unfitted DAGMAWrapper. "
+                "Call fit() first."
+            )
+        return _threshold_continuous_w(
+            self._continuous_w_pre_threshold, threshold
         )
 
     def sample_interventional(

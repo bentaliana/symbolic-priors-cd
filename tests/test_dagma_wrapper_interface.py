@@ -187,11 +187,18 @@ def test_dagma_wrapper_native_edge_continuous_returns_ndarray():
     assert W.shape == (3, 3)
 
 
-def test_dagma_wrapper_thresholded_adjacency_stub_raises():
-    """thresholded_adjacency raises NotImplementedError until implemented."""
+def test_dagma_wrapper_thresholded_adjacency_returns_bool_array():
+    """thresholded_adjacency returns a bool ndarray after a successful fit."""
+    import numpy as _np
+    from symbolic_priors_cd.wrappers.preprocessing import CentredOnlyTransform as _COT
+    X = _np.random.default_rng(4).standard_normal((20, 3))
+    pre = _COT().fit(X)
     wrapper = DAGMAWrapper()
-    with pytest.raises(NotImplementedError):
-        wrapper.thresholded_adjacency()
+    wrapper.fit(X, preprocessor=pre, seed=0)
+    A = wrapper.thresholded_adjacency()
+    assert isinstance(A, _np.ndarray)
+    assert A.dtype == bool
+    assert A.shape == (3, 3)
 
 
 def test_dagma_wrapper_sample_interventional_stub_raises():
