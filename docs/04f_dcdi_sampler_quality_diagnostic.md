@@ -255,6 +255,16 @@ naturally read as a base-model fit/identification mismatch on this
 particular data family, not as a sampler bug and not as a
 fundamental impossibility.
 
+This reading is confirmed by the follow-up sanity check C-P12 in
+`docs/04g_equal_variance_identifiability_check.md`: an exhaustive
+enumeration of all 25 DAGs on 3 nodes scored by a shared-variance
+Gaussian BIC on the same observational training data ranks the true
+DAG as **rank 1 of 25** with a rank-2 BIC gap of about 232, while the
+DCDI-learned thresholded DAG ranks **19 of 25** with a BIC delta of
+~10634 from the top. The fixture is therefore recoverable in
+principle on this data; DCDI-G's failure is a base-model-vs-data
+inductive-bias mismatch, not data non-identifiability.
+
 ### What this does not prove
 
 - It does not prove DCDI-G is unfit for the thesis main study. The

@@ -25,6 +25,15 @@ committed and this plan is reviewed.
   validation is **not** marked as passed.
 - **Commit 11 (loss-hook injection) is paused pending project-level
   review** of the Commit 10 diagnostic findings.
+- A follow-up sanity check
+  (`inspection/probes/c_p12_equal_variance_identifiability_check.py`
+  and `docs/04g_equal_variance_identifiability_check.md`) shows that
+  the C-P11 fixture IS recoverable under an equal-variance-aware
+  exhaustive Gaussian-BIC enumeration (true DAG rank 1 of 25,
+  rank-2 BIC gap ~232; DCDI-learned DAG rank 19 of 25, BIC delta
+  ~10634 from the top). This sharpens the Commit 10 interpretation:
+  the failure is a DCDI-G inductive-bias / optimisation /
+  model-mismatch issue, not data impossibility.
 - Commits 12, 13, and 14 remain blocked behind Commit 11.
 
 This revision incorporates twelve review refinements: continuous-edge
