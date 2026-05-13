@@ -740,3 +740,22 @@ This records the distinction between a validated training/thresholding foundatio
 
 Overall rationale:
 This milestone closes the highest-risk part of the DCDI wrapper foundation: whether the project-owned wrapper training loop faithfully matches the inspected DCDI optimisation behaviour while preserving the continuous native edge representation required by the thesis. It also establishes the wrapper-side thresholding and graph-status boundary needed for downstream SID, SHD, MMD, and invalid-output reporting. This keeps the DCDI wrapper aligned with the thesis protocol while avoiding silent dependency, thresholding, or graph-repair assumptions.
+
+
+---
+
+13/05/2026 — DCDI sampler-quality diagnostic recorded and DCDI loss-hook work paused
+
+Decision:
+
+- DCDI sampler mechanics remain accepted through Commit 9: structural masking, restoration, clamping, deterministic sampling, and raw-unit intervention roundtrip are validated by the normal test suite.
+- Commit 10 sampler-quality validation did not pass and has been converted into diagnostic probe C-P11 rather than retained as failing pytest tests.
+- The diagnostic is recorded in `docs/04f_dcdi_sampler_quality_diagnostic.md`.
+- DCDI Commit 11, loss-hook injection, is paused pending base-model selection review.
+- The next implementation priority is DAGMA wrapper work, with SID verification continuing in parallel.
+
+Reason:
+
+The diagnostic showed that DCDI-G, under observational-only linear-Gaussian training, learned a valid but structurally incomplete DAG. The learned thresholded graph missed the strongest true edge, `2 -> 0`, with true weight magnitude 1.7861. Wrapper-vs-truth MMD was `+6.275e-01`, far above the Monte Carlo floor scale. When the same fitted DCDI conditionals were sampled under the true adjacency, MMD dropped to `+5.259e-02`; when the missing strongest edge was added back, MMD dropped to `+4.228e-02`.
+
+This localises the dominant failure to learned-structure quality rather than to sampler mechanics alone. The result strengthens the thesis motivation that observational differentiable causal discovery can fail under unseen-intervention evaluation, but it weakens DCDI-G as a candidate base model until the full base-model selection protocol is run. No acceptance threshold was weakened and no silent graph repair was introduced.

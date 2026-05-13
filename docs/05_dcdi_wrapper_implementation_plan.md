@@ -7,6 +7,26 @@ repository file is written by this commit. Implementation does not begin
 until Doc 02 v1.3 and the supporting inspection/probe documents are
 committed and this plan is reviewed.
 
+### Execution status update
+
+- Commits 1 through 9 are implemented and the corresponding pytest tests
+  are green.
+- **Commit 10 (sampler-quality validation) did NOT pass.** Both
+  acceptance thresholds (`wrapper_vs_truth <= 3 * floor` and
+  `correct * 1.5 <= wrong`) were missed by the actual fit. The
+  observed values, learned vs true structure, and the additional
+  diagnostic MMDs under the true adjacency and under the
+  learned-plus-missing-strongest-edge adjacency are recorded in
+  `docs/04f_dcdi_sampler_quality_diagnostic.md`. The pytest tests for
+  Commit 10 have been removed from normal pytest collection and
+  converted into the diagnostic probe
+  `inspection/probes/c_p11_dcdi_sampler_quality_diagnostic.py`. No
+  acceptance threshold has been weakened. The sampler-quality
+  validation is **not** marked as passed.
+- **Commit 11 (loss-hook injection) is paused pending project-level
+  review** of the Commit 10 diagnostic findings.
+- Commits 12, 13, and 14 remain blocked behind Commit 11.
+
 This revision incorporates twelve review refinements: continuous-edge
 preservation policy, tiered behavioural-equivalence tolerances,
 sampler-quality validation that isolates sampler correctness from DCDI
@@ -559,6 +579,8 @@ entered. The seed and derivation rule are logged in `WrapperDiagnostics`.
 The clamping invariant alone is too weak. The sampler-quality test must
 isolate sampler correctness from DCDI training fit error.
 
+Retrospective note: C-P11 showed that this assumption did not hold for the tested linear-Gaussian diagnostic; sampler-quality validation was therefore converted into a diagnostic artefact rather than marked as passed.
+
 ### Why hand-construction is infeasible
 
 The cleanest sampler-correctness test would inject a hand-constructed
@@ -911,8 +933,8 @@ where continuous-edge preservation is implemented and tested.
 | 7 | structural-mask context manager | `wrappers/_dcdi_sampling.py::_structural_mask_context` | `test_restoration_after_normal_sampling`, `test_restoration_after_induced_exception`, `test_cp9_structural_masking` | restoration normally and on exception; C-P9 invariance reproduces | moderate; corrupts model state if buggy |
 | 8 | sampler core (no preprocessing yet) | `wrappers/dcdi.py::sample_interventional`, `wrappers/_dcdi_sampling.py::ancestral_sample_with_clamp` | `test_sampler_clamping` | target column clamped in model frame; shape/dtype correct | low |
 | 9 | sampler raw-unit roundtrip | wire `preprocessing.py` into sampler | `test_raw_unit_intervention_roundtrip_centred_only`, `_standardised` | clamped value equals raw request after inverse transform | low |
-| 10 | sampler-quality (integration) | `tests/test_dcdi_wrapper_sampler_quality.py` | `test_sampler_quality_mc_floor`, `test_sampler_wrong_structure_comparison` | wrapper-vs-truth median MMD within `3 * floor`; wrong-structure further from truth by factor 1.5 | moderate; primary test may need calibration |
-| 11 | loss-hook injection | `_dcdi_training.py::run_dcdi_training_loop` accepts `loss_hook`; `DCDIWrapper.set_loss_hook` | `test_loss_hook_gradient_flow`, `test_loss_hook_behavioural_shrinkage`, `test_loss_hook_name_in_diagnostics` | gradient changes match prediction; shrinkage observed; name propagates | moderate |
+| 10 | sampler-quality (integration) | `inspection/probes/c_p11_dcdi_sampler_quality_diagnostic.py`, `docs/04f_dcdi_sampler_quality_diagnostic.md` (was: `tests/test_dcdi_wrapper_sampler_quality.py`) | converted to diagnostic probe; no pytest collection | **DIAGNOSTIC FAILED / PAUSED.** Both acceptance thresholds missed. Observed values and full interpretation recorded in `docs/04f_dcdi_sampler_quality_diagnostic.md`. Original thresholds were not weakened. | resolved as a base-model / wrapper-design open question |
+| 11 | loss-hook injection | `_dcdi_training.py::run_dcdi_training_loop` accepts `loss_hook`; `DCDIWrapper.set_loss_hook` | `test_loss_hook_gradient_flow`, `test_loss_hook_behavioural_shrinkage`, `test_loss_hook_name_in_diagnostics` | gradient changes match prediction; shrinkage observed; name propagates | **PAUSED** pending review of Commit 10 diagnostic |
 | 12 | diagnostics and logging | `DCDIWrapper.get_diagnostics`, `WrapperDiagnostics` | `test_diagnostics_completeness`, `test_native_edge_probabilities_zero_diagonal_after_fit` | all keys present; diagonal exactly zero after fit | low |
 | 13 | full-convergence integration | `tests/test_dcdi_wrapper_full_convergence.py` (required; marks as slow/integration) | one integration test that runs the wrapper to `h_threshold` on a small but non-trivial setting and verifies `convergence_info.first_stop` is set and the preserved continuous edge objects are non-saturated | training reaches second stop on the configured setting; `graph_status` is `valid_dag` or `cyclic` (documenting whichever occurs); continuous edge invariants pass | moderate; this test has a longer runtime than the unit tests; mark with pytest slow marker and exclude from the fast test suite |
 | 14 | docstrings, public API stabilisation | `wrappers/dcdi.py` docstrings, `wrappers/__init__.py` re-exports | none | docstrings cite Doc 02 v1.3, Doc 04, Doc 04b-d | trivial |
