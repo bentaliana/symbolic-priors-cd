@@ -16,11 +16,16 @@ import torch
 from symbolic_priors_cd.wrappers._dcdi_sampling import (
     _structural_mask_context,
     sample_model_frame_dcdi,
+    sample_raw_units_dcdi,
 )
 from symbolic_priors_cd.wrappers._dcdi_utils import (
     make_dcdi_model,
     snapshot_log_alpha,
     snapshot_w_adj,
+)
+from symbolic_priors_cd.wrappers.preprocessing import (
+    CentredOnlyTransform,
+    StandardisedTransform,
 )
 
 
@@ -382,3 +387,142 @@ def test_sampler_restores_training_mode():
     assert model.training, (
         "model.training was not restored to True after sample_model_frame_dcdi."
     )
+
+
+# ---------------------------------------------------------------------------
+# Raw-unit intervention roundtrip
+# ---------------------------------------------------------------------------
+
+
+def _make_model_and_preprocessors():
+    """Shared setup for raw-unit roundtrip tests.
+
+    Returns a 3-variable model and two fitted preprocessors (centred-only and
+    standardised) trained on data with non-trivial mean and variance so the
+    roundtrip is a real test.
+    """
+    rng = np.random.default_rng(0)
+    X_train = rng.standard_normal((200, 3)) * np.array([2.0, 3.0, 1.5]) + np.array([1.0, -2.0, 4.0])
+
+    centred = CentredOnlyTransform().fit(X_train)
+    standardised = StandardisedTransform().fit(X_train)
+
+    torch.manual_seed(0)
+    model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
+    model.eval()
+
+    return model, centred, standardised
+
+
+def test_raw_unit_intervention_roundtrip_centred_only():
+    """Target column in raw-unit samples equals the raw do-value for CentredOnlyTransform.
+
+    The raw do-value 2.0 is transformed to model frame, clamped during
+    sampling, then transformed back. The result must equal 2.0 within
+    float32 precision of the intermediate sample tensor.
+    """
+    model, centred, _ = _make_model_and_preprocessors()
+    target = 1
+    raw_value = 2.0
+
+    samples = sample_raw_units_dcdi(
+        model, _chain_dag_3(), target, raw_value, 40, sample_seed=0,
+        preprocessor=centred,
+    )
+
+    np.testing.assert_allclose(
+        samples[:, target], raw_value, rtol=1e-5,
+        err_msg=f"Target column {target} not equal to raw do-value {raw_value} after roundtrip.",
+    )
+
+
+def test_raw_unit_intervention_roundtrip_standardised():
+    """Target column in raw-unit samples equals the raw do-value for StandardisedTransform.
+
+    The raw do-value 2.0 is transformed to model frame (mean-subtracted,
+    std-divided), clamped during sampling, then transformed back. The result
+    must equal 2.0 within float32 precision.
+    """
+    model, _, standardised = _make_model_and_preprocessors()
+    target = 1
+    raw_value = 2.0
+
+    samples = sample_raw_units_dcdi(
+        model, _chain_dag_3(), target, raw_value, 40, sample_seed=0,
+        preprocessor=standardised,
+    )
+
+    np.testing.assert_allclose(
+        samples[:, target], raw_value, rtol=1e-5,
+        err_msg=f"Target column {target} not equal to raw do-value {raw_value} after roundtrip.",
+    )
+
+
+def test_raw_unit_sampler_does_not_refit_preprocessor():
+    """Calling sample_raw_units_dcdi must not alter the preprocessor's stored statistics.
+
+    Checks both CentredOnlyTransform (mean only) and StandardisedTransform
+    (mean and std) to confirm neither is modified by the sampling call.
+    """
+    model, centred, standardised = _make_model_and_preprocessors()
+
+    centred_mean_before = centred._mean.copy()
+    std_mean_before = standardised._mean.copy()
+    std_std_before = standardised._std.copy()
+
+    sample_raw_units_dcdi(
+        model, _chain_dag_3(), 1, 2.0, 20, sample_seed=0,
+        preprocessor=centred,
+    )
+    sample_raw_units_dcdi(
+        model, _chain_dag_3(), 1, 2.0, 20, sample_seed=0,
+        preprocessor=standardised,
+    )
+
+    np.testing.assert_array_equal(
+        centred._mean, centred_mean_before,
+        err_msg="CentredOnlyTransform mean was modified by sample_raw_units_dcdi.",
+    )
+    np.testing.assert_array_equal(
+        standardised._mean, std_mean_before,
+        err_msg="StandardisedTransform mean was modified by sample_raw_units_dcdi.",
+    )
+    np.testing.assert_array_equal(
+        standardised._std, std_std_before,
+        err_msg="StandardisedTransform std was modified by sample_raw_units_dcdi.",
+    )
+
+
+def test_raw_unit_sampler_deterministic_with_sample_seed():
+    """Same sample_seed produces bitwise-identical raw-unit output."""
+    model, centred, _ = _make_model_and_preprocessors()
+
+    s1 = sample_raw_units_dcdi(
+        model, _chain_dag_3(), 1, 2.0, 25, sample_seed=7,
+        preprocessor=centred,
+    )
+    s2 = sample_raw_units_dcdi(
+        model, _chain_dag_3(), 1, 2.0, 25, sample_seed=7,
+        preprocessor=centred,
+    )
+
+    np.testing.assert_array_equal(
+        s1, s2, err_msg="Same sample_seed produced different raw-unit samples.",
+    )
+
+
+def test_raw_unit_sampler_rejects_invalid_preprocessor_type():
+    """Passing an object that is not a recognised preprocessor raises TypeError.
+
+    The error message must mention "preprocessor" so the caller can identify
+    which argument is wrong.
+    """
+    torch.manual_seed(0)
+    model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
+    model.eval()
+
+    with pytest.raises(TypeError, match="preprocessor"):
+        sample_raw_units_dcdi(
+            model, _chain_dag_3(), 0, 1.0, 5, sample_seed=0,
+            preprocessor=object(),
+        )

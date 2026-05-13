@@ -12,14 +12,17 @@ tensors stored on TrainingResult) are independent of the live model
 state and are therefore unaffected by this context manager.
 
 sample_model_frame_dcdi performs ancestral sampling inside the
-structural-mask context. It produces samples in model frame; converting
-to raw SCM units is the caller's responsibility.
+structural-mask context. It produces samples in model frame.
+
+sample_raw_units_dcdi wraps sample_model_frame_dcdi with preprocessor
+support: it transforms the raw-unit intervention value to model frame,
+samples, then applies inverse_transform to return raw-unit samples.
 """
 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Union
 
 import numpy as np
 import torch
@@ -175,8 +178,8 @@ def sample_model_frame_dcdi(
     Returns
     -------
     np.ndarray
-        Float32 array of shape (n_samples, num_vars) containing samples
-        in model frame.
+        Floating array of shape (n_samples, num_vars) containing samples
+        in model frame. The dtype matches model.gumbel_adjacency.log_alpha.
 
     Raises
     ------
@@ -240,3 +243,70 @@ def sample_model_frame_dcdi(
             model.train()
 
     return x.detach().cpu().numpy()
+
+
+def sample_raw_units_dcdi(
+    model: LearnableModel_NonLinGaussANM,
+    a_thresh: np.ndarray,
+    target: int,
+    raw_intervention_value: float,
+    n_samples: int,
+    sample_seed: int,
+    preprocessor: Union[
+        "CentredOnlyTransform", "StandardisedTransform"
+    ],
+) -> np.ndarray:
+    """Sample from DCDI and return results in raw SCM units.
+
+    Converts the raw-unit intervention value to model frame using the
+    fitted preprocessor, delegates all sampling to sample_model_frame_dcdi,
+    then applies inverse_transform to the returned model-frame samples.
+
+    The preprocessor must already be fitted. This function does not call
+    preprocessor.fit and does not modify any stored preprocessor statistics.
+
+    Parameters
+    ----------
+    model : LearnableModel_NonLinGaussANM
+        A fitted DCDI model.
+    a_thresh : np.ndarray
+        Boolean adjacency matrix of shape (num_vars, num_vars),
+        row-source / column-destination convention. Must be a valid DAG.
+    target : int
+        Index of the intervened variable (0-indexed).
+    raw_intervention_value : float
+        Intervention value in raw SCM units. Converted to model frame
+        internally via preprocessor.transform_intervention_value.
+    n_samples : int
+        Number of samples to draw. Must be at least 1.
+    sample_seed : int
+        Seed for torch.manual_seed. Identical arguments produce identical
+        output for the same fitted model and preprocessor.
+    preprocessor : CentredOnlyTransform or StandardisedTransform
+        A fitted preprocessor used to translate between raw and model frame.
+
+    Returns
+    -------
+    np.ndarray
+        Float64 array of shape (n_samples, num_vars) in raw SCM units.
+        The target column equals raw_intervention_value up to float32
+        precision of the sample tensor.
+    """
+    from symbolic_priors_cd.wrappers.preprocessing import (
+        CentredOnlyTransform,
+        StandardisedTransform,
+    )
+
+    if not isinstance(preprocessor, (CentredOnlyTransform, StandardisedTransform)):
+        raise TypeError(
+            f"preprocessor must be a CentredOnlyTransform or StandardisedTransform, "
+            f"got {type(preprocessor).__name__}."
+        )
+
+    model_frame_value = preprocessor.transform_intervention_value(
+        raw_intervention_value, target
+    )
+    model_frame_samples = sample_model_frame_dcdi(
+        model, a_thresh, target, model_frame_value, n_samples, sample_seed,
+    )
+    return preprocessor.inverse_transform(model_frame_samples)
