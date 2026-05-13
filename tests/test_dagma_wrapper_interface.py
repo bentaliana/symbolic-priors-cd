@@ -174,11 +174,17 @@ def test_dagma_wrapper_fit_runs_on_valid_input():
     assert wrapper._fitted
 
 
-def test_dagma_wrapper_native_edge_continuous_stub_raises():
-    """native_edge_continuous raises NotImplementedError until implemented."""
+def test_dagma_wrapper_native_edge_continuous_returns_ndarray():
+    """native_edge_continuous returns a numpy array after a successful fit."""
+    import numpy as _np
+    from symbolic_priors_cd.wrappers.preprocessing import CentredOnlyTransform as _COT
+    X = _np.random.default_rng(3).standard_normal((20, 3))
+    pre = _COT().fit(X)
     wrapper = DAGMAWrapper()
-    with pytest.raises(NotImplementedError):
-        wrapper.native_edge_continuous()
+    wrapper.fit(X, preprocessor=pre, seed=0)
+    W = wrapper.native_edge_continuous()
+    assert isinstance(W, _np.ndarray)
+    assert W.shape == (3, 3)
 
 
 def test_dagma_wrapper_thresholded_adjacency_stub_raises():

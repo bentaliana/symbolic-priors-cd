@@ -786,3 +786,40 @@ The DAGMA wrapper plan preserves the frozen Doc 02 policy: `w_threshold=0.0` ins
 Consequence:
 
 DAGMA wrapper implementation may begin from Commit 1 after this decision-log entry is committed. Any later deviation from Doc 06 must be recorded explicitly before implementation continues.
+
+
+## 13/05/2026 — DAGMA fit path and continuous-W boundary established
+
+### Decision
+
+DAGMA wrapper Commits 2 and 3 are accepted as the implementation of the prior-free DAGMA fit path and native continuous-edge boundary.
+
+Commit 2 establishes the DAGMA fit path:
+
+- `DAGMAWrapper.fit` accepts observational training data already in model frame.
+- The caller's input array is protected by passing a defensive copy into `DagmaLinear.fit`, because DAGMA mean-centres its input in place.
+- All DAGMA fit hyperparameters are passed explicitly from `DAGMAConfig`, including `w_threshold_internal = 0.0`.
+- `exclude_edges` and `include_edges` are passed as `None`; the prior-free DAGMA wrapper does not use DAGMA's hard-constraint API.
+- The fit path does not call `np.random.seed`, `torch.manual_seed`, or `dagma.utils.set_random_seed`.
+- `h_final` and `score_final` are captured from the fitted DAGMA model.
+- Failed fits propagate the original exception and leave `_fitted = False`.
+
+Commit 3 establishes the canonical continuous-edge boundary:
+
+- The post-fit continuous DAGMA matrix is copied into `_continuous_w_pre_threshold`.
+- `native_edge_continuous()` returns a defensive copy of `_continuous_w_pre_threshold`.
+- Signed weights are preserved.
+- Sub-threshold nonzero weights are preserved.
+- No thresholding, transposition, sign modification, or graph repair occurs at this boundary.
+
+### Reason
+
+The DAGMA wrapper must preserve the native continuous weighted adjacency before any project-level thresholding occurs. This is load-bearing for later threshold robustness, source-faithfulness checks, graph-status validation, residual-noise estimation, and interventional sampling.
+
+The fit path is intentionally narrow: it calls the inspected DAGMA implementation directly, with explicit configuration values and without global RNG mutation or hard-constraint mechanisms. This keeps the wrapper faithful to the prior-free selection-study setup and avoids contaminating later evaluation.
+
+### Consequence
+
+DAGMA now has a functional prior-free fit path and a canonical continuous-edge accessor. The next implementation step is the DAGMA source-faithfulness gate, which must verify that the wrapper's fitted continuous `W` matches a direct `DagmaLinear.fit` call under the same input and hyperparameters.
+
+No selection-study conclusion can be drawn from this milestone. Thresholding, graph-status validation, residual-noise estimation, interventional sampling, sampler-quality diagnostics, and verified SID integration remain outstanding.

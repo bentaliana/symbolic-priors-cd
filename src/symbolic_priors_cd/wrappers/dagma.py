@@ -168,24 +168,47 @@ class DAGMAWrapper:
 
         cfg = config if config is not None else DAGMAConfig()
 
-        # run_dagma_fit raises if DagmaLinear.fit raises; _fitted is
-        # only set to True after a successful return.
+        # run_dagma_fit raises if DagmaLinear.fit raises; all
+        # assignments below only execute on a successful return, so
+        # _fitted and _continuous_w_pre_threshold are never set in
+        # the error case.
         fit_result = run_dagma_fit(X_local, cfg)
 
         self._seed = seed
         self._config = cfg
         self._preprocessor = preprocessor
         self._fit_result = fit_result
+        # Canonical continuous-W field: a copy so that future callers
+        # cannot mutate the internal record via _fit_result.W.
+        self._continuous_w_pre_threshold: np.ndarray = fit_result.W.copy()
         self._fitted = True
 
     def native_edge_continuous(self) -> np.ndarray:
-        """Return the preserved pre-threshold continuous ``W`` matrix.
+        """Return the canonical pre-threshold continuous ``W`` matrix.
 
-        Not implemented yet.
+        Returns a defensive copy so that mutating the returned array
+        does not affect the wrapper's internal state.
+
+        The matrix is the continuous DAGMA edge output captured with
+        ``w_threshold=0.0``. Signs and sub-threshold values are
+        preserved exactly as returned by DagmaLinear.
+
+        Returns
+        -------
+        np.ndarray
+            Float array of shape (n_vars, n_vars).
+
+        Raises
+        ------
+        RuntimeError
+            If called before a successful fit.
         """
-        raise NotImplementedError(
-            "DAGMAWrapper.native_edge_continuous is not implemented yet."
-        )
+        if not self._fitted:
+            raise RuntimeError(
+                "native_edge_continuous called on an unfitted DAGMAWrapper. "
+                "Call fit() first."
+            )
+        return self._continuous_w_pre_threshold.copy()
 
     def thresholded_adjacency(self, threshold: float = 0.3) -> np.ndarray:
         """Return ``abs(W_continuous) >= threshold`` as a boolean adjacency.
