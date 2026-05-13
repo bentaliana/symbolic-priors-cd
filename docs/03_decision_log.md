@@ -823,3 +823,29 @@ The fit path is intentionally narrow: it calls the inspected DAGMA implementatio
 DAGMA now has a functional prior-free fit path and a canonical continuous-edge accessor. The next implementation step is the DAGMA source-faithfulness gate, which must verify that the wrapper's fitted continuous `W` matches a direct `DagmaLinear.fit` call under the same input and hyperparameters.
 
 No selection-study conclusion can be drawn from this milestone. Thresholding, graph-status validation, residual-noise estimation, interventional sampling, sampler-quality diagnostics, and verified SID integration remain outstanding.
+
+## 13/05/2026 — DAGMA thresholding and graph-status boundary established
+
+### Decision
+
+DAGMA wrapper Commit 5 is accepted as the implementation of wrapper-side thresholding and graph-status classification.
+
+- DAGMA thresholding is external to the DAGMA library and uses `abs(W_continuous) >= threshold`.
+- The default DAGMA project threshold is `0.3`.
+- `thresholded_adjacency()` returns a boolean adjacency in row-source / column-destination convention.
+- Thresholding does not mutate the preserved continuous `W`.
+- Invalid graph patterns are reported, not repaired.
+- Self-loops, bidirected pairs, and directed cycles remain present in the returned adjacency and are classified through `graph_status`.
+- DAGMA stores graph-status and sampler-status state after fit.
+- The shared graph-status helpers now live in `wrappers/_graph_status.py`.
+- DCDI imports and re-exports the shared graph-status helpers, while keeping its DCDI-specific thresholding helper unchanged.
+
+### Reason
+
+The wrapper must convert DAGMA's continuous signed `W` into evaluator-compatible boolean adjacencies without hiding invalid structures. This boundary is load-bearing for later residual-noise estimation, interventional sampling, sampler-quality diagnostics, and model-selection reporting.
+
+The shared helper prevents DAGMA and DCDI from drifting in their interpretation of graph validity.
+
+### Consequence
+
+DAGMA now exposes thresholded adjacency and graph-status state, but it still does not estimate residual noise or draw interventional samples. The next implementation step is residual-noise estimation for valid thresholded DAGs. If the thresholded graph is invalid, the sampler remains unavailable.
