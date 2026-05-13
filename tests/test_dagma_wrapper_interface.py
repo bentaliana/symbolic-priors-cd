@@ -154,7 +154,7 @@ def test_dagma_utils_does_not_import_dagma_utils_submodule():
 
 
 # ---------------------------------------------------------------------------
-# DAGMAWrapper construction and stubs
+# DAGMAWrapper construction and implemented methods
 # ---------------------------------------------------------------------------
 
 
@@ -164,14 +164,14 @@ def test_dagma_wrapper_constructable():
     assert wrapper is not None
 
 
-def test_dagma_wrapper_fit_stub_raises():
-    """fit raises NotImplementedError until its implementation lands."""
+def test_dagma_wrapper_fit_runs_on_valid_input():
+    """fit completes without error on a valid 2D float array."""
     wrapper = DAGMAWrapper()
     pre = CentredOnlyTransform()
-    X = np.zeros((4, 3), dtype=float)
+    X = np.random.default_rng(5).standard_normal((20, 3))
     pre.fit(X)
-    with pytest.raises(NotImplementedError):
-        wrapper.fit(X, preprocessor=pre, seed=0)
+    wrapper.fit(X, preprocessor=pre, seed=0)
+    assert wrapper._fitted
 
 
 def test_dagma_wrapper_native_edge_continuous_stub_raises():

@@ -1,10 +1,9 @@
 """DAGMA-linear wrapper: public surface and frozen configuration.
 
 Defines the ``DAGMAConfig`` dataclass and the ``DAGMAWrapper`` class
-that exposes DAGMA-linear behind a project-level API. Method
-implementations are added incrementally; methods that are not yet
-implemented raise ``NotImplementedError`` so the class can already
-be imported, instantiated, and type-checked.
+that exposes DAGMA-linear behind a project-level API. Methods that
+are not yet implemented raise ``NotImplementedError`` so the class
+can be imported, instantiated, and type-checked at any stage.
 """
 
 from __future__ import annotations
@@ -99,9 +98,85 @@ class DAGMAWrapper:
     ) -> None:
         """Fit DAGMA-linear on observational training data in model frame.
 
-        Not implemented yet.
+        X_train is expected already in model frame (transformed by the
+        caller's preprocessor before this call). The wrapper passes a
+        defensive copy to DagmaLinear so the caller's array is never
+        mutated, even though DagmaLinear mean-centres its input in place.
+
+        The fit path does not call ``np.random.seed``,
+        ``torch.manual_seed``, or ``dagma.utils.set_random_seed``.
+        DagmaLinear.fit is deterministic for fixed input and
+        hyperparameters. The ``seed`` argument is stored for
+        traceability only.
+
+        Parameters
+        ----------
+        X_train : np.ndarray
+            2D float array of shape (n_samples, n_vars), already in
+            model frame. Minimum shape: (1, 2).
+        preprocessor : CentredOnlyTransform or StandardisedTransform
+            Fitted preprocessor used by later sampling calls for
+            intervention-value transforms and inverse transforms.
+        seed : int
+            Run identifier recorded for reproducibility. Not used to
+            seed any random number generator.
+        config : DAGMAConfig or None
+            Hyperparameter configuration. Defaults to ``DAGMAConfig()``
+            when None.
+
+        Raises
+        ------
+        ValueError
+            If X_train is not a valid 2D numeric array with at least
+            one row and two columns.
+        Any exception raised by DagmaLinear.fit propagates unchanged.
         """
-        raise NotImplementedError("DAGMAWrapper.fit is not implemented yet.")
+        # Import lazily to avoid pulling in the DAGMA source at
+        # wrappers package import time.
+        from symbolic_priors_cd.wrappers._dagma_fit import run_dagma_fit
+
+        # --- input validation ---
+        X_arr = np.asarray(X_train)
+        if X_arr.dtype.kind == "b":
+            raise ValueError(
+                "X_train has dtype bool; provide a numeric float array."
+            )
+        try:
+            X_float = X_arr.astype(float)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(
+                f"X_train could not be converted to a float array: {exc}"
+            ) from exc
+        if X_float.ndim != 2:
+            raise ValueError(
+                f"X_train must be a 2D array, got ndim={X_float.ndim}."
+            )
+        if X_float.shape[0] < 1:
+            raise ValueError(
+                f"X_train must have at least one row, got shape {X_float.shape}."
+            )
+        if X_float.shape[1] < 2:
+            raise ValueError(
+                f"X_train must have at least two columns (variables), "
+                f"got shape {X_float.shape}."
+            )
+
+        # Defensive copy: DagmaLinear mutates its input during
+        # mean-centering; passing a copy keeps the caller's array
+        # unchanged.
+        X_local = X_float.copy()
+
+        cfg = config if config is not None else DAGMAConfig()
+
+        # run_dagma_fit raises if DagmaLinear.fit raises; _fitted is
+        # only set to True after a successful return.
+        fit_result = run_dagma_fit(X_local, cfg)
+
+        self._seed = seed
+        self._config = cfg
+        self._preprocessor = preprocessor
+        self._fit_result = fit_result
+        self._fitted = True
 
     def native_edge_continuous(self) -> np.ndarray:
         """Return the preserved pre-threshold continuous ``W`` matrix.
