@@ -13,7 +13,10 @@ import numpy as np
 import pytest
 import torch
 
-from symbolic_priors_cd.wrappers._dcdi_sampling import _structural_mask_context
+from symbolic_priors_cd.wrappers._dcdi_sampling import (
+    _structural_mask_context,
+    sample_model_frame_dcdi,
+)
 from symbolic_priors_cd.wrappers._dcdi_utils import (
     make_dcdi_model,
     snapshot_log_alpha,
@@ -134,12 +137,12 @@ def test_restoration_after_induced_exception():
 def test_cp9_structural_masking():
     """Reproduce the C-P9 invariant inside the structural-mask context.
 
-    With parent 1 excluded for target 2, Varying column 1 of the input batch by a
-    large amount leaves the target's density parameters unchanged within 
-    numerical tolerance. Varying column 0 (the included parent for target 2)
-    by the same amount produces a visible change in the target's density parameters. 
-    The RNG seed is reset before each forward pass so the
-    Gumbel draw is identical across paired calls.
+    With parent 1 excluded for target 2, varying column 1 of the input
+    batch by a large amount leaves the target's density parameters
+    unchanged within numerical tolerance. Varying column 0 (the included
+    parent for target 2) by the same amount produces a visible change.
+    The RNG seed is reset before each forward pass so the Gumbel draw
+    is identical across paired calls.
     """
     model, mask = _build_model_and_mask()
 
@@ -216,4 +219,166 @@ def test_preserved_continuous_edges_unchanged_after_context_exception():
     )
     assert torch.equal(preserved_w_adj, w_adj_baseline), (
         "Preserved w_adj snapshot changed after an in-context exception."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sampler core: model-frame sampling
+# ---------------------------------------------------------------------------
+
+
+def _chain_dag_3() -> np.ndarray:
+    """Return the 3-node chain DAG adjacency 0->1->2."""
+    return np.array([
+        [False, True,  False],
+        [False, False, True],
+        [False, False, False],
+    ])
+
+
+def test_sampler_clamping_model_frame():
+    """Target column contains exactly the requested intervention value for all rows.
+
+    Uses a 3-node chain 0->1->2 with n_samples=30, intervening on node 1.
+    The value 3.0 is exactly representable in float32, so the comparison
+    is exact.
+    """
+    torch.manual_seed(0)
+    model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
+    model.eval()
+
+    target = 1
+    intervention_value = 3.0
+    n_samples = 30
+
+    samples = sample_model_frame_dcdi(
+        model, _chain_dag_3(), target, intervention_value, n_samples,
+        sample_seed=0,
+    )
+
+    assert np.all(samples[:, target] == np.float32(intervention_value)), (
+        f"Target column {target} not uniformly clamped to {intervention_value}. "
+        f"Got min={samples[:, target].min()}, max={samples[:, target].max()}"
+    )
+
+
+def test_sampler_shape():
+    """Returned array has shape (n_samples, num_vars)."""
+    torch.manual_seed(0)
+    model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
+    model.eval()
+
+    n_samples = 17
+    samples = sample_model_frame_dcdi(
+        model, _chain_dag_3(), 0, 1.0, n_samples, sample_seed=0,
+    )
+
+    assert samples.shape == (n_samples, model.num_vars), (
+        f"Expected shape ({n_samples}, {model.num_vars}), got {samples.shape}"
+    )
+
+
+def test_sampler_deterministic_with_sample_seed():
+    """Same sample_seed produces identical output; different seeds produce different output.
+
+    Non-target columns are expected to vary between seeds because they are
+    drawn from learned conditionals. If the outputs happen to be equal for
+    a different seed (extremely unlikely), the test would spuriously pass;
+    but this is practically impossible for a real model and 20 samples.
+    """
+    torch.manual_seed(0)
+    model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
+    model.eval()
+
+    target = 1
+    a = _chain_dag_3()
+
+    s1 = sample_model_frame_dcdi(model, a, target, 1.0, 20, sample_seed=7)
+    s2 = sample_model_frame_dcdi(model, a, target, 1.0, 20, sample_seed=7)
+    s3 = sample_model_frame_dcdi(model, a, target, 1.0, 20, sample_seed=99)
+
+    np.testing.assert_array_equal(s1, s2, err_msg="Same seed produced different samples.")
+
+    non_target = [j for j in range(model.num_vars) if j != target]
+    for col in non_target:
+        assert not np.array_equal(s1[:, col], s3[:, col]), (
+            f"Different seeds produced identical non-target column {col}."
+        )
+
+
+def test_sampler_uses_structural_mask_context():
+    """Changing the clamped value of an excluded-parent node does not alter
+    the samples of downstream nodes that have no edge from that node.
+
+    Mask: only edge 0->2. Node 1 is not a parent of node 2.
+    Intervening on node 1 with two very different values (999 vs -999)
+    must leave x[:, 2] bitwise identical when the same sample_seed is used,
+    because node 2 only depends on node 0 in this mask and node 0 is
+    sampled identically under both interventions (same seed, same topology).
+    """
+    torch.manual_seed(0)
+    model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
+    model.eval()
+
+    # Only edge 0->2. Node 1 has no parents and no children.
+    a_thresh = np.array([
+        [False, False, True],
+        [False, False, False],
+        [False, False, False],
+    ])
+    target = 1
+    n_samples = 50
+
+    samples_high = sample_model_frame_dcdi(
+        model, a_thresh, target, 999.0, n_samples, sample_seed=42,
+    )
+    samples_low = sample_model_frame_dcdi(
+        model, a_thresh, target, -999.0, n_samples, sample_seed=42,
+    )
+
+    np.testing.assert_array_equal(
+        samples_high[:, 2],
+        samples_low[:, 2],
+        err_msg=(
+            "Node 2 samples differ between two interventions on node 1, "
+            "which is not a parent of node 2 in the mask. "
+            "Structural masking may not be enforced through the sampler."
+        ),
+    )
+    assert np.all(samples_high[:, target] == np.float32(999.0))
+    assert np.all(samples_low[:, target] == np.float32(-999.0))
+
+
+def test_sampler_refuses_invalid_graph():
+    """Calling the sampler with a non-DAG adjacency raises ValueError.
+
+    The error message must mention graph status so the caller can diagnose
+    the failure without inspecting source.
+    """
+    torch.manual_seed(0)
+    model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
+    model.eval()
+
+    cyclic = np.array([
+        [False, True,  False],
+        [False, False, True],
+        [True,  False, False],
+    ])
+
+    with pytest.raises(ValueError, match="graph status"):
+        sample_model_frame_dcdi(model, cyclic, 0, 1.0, 10, sample_seed=0)
+
+
+def test_sampler_restores_training_mode():
+    """sample_model_frame_dcdi restores model.training to True when called in train mode."""
+    torch.manual_seed(0)
+    model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
+    model.train()
+
+    assert model.training, "Pre-condition: model must be in train mode before the call."
+
+    sample_model_frame_dcdi(model, _chain_dag_3(), 0, 0.0, 5, sample_seed=0)
+
+    assert model.training, (
+        "model.training was not restored to True after sample_model_frame_dcdi."
     )
