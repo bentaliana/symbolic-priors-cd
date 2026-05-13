@@ -761,3 +761,28 @@ The diagnostic showed that DCDI-G, under observational-only linear-Gaussian trai
 This localises the dominant failure to learned-structure quality rather than to sampler mechanics alone. The result strengthens the thesis motivation that observational differentiable causal discovery can fail under unseen-intervention evaluation, but it weakens DCDI-G as a candidate base model until the full base-model selection protocol is run. No acceptance threshold was weakened and no silent graph repair was introduced.
 
 C-P12 confirmed that the C-P11 fixture is recoverable under an equal-variance-aware exhaustive Gaussian-BIC score. The true DAG ranks 1/25 with a large BIC margin, while the DCDI-learned DAG ranks 19/25. This sharpens the C-P11 interpretation: DCDI-G’s failure is not data non-identifiability, but a base-model inductive-bias / optimisation / model-mismatch issue. DCDI Commit 11 remains paused.
+
+13/05/2026 — DAGMA wrapper plan created and approved for implementation
+
+Decision:
+
+- `docs/06_dagma_wrapper_implementation_plan.md` v1.1 is accepted as the DAGMA wrapper implementation plan, following the same plan-then-implement discipline used for the DCDI wrapper plan.
+- DAGMA implementation may proceed from Commit 1 only, following the atomic sequence in Doc 06.
+- DAGMA uses source-faithfulness against a direct `DagmaLinear.fit` call rather than DCDI-style behavioural equivalence, because the DAGMA wrapper calls the official fit path directly and does not reimplement the optimisation loop.
+- DAGMA learned sampler-quality is treated as an inspection probe and report from the start, not as a normal pytest gate. Wrapper mechanics remain covered by pytest.
+- The diagnostics schema will use common wrapper fields plus `model_specific_diagnostics` for model-native fields.
+- DAGMA fit will not call `dagma.utils.set_random_seed`, `np.random.seed`, or `torch.manual_seed`; the fit is deterministic for fixed input and hyperparameters, and sampler randomness is handled through local `np.random.default_rng(sample_seed)`.
+- DAGMA `sample_interventional` exposes `noise_policy`, with `"residual_fitted"` as the primary policy and `"unit_variance"` as the Doc 02 sensitivity path.
+- `h_final <= 1e-5` is used as the provisional DAGMA wrapper diagnostic threshold for `training_status`. This is diagnostic only and never triggers graph repair.
+- Residual sigma estimation uses no silent variance floor. If any sigma is non-finite or non-positive, sampler availability is marked as unresolved and no MMD sample is produced.
+- DAGMA loss-hook implementation remains deferred. DAGMA hard-constraint use through `exclude_edges` / `include_edges` is also deferred to a separately documented future baseline implementation.
+- DCDI Commit 11 remains paused.
+- Verified SID remains a parallel blocker before selection-study conclusions can be considered scientifically complete.
+
+Reason:
+
+The DAGMA wrapper plan preserves the frozen Doc 02 policy: `w_threshold=0.0` inside DAGMA, continuous `W` preservation, external `abs(W) >= 0.3` thresholding, residual-fitted DAGMA noise as primary, unit-variance sensitivity, no silent graph repair, and raw-unit intervention semantics. The plan also incorporates the C-P11 lesson that learned sampler-quality is a base-model diagnostic rather than a wrapper-mechanics invariant.
+
+Consequence:
+
+DAGMA wrapper implementation may begin from Commit 1 after this decision-log entry is committed. Any later deviation from Doc 06 must be recorded explicitly before implementation continues.
