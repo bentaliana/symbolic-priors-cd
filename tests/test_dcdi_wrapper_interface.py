@@ -120,14 +120,13 @@ _EXPECTED_KEYS = {
     "loss_history",
     "loss_decomposition_final",
     "convergence_info",
-    "continuous_log_alpha_pre_threshold",
-    "continuous_w_adj_pre_threshold",
     "thresholded_adjacency",
     "graph_invalid_reason",
     "sampler_unavailable_reason",
     "mmd_sampling_metadata",
     "loss_hook_name",
     "numerical_tolerances",
+    "model_specific_diagnostics",
 }
 
 

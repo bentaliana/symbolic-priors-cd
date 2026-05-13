@@ -6,6 +6,8 @@ The three status axes are independent. For example, training_status can be
 
 WrapperDiagnostics is a TypedDict returned by get_diagnostics() after a fit.
 Every key is present; Optional fields are explicitly None when not applicable.
+Fields unique to a single wrapper live inside model_specific_diagnostics so
+the top-level schema stays generic across implementations.
 """
 
 from __future__ import annotations
@@ -51,7 +53,9 @@ class WrapperDiagnostics(TypedDict):
     """Structured diagnostic output from a fitted wrapper.
 
     Every key is present after a fit. Optional keys are None when the
-    associated feature is absent or unknown.
+    associated feature is absent or unknown. Wrapper-specific fields
+    are placed inside model_specific_diagnostics rather than as
+    top-level keys.
     """
 
     training_status: TrainingStatus
@@ -60,19 +64,21 @@ class WrapperDiagnostics(TypedDict):
     seed: int
     n_iterations: int
     config_snapshot: dict[str, object]
-    """Resolved DCDIConfig values for this run; always populated even when
+    """Resolved configuration values for this run; always populated even when
     config=None was passed to fit (records the applied defaults)."""
     loss_history: list[float]
     loss_decomposition_final: dict[str, float]
-    """Keys: nll, reg, prior, gamma, mu, h at the final training iteration."""
+    """Final-iteration loss breakdown. Wrappers without a meaningful
+    breakdown populate an empty dict."""
     convergence_info: dict[str, object]
-    """Keys: first_stop (int or None), final_iter (int), converged (bool)."""
-    continuous_log_alpha_pre_threshold: np.ndarray
-    continuous_w_adj_pre_threshold: np.ndarray
+    """Per-wrapper convergence information. Keys vary by implementation."""
     thresholded_adjacency: np.ndarray
     graph_invalid_reason: Optional[str]
     sampler_unavailable_reason: Optional[str]
     mmd_sampling_metadata: dict[str, object]
-    """Keys: sample_seed, transform_mode, scaler_stats."""
+    """Per-call sampler metadata. Typical keys: sample_seed,
+    transform_mode, scaler_stats, and per-call records."""
     loss_hook_name: Optional[str]
     numerical_tolerances: dict[str, float]
+    model_specific_diagnostics: dict[str, object]
+    """Wrapper-specific fields not shared across implementations."""

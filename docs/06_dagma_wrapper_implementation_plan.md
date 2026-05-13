@@ -1381,7 +1381,6 @@ v1.3 Section 4.3 hard-constraint warning).
 
 #### Before Commit 1 begins
 
-- This plan is reviewed at Opus level and Commit 1 is approved.
 - The diagnostics schema decision (Section 15) is recorded
   explicitly: refactor of `WrapperDiagnostics`, or sibling
   `DagmaWrapperDiagnostics`.
@@ -1403,14 +1402,6 @@ v1.3 Section 4.3 hard-constraint warning).
   unskipped, OR the selection-study report explicitly defers SID
   per Doc 02 v1.3 Section 7 item 6.
 
-### Opus-level review
-
-This plan should receive Opus-level review before Commit 1 starts.
-Justification: the source-faithfulness tolerance and the residual
-noise policy carry scientific weight, and the Commit 1 schema
-decision is hard to revisit without churn once DCDI Commit 12 is
-unpaused. A single review pass at the top of the sequence is
-appropriate.
 
 ---
 
