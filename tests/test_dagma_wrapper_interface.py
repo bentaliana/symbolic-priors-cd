@@ -201,11 +201,11 @@ def test_dagma_wrapper_thresholded_adjacency_returns_bool_array():
     assert A.shape == (3, 3)
 
 
-def test_dagma_wrapper_sample_interventional_stub_raises():
-    """sample_interventional raises NotImplementedError until implemented."""
+def test_dagma_wrapper_sample_interventional_raises_before_fit():
+    """sample_interventional on an unfitted wrapper raises RuntimeError."""
     wrapper = DAGMAWrapper()
     intervention = Intervention(target=0, value=1.0)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError, match="unfitted"):
         wrapper.sample_interventional(intervention, n_samples=10, sample_seed=0)
 
 

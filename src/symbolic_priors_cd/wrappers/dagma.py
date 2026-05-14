@@ -14,7 +14,10 @@ from typing import Literal, Optional, Union
 import numpy as np
 
 from symbolic_priors_cd.data.interventions import Intervention
-from symbolic_priors_cd.wrappers._dagma_sampling import estimate_residual_sigmas
+from symbolic_priors_cd.wrappers._dagma_sampling import (
+    estimate_residual_sigmas,
+    sample_linear_gaussian_model_frame,
+)
 from symbolic_priors_cd.wrappers._graph_status import (
     classify_graph_status,
     infer_sampler_status,
@@ -334,14 +337,108 @@ class DAGMAWrapper:
     ) -> Optional[np.ndarray]:
         """Draw interventional samples in raw SCM units.
 
-        Returns ``None`` when the sampler is unavailable. The
-        ``noise_policy`` argument selects between residual-fitted
-        per-node noise and a unit-variance sensitivity policy. Not
-        implemented yet.
+        Transforms the raw-unit intervention value to model frame, samples
+        via the linear-Gaussian ancestral sampler in topological order, then
+        applies inverse_transform to return raw-unit samples.
+
+        Returns None when the sampler is unavailable (invalid graph or
+        unresolved noise policy for residual_fitted).
+
+        Parameters
+        ----------
+        intervention : Intervention
+            Target variable index and raw-unit intervention value.
+        n_samples : int
+            Number of samples to draw. Must be at least 1.
+        sample_seed : int
+            Seed for np.random.default_rng. Identical arguments produce
+            identical output. No global RNG state is mutated.
+        noise_policy : {"residual_fitted", "unit_variance"}
+            "residual_fitted" uses per-node residual standard deviations
+            estimated during fit. "unit_variance" replaces sigma with
+            np.ones(n_vars) as a sensitivity check.
+
+        Returns
+        -------
+        np.ndarray or None
+            Float64 array of shape (n_samples, n_vars) in raw SCM units,
+            or None when the sampler is unavailable.
+
+        Raises
+        ------
+        RuntimeError
+            If called before a successful fit, or if graph_status is
+            valid_dag but required internal fields are missing.
+        ValueError
+            If noise_policy is not supported, or if n_samples or target
+            fail validation inside the model-frame sampler.
         """
-        raise NotImplementedError(
-            "DAGMAWrapper.sample_interventional is not implemented yet."
+        if not self._fitted:
+            raise RuntimeError(
+                "sample_interventional called on an unfitted DAGMAWrapper. "
+                "Call fit() first."
+            )
+
+        if noise_policy not in ("residual_fitted", "unit_variance"):
+            raise ValueError(
+                f"Unsupported noise_policy: {noise_policy!r}. "
+                "Must be 'residual_fitted' or 'unit_variance'."
+            )
+
+        # Both policies require a valid thresholded graph.
+        if self._graph_status != "valid_dag":
+            return None
+
+        n_vars = self._continuous_w_pre_threshold.shape[0]
+
+        # Under a normal valid-DAG fit, W_sample must exist.
+        # A missing W_sample at this point indicates an internal inconsistency.
+        if self._w_sample_residual_fitted is None:
+            raise RuntimeError(
+                "Internal inconsistency: graph_status is 'valid_dag' but "
+                "_w_sample_residual_fitted is None."
+            )
+
+        if not (0 <= intervention.target < n_vars):
+            raise ValueError(
+                f"intervention.target must be in [0, {n_vars}), "
+                f"got {intervention.target!r}."
+            )
+
+        # _sampler_status reflects the primary residual_fitted policy.
+        # unit_variance is gated independently on graph validity (checked
+        # above) and W_sample availability (checked above), so unit_variance
+        # may run even when _sampler_status is
+        # unavailable_unresolved_noise_policy (e.g., degenerate residual sigma).
+        if noise_policy == "residual_fitted":
+            if self._sampler_status != "available":
+                return None
+            if self._sigma_vector_residual_fitted is None:
+                raise RuntimeError(
+                    "Internal inconsistency: sampler_status is 'available' but "
+                    "_sigma_vector_residual_fitted is None."
+                )
+            sigma = self._sigma_vector_residual_fitted
+        else:
+            sigma = np.ones(n_vars, dtype=float)
+
+        value_model = self._preprocessor.transform_intervention_value(
+            intervention.value, intervention.target
         )
+
+        a_thresh = _threshold_continuous_w(
+            self._continuous_w_pre_threshold, self._config.project_threshold
+        )
+        model_frame_samples = sample_linear_gaussian_model_frame(
+            a_thresh,
+            self._w_sample_residual_fitted,
+            sigma,
+            target=intervention.target,
+            value_model=value_model,
+            n_samples=n_samples,
+            sample_seed=sample_seed,
+        )
+        return self._preprocessor.inverse_transform(model_frame_samples)
 
     def get_diagnostics(self) -> WrapperDiagnostics:
         """Return the structured diagnostics record after a fit.
