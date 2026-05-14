@@ -1,9 +1,10 @@
 """DAGMA-linear wrapper: public surface and frozen configuration.
 
 Defines the ``DAGMAConfig`` dataclass and the ``DAGMAWrapper`` class
-that exposes DAGMA-linear behind a project-level API. Methods that
-are not yet implemented raise ``NotImplementedError`` so the class
-can be imported, instantiated, and type-checked at any stage.
+that exposes DAGMA-linear behind a project-level API. The wrapper
+calls into the pinned DAGMA source and exposes fit, native continuous
+edge access, thresholded adjacency, raw-unit interventional sampling,
+and structured diagnostics.
 """
 
 from __future__ import annotations
@@ -117,10 +118,11 @@ class DAGMAConfig:
 class DAGMAWrapper:
     """Public DAGMA-linear wrapper.
 
-    Methods raise ``NotImplementedError`` until their implementations
-    land. The class is otherwise constructable so downstream code,
-    type checkers, and import-level smoke tests can already depend on
-    its public surface.
+    Exposes ``fit``, ``native_edge_continuous``, ``thresholded_adjacency``,
+    ``sample_interventional`` (raw-unit roundtrip via the caller's fitted
+    preprocessor), and ``get_diagnostics`` (structured ``WrapperDiagnostics``
+    record). Methods that depend on a successful fit raise ``RuntimeError``
+    when called on an unfitted wrapper.
     """
 
     def __init__(self) -> None:
@@ -443,11 +445,207 @@ class DAGMAWrapper:
     def get_diagnostics(self) -> WrapperDiagnostics:
         """Return the structured diagnostics record after a fit.
 
-        Not implemented yet.
+        Populates the shared ``WrapperDiagnostics`` schema with DAGMA's
+        recorded fit and sampler state. Wrapper-specific entries live
+        inside ``model_specific_diagnostics``; the top level matches the
+        cross-wrapper schema.
+
+        DAGMA does not expose an actual inner-loop iteration count, so
+        top-level ``n_iterations`` is ``None``. The configured
+        optimisation budget is recorded only inside
+        ``model_specific_diagnostics`` as
+        ``iterations_configured_upper_bound``.
+
+        All numpy arrays in the returned record are defensive copies;
+        mutating them does not affect wrapper state.
+
+        Returns
+        -------
+        WrapperDiagnostics
+            Dictionary populating every top-level key of the schema.
+
+        Raises
+        ------
+        RuntimeError
+            If called before a successful fit.
         """
-        raise NotImplementedError(
-            "DAGMAWrapper.get_diagnostics is not implemented yet."
+        if not self._fitted:
+            raise RuntimeError(
+                "get_diagnostics called on an unfitted DAGMAWrapper. "
+                "Call fit() first."
+            )
+
+        # Import lazily so importing this module does not pull in the
+        # DAGMA source at wrappers package import time.
+        from symbolic_priors_cd.wrappers._dagma_utils import DAGMA_SOURCE_PATH
+
+        cfg = self._config
+        continuous_w = self._continuous_w_pre_threshold
+        a_thresh = _threshold_continuous_w(continuous_w, cfg.project_threshold)
+
+        # Training-status mapping from h_final.
+        h_final = float(self._fit_result.h_final)
+        score_final = float(self._fit_result.score_final)
+        if not np.isfinite(h_final):
+            training_status = "diverged"
+            converged = False
+        elif h_final <= cfg.h_diagnostic_threshold:
+            training_status = "converged"
+            converged = True
+        else:
+            training_status = "max_iter"
+            converged = False
+
+        config_snapshot: dict[str, object] = {
+            "T": cfg.T,
+            "lambda1": cfg.lambda1,
+            "s": list(cfg.s),
+            "mu_init": cfg.mu_init,
+            "mu_factor": cfg.mu_factor,
+            "w_threshold_internal": cfg.w_threshold_internal,
+            "lr": cfg.lr,
+            "warm_iter": cfg.warm_iter,
+            "max_iter": cfg.max_iter,
+            "beta_1": cfg.beta_1,
+            "beta_2": cfg.beta_2,
+            "loss_type": cfg.loss_type,
+            "project_threshold": cfg.project_threshold,
+            "h_diagnostic_threshold": cfg.h_diagnostic_threshold,
+        }
+
+        loss_decomposition_final: dict[str, float] = {
+            "h_final": h_final,
+            "score_final": score_final,
+        }
+
+        convergence_info: dict[str, object] = {
+            "h_final": h_final,
+            "h_diagnostic_threshold": cfg.h_diagnostic_threshold,
+            "converged": converged,
+            "actual_iterations_note": (
+                "DAGMA does not expose an actual inner-loop iteration count; "
+                "see model_specific_diagnostics.iterations_configured_upper_bound "
+                "for the configured budget."
+            ),
+        }
+
+        numerical_tolerances: dict[str, float] = {
+            "h_diagnostic_threshold": cfg.h_diagnostic_threshold,
+        }
+
+        # Sigma / W_sample availability flags are also surfaced under
+        # mmd_sampling_metadata so callers can read sampling policy state
+        # without inspecting model_specific_diagnostics.
+        residual_fitted_available = (
+            self._sampler_status == "available"
+            and self._sigma_vector_residual_fitted is not None
         )
+        unit_variance_available = (
+            self._graph_status == "valid_dag"
+            and self._w_sample_residual_fitted is not None
+        )
+
+        mmd_sampling_metadata: dict[str, object] = {
+            "primary_noise_policy": "residual_fitted",
+            "sensitivity_noise_policy": "unit_variance",
+            "noise_policy_default": "residual_fitted",
+            "supported_noise_policies": ["residual_fitted", "unit_variance"],
+            "project_threshold": cfg.project_threshold,
+            "preprocessor_class": type(self._preprocessor).__name__,
+            "residual_fitted_available": bool(residual_fitted_available),
+            "unit_variance_available": bool(unit_variance_available),
+        }
+
+        # Threshold-related counts on the continuous W matrix.
+        abs_w = np.abs(continuous_w)
+        n = continuous_w.shape[0]
+        off_diag = ~np.eye(n, dtype=bool)
+        threshold_grid_edge_counts: dict[str, int] = {
+            "0.2": int(((abs_w >= 0.2) & off_diag).sum()),
+            "0.3": int(((abs_w >= 0.3) & off_diag).sum()),
+            "0.4": int(((abs_w >= 0.4) & off_diag).sum()),
+        }
+        sub_threshold_nonzero_count = int(
+            ((abs_w > 0.0) & (abs_w < cfg.project_threshold) & off_diag).sum()
+        )
+        near_threshold_entry_count = int(
+            ((abs_w >= 0.2) & (abs_w <= 0.4) & off_diag).sum()
+        )
+
+        # Sigma / W_sample availability flags reuse the values computed
+        # above for mmd_sampling_metadata. residual_noise_available is the
+        # spec-required key under model_specific_diagnostics; it tracks
+        # the same condition as residual_fitted_available.
+        residual_noise_available = residual_fitted_available
+
+        x_train_shape: Optional[tuple[int, int]] = (
+            tuple(self._X_train_model_frame.shape)
+            if self._X_train_model_frame is not None
+            else None
+        )
+
+        sigma_copy = (
+            self._sigma_vector_residual_fitted.copy()
+            if self._sigma_vector_residual_fitted is not None
+            else None
+        )
+        w_sample_copy = (
+            self._w_sample_residual_fitted.copy()
+            if self._w_sample_residual_fitted is not None
+            else None
+        )
+
+        model_specific: dict[str, object] = {
+            "model_name": "DAGMA-linear",
+            "dagma_source_path": str(DAGMA_SOURCE_PATH),
+            "continuous_w_pre_threshold": continuous_w.copy(),
+            "thresholded_adjacency_project": a_thresh.copy(),
+            "project_threshold": cfg.project_threshold,
+            "w_threshold_internal": cfg.w_threshold_internal,
+            "h_final": h_final,
+            "score_final": score_final,
+            "residual_sigma_vector": sigma_copy,
+            "w_sample": w_sample_copy,
+            "residual_noise_available": bool(residual_noise_available),
+            "unit_variance_available": bool(unit_variance_available),
+            "x_train_model_frame_shape": x_train_shape,
+            "graph_status": self._graph_status,
+            "sampler_status": self._sampler_status,
+            "sampler_unavailable_reason": self._sampler_unavailable_reason,
+            "threshold_grid_edge_counts": threshold_grid_edge_counts,
+            "near_threshold_entry_count": near_threshold_entry_count,
+            "sub_threshold_nonzero_count": sub_threshold_nonzero_count,
+            "iterations_configured_upper_bound": int(
+                (cfg.T - 1) * cfg.warm_iter + cfg.max_iter
+            ),
+            "iterations_configured_formula": (
+                "(T - 1) * warm_iter + max_iter; DAGMA's path-following loop "
+                "runs T stages with warm_iter inner steps for stages 0..T-2 "
+                "and max_iter inner steps for stage T-1, matching the tqdm "
+                "total at dagma/linear.py. This is a configured optimisation "
+                "budget, not an observed iteration count."
+            ),
+        }
+
+        diagnostics: WrapperDiagnostics = {
+            "training_status": training_status,
+            "graph_status": self._graph_status,
+            "sampler_status": self._sampler_status,
+            "seed": int(self._seed),
+            "n_iterations": None,
+            "config_snapshot": config_snapshot,
+            "loss_history": [],
+            "loss_decomposition_final": loss_decomposition_final,
+            "convergence_info": convergence_info,
+            "thresholded_adjacency": a_thresh.copy(),
+            "graph_invalid_reason": self._graph_invalid_reason,
+            "sampler_unavailable_reason": self._sampler_unavailable_reason,
+            "mmd_sampling_metadata": mmd_sampling_metadata,
+            "loss_hook_name": None,
+            "numerical_tolerances": numerical_tolerances,
+            "model_specific_diagnostics": model_specific,
+        }
+        return diagnostics
 
 
 __all__ = ["DAGMAConfig", "DAGMAWrapper"]

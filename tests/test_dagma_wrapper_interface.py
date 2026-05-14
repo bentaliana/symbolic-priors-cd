@@ -209,10 +209,10 @@ def test_dagma_wrapper_sample_interventional_raises_before_fit():
         wrapper.sample_interventional(intervention, n_samples=10, sample_seed=0)
 
 
-def test_dagma_wrapper_get_diagnostics_stub_raises():
-    """get_diagnostics raises NotImplementedError until implemented."""
+def test_dagma_wrapper_get_diagnostics_raises_before_fit():
+    """get_diagnostics on an unfitted wrapper raises RuntimeError."""
     wrapper = DAGMAWrapper()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError, match="unfitted"):
         wrapper.get_diagnostics()
 
 

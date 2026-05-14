@@ -62,7 +62,8 @@ class WrapperDiagnostics(TypedDict):
     graph_status: GraphStatus
     sampler_status: SamplerStatus
     seed: int
-    n_iterations: int
+    n_iterations: Optional[int]
+    """Observed iteration count, or None when unavailable."""
     config_snapshot: dict[str, object]
     """Resolved configuration values for this run; always populated even when
     config=None was passed to fit (records the applied defaults)."""
@@ -76,8 +77,7 @@ class WrapperDiagnostics(TypedDict):
     graph_invalid_reason: Optional[str]
     sampler_unavailable_reason: Optional[str]
     mmd_sampling_metadata: dict[str, object]
-    """Per-call sampler metadata. Typical keys: sample_seed,
-    transform_mode, scaler_stats, and per-call records."""
+    """Sampling-policy metadata; per-call records are optional."""
     loss_hook_name: Optional[str]
     numerical_tolerances: dict[str, float]
     model_specific_diagnostics: dict[str, object]

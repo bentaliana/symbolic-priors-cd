@@ -902,3 +902,39 @@ DAGMA now has a complete mechanical sampling path:
 The next step is the DAGMA sampler-quality diagnostic. This diagnostic must test whether the learned DAGMA structure and sampler produce credible interventional distributions on the frozen diagnostic fixture. Passing these mechanics tests does not by itself prove that DAGMA learns the correct structure or achieves good interventional MMD.
 
 One naming debt is recorded: `_w_sample_residual_fitted` is policy-independent and is also used by the `unit_variance` sensitivity path. A later tidy-up may rename it to a policy-neutral name such as `_w_sample`, but no behavioural change is implied.
+
+
+## 14/05/2026 — DAGMA sampler-quality diagnostic recorded
+
+### Decision
+
+C-P13 is accepted as the DAGMA sampler-quality diagnostic artefact on the frozen C-P11 fixture.
+
+The diagnostic records that:
+
+- DAGMA recovered the true adjacency exactly on this fixture: `SHD = 0`.
+- The learned thresholded graph was a valid DAG: `graph_status = "valid_dag"`.
+- The DAGMA sampler was available under the primary residual-fitted policy: `sampler_status = "available"`.
+- The residual sigma vector was close to unit variance, consistent with the fixture's unit-variance Gaussian SCM.
+- The literal primary MMD inequality remained non-informative because the Monte Carlo floor MMD was negative.
+- DAGMA passed the wrong-structure fail-safe: deleting the dominant downstream true edge `2 -> 0` produced much worse MMD, with `wrong / correct = 91.334`.
+- Compared with C-P11, DAGMA's much lower wrapper-vs-truth MMD on this same fixture is primarily evidence of better structure recovery on this fixture, not evidence that DAGMA's sampler mechanics are intrinsically superior to DCDI's.
+- Diagnostic B1/B2 were not applicable because DAGMA did not miss any true edges on this fixture.
+
+### Reason
+
+C-P13 was created to test the DAGMA wrapper and sampler under the same diagnostic microscope that exposed DCDI-G's C-P11 failure. Replicating the C-P11 fixture and comparison protocol controls the major nuisance variables: SCM seed, training data, intervention, preprocessing mode, MMD estimator, batch size, seed layout, and aggregation rule.
+
+The result reduces the risk that the DAGMA wrapper/sampler path is mechanically or empirically untrustworthy. It also provides a controlled same-fixture contrast with DCDI-G, whose C-P11 failure was localised to learned-structure quality.
+
+However, C-P13 is fixture-specific evidence only. It does not select DAGMA as the base model, does not replace the Doc 02 selection study, and does not remove the verified-SID blocker.
+
+### Consequence
+
+DAGMA wrapper work may proceed to diagnostics assembly and phase readout.
+
+The next wrapper-side step is to implement structured DAGMA diagnostics through `get_diagnostics()`, so future selection-study runs can log the fitted configuration, continuous `W`, thresholded adjacency, graph status, sampler status, residual sigma vector, sampling weights, DAGMA source path, and model-specific fit diagnostics.
+
+A `phase_2c_dagma_readout.md` should be drafted after diagnostics assembly and public API stabilisation, summarising DAGMA wrapper mechanics, C-P13 results, remaining limitations, and the fact that base-model selection still depends on the full multi-seed study and verified SID.
+
+DCDI loss-hook work remains paused. Nothing in C-P13 changes that decision.

@@ -608,14 +608,23 @@ from the thresholded boolean adjacency).
 - `h_final`: float, recorded verbatim.
 - `score_final`: float, recorded verbatim.
 - `iterations_configured_upper_bound`: integer, derived from the
-  configured budget `cfg.T * cfg.max_iter + cfg.warm_iter`. This
-  is NOT an observed iteration count and MUST NOT be presented as
-  one. DAGMA does not expose an iteration counter for the inner
-  Adam loop, so the wrapper records the configured upper bound from
-  `DAGMAConfig` as a reproducibility surrogate only. If a future
+  source-verified DAGMA schedule
+  `(cfg.T - 1) * cfg.warm_iter + cfg.max_iter`. The pinned DAGMA
+  source at `external/source_inspection/dagma/src/dagma/linear.py`
+  drives the path-following loop with
+  `tqdm(total=(T - 1) * warm_iter + max_iter)` and uses `warm_iter`
+  inner steps for stages `0` through `T - 2` and `max_iter` inner
+  steps for the final stage `T - 1`. For `DAGMAConfig()` defaults
+  (`T=4`, `warm_iter=30000`, `max_iter=60000`) the value is `150000`.
+  This is a configured upper bound, NOT an observed iteration count,
+  and MUST NOT be presented as one. DAGMA does not expose an
+  iteration counter for the inner Adam loop, so the wrapper records
+  this configured upper bound as a reproducibility surrogate only.
+  Top-level `n_iterations` remains `None` for DAGMA. If a future
   DAGMA version exposes an actual iteration count, the wrapper
-  should add that field separately rather than relabelling this
-  one.
+  should switch top-level `n_iterations` to that observed value and
+  keep `iterations_configured_upper_bound` as a separate
+  configured-budget field.
 
 ---
 
@@ -1101,7 +1110,7 @@ class WrapperDiagnostics(TypedDict):
     graph_status: GraphStatus
     sampler_status: SamplerStatus
     seed: int
-    n_iterations: int
+    n_iterations: Optional[int]
     config_snapshot: dict[str, object]
     loss_history: list[float]              # empty list for DAGMA
     loss_decomposition_final: dict[str, float]
@@ -1114,6 +1123,41 @@ class WrapperDiagnostics(TypedDict):
     numerical_tolerances: dict[str, float]
     model_specific_diagnostics: dict[str, object]
 ```
+
+### Top-level n_iterations and the DAGMA-specific configured budget
+
+DAGMA does **not** expose an actual iteration count for its inner Adam
+loop. The path-following Lagrangian method either reaches its planned
+`T` central-path stages or it does not, and no observed inner-loop
+counter is available at the wrapper boundary.
+
+To avoid encoding a measured-iterations claim that the source does not
+support, DAGMA's `get_diagnostics()` must:
+
+- set the top-level `n_iterations` to `None`. The schema is therefore
+  widened to `Optional[int]` so this is permitted and so DCDI, which
+  does expose a real iteration count, can continue to populate it
+  with an integer when its `get_diagnostics()` lands.
+- record the configured optimisation budget **only** under
+  `model_specific_diagnostics`, using the name
+  `iterations_configured_upper_bound` (matching Section 10),
+  derived as `(cfg.T - 1) * cfg.warm_iter + cfg.max_iter`. This is
+  the source-verified DAGMA schedule: stages `0` through `T - 2`
+  run with `warm_iter` inner steps and stage `T - 1` runs with
+  `max_iter` inner steps, matching the
+  `tqdm(total=(T - 1) * warm_iter + max_iter)` total at
+  `external/source_inspection/dagma/src/dagma/linear.py`. The field
+  is a reproducibility surrogate for the DAGMA config snapshot, not
+  a measurement.
+- **never** label the configured budget as measured iterations used.
+  Top-level `n_iterations` is reserved for observed counts. The
+  configured budget must not appear as a top-level field, and must not
+  be presented anywhere as if it were an observed iteration count.
+
+If a future DAGMA version exposes an actual inner-loop iteration count,
+the wrapper should switch top-level `n_iterations` to that observed
+value and keep `iterations_configured_upper_bound` as a separate
+configured-budget field.
 
 The two existing DCDI-only fields
 `continuous_log_alpha_pre_threshold` and
@@ -1156,6 +1200,13 @@ Independently of the schema choice, the DAGMA-specific fields are:
   `(num_vars, num_vars)`, the canonical pre-threshold continuous `W`.
 - `h_final`: `float`.
 - `score_final`: `float`.
+- `iterations_configured_upper_bound`: `int`, derived from
+  `(cfg.T - 1) * cfg.warm_iter + cfg.max_iter`. This is the
+  source-verified DAGMA path-following budget (`warm_iter` for
+  stages `0..T-2`, `max_iter` for stage `T-1`). It is the
+  configured optimisation budget; it is NOT an observed iteration
+  count and MUST NOT be presented as one. See "Top-level n_iterations and
+  the DAGMA-specific configured budget" above.
 - `sigma_vector_residual_fitted`: `np.ndarray` of shape
   `(num_vars,)`, or `None` if estimation was degenerate.
 - `sigma_validation_failure_reason`: `Optional[str]`.
