@@ -14,6 +14,7 @@ from typing import Literal, Optional, Union
 import numpy as np
 
 from symbolic_priors_cd.data.interventions import Intervention
+from symbolic_priors_cd.wrappers._dagma_sampling import estimate_residual_sigmas
 from symbolic_priors_cd.wrappers._graph_status import (
     classify_graph_status,
     infer_sampler_status,
@@ -125,6 +126,9 @@ class DAGMAWrapper:
         self._graph_invalid_reason: Optional[str] = None
         self._sampler_status: Optional[str] = None
         self._sampler_unavailable_reason: Optional[str] = None
+        self._X_train_model_frame: Optional[np.ndarray] = None
+        self._w_sample_residual_fitted: Optional[np.ndarray] = None
+        self._sigma_vector_residual_fitted: Optional[np.ndarray] = None
 
     def fit(
         self,
@@ -233,6 +237,28 @@ class DAGMAWrapper:
         self._graph_invalid_reason = graph_reason
         self._sampler_status = sampler_status
         self._sampler_unavailable_reason = sampler_reason
+
+        # Store model-frame training data for residual estimation.
+        # X_float was not passed to DagmaLinear and is not mutated by
+        # DAGMA's internal mean-centering (only X_local is mutated).
+        self._X_train_model_frame = X_float.copy()
+
+        # Residual sigma estimation is performed only for valid thresholded
+        # DAGs. Invalid graphs leave _w_sample_residual_fitted and
+        # _sigma_vector_residual_fitted as None.
+        if self._graph_status == "valid_dag":
+            w_sample, sigma_vec = estimate_residual_sigmas(
+                self._X_train_model_frame,
+                self._continuous_w_pre_threshold,
+                a_thresh,
+            )
+            self._w_sample_residual_fitted = w_sample
+            self._sigma_vector_residual_fitted = sigma_vec
+            if not np.all(np.isfinite(sigma_vec)) or not np.all(sigma_vec > 0):
+                self._sampler_status = "unavailable_unresolved_noise_policy"
+                self._sampler_unavailable_reason = (
+                    "Residual-fitted sigma estimate non-finite or non-positive."
+                )
 
         self._fitted = True
 
