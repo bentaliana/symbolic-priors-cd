@@ -96,6 +96,53 @@ def classify_graph_status(
     return "valid_dag", None
 
 
+def _topological_order(adjacency: np.ndarray) -> list[int]:
+    """Return node indices in topological order for a boolean DAG adjacency.
+
+    Uses Kahn's algorithm. Ties in the ready set are broken by ascending
+    node index so the output is deterministic for a given adjacency.
+
+    Parameters
+    ----------
+    adjacency : np.ndarray
+        Boolean adjacency matrix, shape (d, d), row-source /
+        column-destination convention. adjacency[i, j] = True means
+        edge i -> j. Must be a valid DAG.
+
+    Returns
+    -------
+    list[int]
+        Node indices in topological order (parents before children).
+
+    Raises
+    ------
+    TypeError
+        If adjacency.dtype is not bool.
+    ValueError
+        If adjacency is not a valid DAG (invalid shape, self-loop,
+        bidirected edge, or cycle).
+    """
+    graph_status, reason = classify_graph_status(adjacency)
+    if graph_status != "valid_dag":
+        raise ValueError(
+            f"Topological sort requires a valid DAG; got '{graph_status}'. "
+            f"Reason: {reason}"
+        )
+    d = adjacency.shape[0]
+    in_degree = adjacency.sum(axis=0).astype(int)
+    ready = sorted(i for i in range(d) if in_degree[i] == 0)
+    order: list[int] = []
+    while ready:
+        j = ready.pop(0)
+        order.append(j)
+        for k in np.nonzero(adjacency[j, :])[0]:
+            in_degree[k] -= 1
+            if in_degree[k] == 0:
+                ready.append(k)
+        ready.sort()
+    return order
+
+
 def infer_sampler_status(
     graph_status: GraphStatus,
 ) -> tuple[SamplerStatus, Optional[str]]:
@@ -124,6 +171,7 @@ def infer_sampler_status(
 
 __all__ = [
     "_is_acyclic_adjacency",
+    "_topological_order",
     "classify_graph_status",
     "infer_sampler_status",
 ]

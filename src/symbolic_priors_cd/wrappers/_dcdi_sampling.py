@@ -28,6 +28,7 @@ import numpy as np
 import torch
 
 from symbolic_priors_cd.wrappers._dcdi_utils import LearnableModel_NonLinGaussANM
+from symbolic_priors_cd.wrappers._graph_status import _topological_order
 
 
 @contextmanager
@@ -87,49 +88,6 @@ def _structural_mask_context(
             model.adjacency.copy_(saved_adj)
             model.gumbel_adjacency.log_alpha.copy_(saved_log_alpha)
 
-
-def _topological_order(adjacency: np.ndarray) -> list[int]:
-    """Return node indices in topological order for a boolean DAG adjacency.
-
-    Uses Kahn's algorithm. The initial ready set is sorted so the output
-    is deterministic for a given adjacency.
-
-    Parameters
-    ----------
-    adjacency : np.ndarray
-        Boolean adjacency matrix of shape (d, d), row-source /
-        column-destination convention. adjacency[i, j] = True means
-        edge i -> j.
-
-    Returns
-    -------
-    list[int]
-        Node indices in topological order (parents before children).
-
-    Raises
-    ------
-    ValueError
-        If fewer than d nodes are processed, indicating a cycle.
-    """
-    d = adjacency.shape[0]
-    in_degree = adjacency.sum(axis=0).astype(int)
-    ready = sorted(i for i in range(d) if in_degree[i] == 0)
-    order: list[int] = []
-    while ready:
-        j = ready.pop(0)
-        order.append(j)
-        children = np.nonzero(adjacency[j, :])[0]
-        for k in children:
-            in_degree[k] -= 1
-            if in_degree[k] == 0:
-                ready.append(k)
-        ready.sort()
-    if len(order) != d:
-        raise ValueError(
-            f"Topological sort incomplete: processed {len(order)} of {d} nodes. "
-            "The adjacency may contain a cycle."
-        )
-    return order
 
 
 def sample_model_frame_dcdi(
