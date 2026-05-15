@@ -938,3 +938,44 @@ The next wrapper-side step is to implement structured DAGMA diagnostics through 
 A `phase_2c_dagma_readout.md` should be drafted after diagnostics assembly and public API stabilisation, summarising DAGMA wrapper mechanics, C-P13 results, remaining limitations, and the fact that base-model selection still depends on the full multi-seed study and verified SID.
 
 DCDI loss-hook work remains paused. Nothing in C-P13 changes that decision.
+
+
+---
+
+15/05/2026 -- gadjid==0.1.0 adopted as the project SID backend dependency
+
+Decision:
+
+- `gadjid==0.1.0` is added as a pinned runtime dependency in `pyproject.toml`.
+- The resolved entry `gadjid==0.1.0` is recorded in `requirements-lock.txt`.
+- The empirical basis for this adoption is `docs/04i_gadjid_sid_backend_spike.md`,
+  which records: successful install from a prebuilt abi3 wheel on Python 3.12 / win_amd64
+  with no Rust toolchain; numpy-only runtime dependency; the API signature
+  `gadjid.sid(g_true, g_guess, edge_direction)` returning `(normalised_distance, mistake_count)`;
+  upstream R-SID cross-validation of `parent_aid` on 100-node DAG inputs; and locally
+  verified `gadjid.sid == gadjid.parent_aid` identity on 20 random DAG pairs (0/20 mismatches).
+- The project-facing API is unchanged: `sid_score(predicted_dag, true_dag) -> int`.
+- The internal backend call will be
+  `gadjid.sid(true_dag.astype(np.int8), predicted_dag.astype(np.int8), edge_direction="from row to column")[1]`.
+  Argument order is flipped exactly once at the wrapper boundary; `edge_direction` is pinned
+  and is never exposed in the public API.
+- The raw integer mistake count is returned. The normalised SID score (`tuple[0]`) is discarded.
+- Project-side prevalidation (shape, dtype bool, no self-loops, acyclicity) remains required
+  before any call to `gadjid`. The wrapper must never call `gadjid` on unvalidated inputs.
+- This is not a CDT or R runtime dependency. No R toolchain is required.
+- `gadjid` is MPL-2.0; the project is MIT. Runtime use of an MPL-2.0 library from an MIT
+  project is unproblematic. The project will not modify or vendor `gadjid` source files.
+- The version is pinned exactly (`gadjid==0.1.0`). Upgrading requires rerunning the full SID
+  regression test set, including the `sid == parent_aid` agreement test.
+- The selection study remains blocked until `sid_score` is implemented, verified against the
+  full regression test set (docs/07 Section 10), and the skipped SID scaffold is unskipped or
+  deliberately replaced.
+
+Reason:
+
+The spike established that `gadjid` is a clean, stable, numpy-only backend whose `parent_aid`
+function is directly cross-validated against R SID v1.1, and whose `sid` function was locally
+confirmed to agree with `parent_aid` on DAG inputs. This makes `gadjid` safer and more
+maintainable than an internal re-implementation of the Peters and Buhlmann SID algorithm,
+which would require separate verification against an external reference. Adding the dependency
+in a dedicated commit, with a pinned version, keeps the adoption auditable and reversible.
