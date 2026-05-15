@@ -23,6 +23,10 @@ def _is_acyclic_adjacency(adjacency: np.ndarray) -> bool:
     Builds successive matrix powers up to size d; a non-zero trace at
     any power indicates a directed cycle.
 
+    Same semantic role as metrics._graph_validation._is_acyclic_adjacency;
+    the two helpers must be kept consistent.  Wrappers must not import from
+    metrics, so the implementation is duplicated rather than shared.
+
     Parameters
     ----------
     adjacency : np.ndarray

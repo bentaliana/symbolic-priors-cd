@@ -1,6 +1,6 @@
 """Interventional adequacy metrics for causal discovery evaluation.
 
-Contains sample-based metrics (MMD) and graph-based metrics (SID stub).
+Contains sample-based metrics (MMD) and graph-based metrics (SID).
 Does not perform thresholding or graph inference; those steps belong
 upstream in the evaluation harness.
 """
@@ -8,8 +8,12 @@ upstream in the evaluation harness.
 from __future__ import annotations
 
 import numpy as np
+import gadjid
 
-from symbolic_priors_cd.metrics._graph_validation import _validate_adjacency
+from symbolic_priors_cd.metrics._graph_validation import (
+    _is_acyclic_adjacency,
+    _validate_adjacency,
+)
 
 
 def _validate_sample_matrix(arr: np.ndarray, name: str) -> None:
@@ -40,7 +44,8 @@ def _validate_mmd_pair(x: np.ndarray, y: np.ndarray) -> None:
 def _squared_pairwise_distances(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Return (n_a, n_b) matrix of squared Euclidean distances.
 
-    Uses the identity ||a_i - b_j||^2 = ||a_i||^2 + ||b_j||^2 - 2 a_i·b_j.
+    Applies the squared-norm expansion to avoid forming all pairwise
+    difference vectors explicitly.
     """
     return np.maximum(
         np.sum(a ** 2, axis=1, keepdims=True)
@@ -181,35 +186,39 @@ def mmd_sensitivity_sweep(
 def sid_score(predicted_dag: np.ndarray, true_dag: np.ndarray) -> int:
     """Compute the Structural Intervention Distance between two DAG adjacency matrices.
 
-    SID measures how many interventional distributions are incorrect under
-    the predicted graph relative to the true graph. Unlike SHD, SID directly
-    quantifies intervention mistakes rather than edge-edit distance.
+    SID counts the number of interventional distributions that are incorrect
+    under the predicted graph relative to the true graph.  Unlike SHD, SID
+    directly quantifies intervention mistakes rather than edge-edit distance.
+    SID is asymmetric: ``sid_score(A, B) != sid_score(B, A)`` in general.
 
-    Inputs must be strict boolean DAG adjacency matrices with no self-loops.
-    The function does not verify acyclicity or the absence of bidirected edges;
-    behaviour on such malformed inputs is undefined.
+    Both inputs must be square boolean DAG adjacency matrices with no
+    self-loops and no directed cycles.  The project convention is
+    row-source / column-destination: ``adjacency[i, j] = True`` means edge
+    ``i -> j``.
+
+    The raw integer mistake count is returned.  The normalised SID score is
+    discarded.  The return value is in ``[0, n * (n - 1)]`` for n-node DAGs.
 
     Parameters
     ----------
-    predicted_dag : np.ndarray, square, dtype bool
-        Estimated DAG adjacency matrix. ``predicted_dag[i, j] = True`` means
-        directed edge i->j.
-    true_dag : np.ndarray, square, dtype bool
+    predicted_dag : np.ndarray, shape (n, n), dtype bool
+        Estimated DAG adjacency matrix.
+    true_dag : np.ndarray, shape (n, n), dtype bool
         Ground-truth DAG adjacency matrix, same shape as ``predicted_dag``.
 
     Returns
     -------
     int
-        SID score. Zero means every interventional distribution is correct.
+        Raw SID mistake count.  Zero means every interventional distribution
+        is correctly identified.
 
     Raises
     ------
     TypeError
         If either input is not dtype bool.
     ValueError
-        If inputs are not square, shapes differ, or self-loops are present.
-    NotImplementedError
-        Always; no SID backend is wired in.
+        If inputs are not square, shapes differ, self-loops are present, or
+        either input contains a directed cycle.
     """
     _validate_adjacency(predicted_dag, "predicted_dag")
     _validate_adjacency(true_dag, "true_dag")
@@ -218,6 +227,22 @@ def sid_score(predicted_dag: np.ndarray, true_dag: np.ndarray) -> int:
             f"predicted_dag and true_dag must have the same shape, "
             f"got {predicted_dag.shape} and {true_dag.shape}"
         )
-    raise NotImplementedError(
-        "SID implementation is deferred pending explicit verification."
-    )
+    if not _is_acyclic_adjacency(predicted_dag):
+        raise ValueError(
+            "predicted_dag contains a directed cycle; sid_score requires a DAG"
+        )
+    if not _is_acyclic_adjacency(true_dag):
+        raise ValueError(
+            "true_dag contains a directed cycle; sid_score requires a DAG"
+        )
+    pred_int8 = predicted_dag.astype(np.int8)
+    true_int8 = true_dag.astype(np.int8)
+    try:
+        result = gadjid.sid(true_int8, pred_int8, edge_direction="from row to column")
+    except RuntimeError as exc:
+        raise ValueError("gadjid backend rejected SID input") from exc
+    except BaseException as exc:
+        if type(exc).__name__ == "PanicException":
+            raise ValueError("gadjid backend rejected SID input") from exc
+        raise
+    return int(result[1])

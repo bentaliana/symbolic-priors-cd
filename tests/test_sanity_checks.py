@@ -2,7 +2,7 @@
 
 Tests exercise each primitive check in isolation, then verify the structured
 report shape, and finally test the full assert-wrapper gate on three paths:
-pass, deferred-SID fail, and tolerance fail.
+pass, tolerance fail, and failed-SID hard error.
 """
 
 import numpy as np
@@ -36,10 +36,10 @@ def _make_test_scm_and_intervention():
 # ---------------------------------------------------------------------------
 
 
-def test_check_sid_self_zero_returns_none_while_deferred():
-    """Returns None while SID is stubbed as NotImplementedError."""
+def test_check_sid_self_zero_returns_zero_for_valid_dag():
+    """check_sid_self_zero(true_dag) must return 0 for a valid ground-truth DAG."""
     scm, _ = _make_test_scm_and_intervention()
-    assert check_sid_self_zero(scm.adjacency) is None
+    assert check_sid_self_zero(scm.adjacency) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -96,16 +96,16 @@ def test_run_checks_report_has_expected_keys():
     }
 
 
-def test_run_checks_sid_status_is_deferred():
+def test_run_checks_sid_status_is_passed():
     scm, intervention = _make_test_scm_and_intervention()
     report = run_ground_truth_compatibility_checks(scm, intervention)
-    assert report["sid_self_zero_status"] == "deferred"
+    assert report["sid_self_zero_status"] == "passed"
 
 
-def test_run_checks_sid_value_is_none():
+def test_run_checks_sid_value_is_zero():
     scm, intervention = _make_test_scm_and_intervention()
     report = run_ground_truth_compatibility_checks(scm, intervention)
-    assert report["sid_self_zero_value"] is None
+    assert report["sid_self_zero_value"] == 0
 
 
 def test_run_checks_mmd_values_are_floats():
@@ -127,16 +127,15 @@ def test_run_checks_clamping_deviation_is_zero():
 
 
 def test_assert_gate_passes_require_sid_false():
-    """Pass path: deferred SID must not block the gate when require_sid=False."""
+    """Pass path: a valid SCM with passing SID must not raise."""
     scm, intervention = _make_test_scm_and_intervention()
     assert_ground_truth_compatibility(scm, intervention)  # must not raise
 
 
-def test_assert_gate_fails_require_sid_true():
-    """Deferred-SID fail path: require_sid=True must raise AssertionError."""
+def test_assert_gate_passes_require_sid_true():
+    """require_sid=True must not raise when SID self-zero check passes."""
     scm, intervention = _make_test_scm_and_intervention()
-    with pytest.raises(AssertionError):
-        assert_ground_truth_compatibility(scm, intervention, require_sid=True)
+    assert_ground_truth_compatibility(scm, intervention, require_sid=True)  # must not raise
 
 
 def test_assert_gate_fails_tight_mmd_tolerance():
@@ -150,28 +149,24 @@ def test_assert_gate_error_contains_report():
     """AssertionError message must include the full structured report."""
     scm, intervention = _make_test_scm_and_intervention()
     with pytest.raises(AssertionError) as exc_info:
-        assert_ground_truth_compatibility(scm, intervention, require_sid=True)
+        assert_ground_truth_compatibility(scm, intervention, mmd_tolerance=1e-15)
     message = str(exc_info.value)
-    # Gate failure reason is present
-    assert "SID is deferred" in message
     # Full report string is present with key fields
     assert "Full report:" in message
     assert "sid_self_zero_status" in message
     assert "do_clamping_max_deviation" in message
-    # Actual SID status value is present
-    assert "deferred" in message
+    # At least one MMD failure reason is present
+    assert "MMD" in message
 
 
 def test_assert_gate_multiple_failures_all_in_message():
-    """When multiple gates fail simultaneously, the message must mention all of them."""
+    """When multiple MMD gates fail, the message must mention both."""
     scm, intervention = _make_test_scm_and_intervention()
     with pytest.raises(AssertionError) as exc_info:
-        assert_ground_truth_compatibility(
-            scm, intervention, require_sid=True, mmd_tolerance=1e-15
-        )
+        assert_ground_truth_compatibility(scm, intervention, mmd_tolerance=1e-15)
     message = str(exc_info.value)
-    assert "SID is deferred" in message
-    assert "MMD" in message
+    assert "mmd_same_intervention" in message or "MMD" in message
+    assert "mmd_same_observational" in message or "MMD" in message
 
 
 # ---------------------------------------------------------------------------

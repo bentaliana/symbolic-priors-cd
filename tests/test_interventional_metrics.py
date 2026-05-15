@@ -256,7 +256,7 @@ def test_mmd_sensitivity_sweep_degenerate_median_raises():
 
 
 # ---------------------------------------------------------------------------
-# sid_score: input validation and NotImplementedError contract
+# sid_score: identity, input validation, and cyclic-input rejection
 # ---------------------------------------------------------------------------
 
 
@@ -264,23 +264,29 @@ def _empty_dag(n: int) -> np.ndarray:
     return np.zeros((n, n), dtype=bool)
 
 
-def test_sid_valid_inputs_raise_not_implemented():
-    """Valid bool DAG matrices must raise NotImplementedError while no backend is wired in."""
-    A = np.array([[False, True], [False, False]])
-    B = _empty_dag(2)
-    with pytest.raises(NotImplementedError):
-        sid_score(A, B)
+def test_sid_score_identity_simple():
+    """sid_score(G, G) must be 0 for any valid DAG."""
+    chain = np.array(
+        [[False, True, False],
+         [False, False, True],
+         [False, False, False]]
+    )
+    assert sid_score(chain, chain) == 0
 
 
-def test_sid_not_implemented_message_content():
-    """NotImplementedError message identifies the missing SID implementation."""
-    A = _empty_dag(3)
-    with pytest.raises(NotImplementedError, match="SID implementation is deferred"):
-        sid_score(A, A)
+def test_sid_score_rejects_cyclic_predicted():
+    """A cyclic predicted DAG must raise ValueError containing 'cycle'."""
+    cycle = np.array(
+        [[False, True, False],
+         [False, False, True],
+         [True, False, False]]
+    )
+    with pytest.raises(ValueError, match="cycle"):
+        sid_score(cycle, _empty_dag(3))
 
 
 def test_sid_validation_shape_mismatch():
-    """Shape mismatch must raise ValueError, not NotImplementedError."""
+    """Shape mismatch must raise ValueError."""
     A = _empty_dag(3)
     B = _empty_dag(4)
     with pytest.raises(ValueError, match="same shape"):
@@ -316,22 +322,19 @@ def test_sid_validation_self_loop_in_true():
         sid_score(_empty_dag(3), B)
 
 
-@pytest.mark.skip(reason="SID not yet implemented — expected value is provisional scaffolding only")
+@pytest.mark.skip(reason="expected_sid is not yet set; unskip once the expected value is confirmed")
 def test_sid_preregistered_hand_computed():
-    """Pre-registered SID test for a 3-node chain vs empty graph.
+    """SID for predicted=empty 3x3 against true=chain 0->1->2.
 
     true: 0->1->2 (chain)
     predicted: empty (no edges)
 
-    IMPORTANT: ``expected_sid`` below is provisional scaffolding only.
-    It has NOT been computed from a reference implementation.
-    Before unskipping this test, replace ``None`` with the hand-verified
-    SID value and remove this warning.
+    Set expected_sid to the confirmed integer value before unskipping.
     """
     true = np.array([[False, True,  False],
                      [False, False, True],
                      [False, False, False]])
     predicted = _empty_dag(3)
-    expected_sid: int | None = None  # must be replaced before unskipping
+    expected_sid: int | None = None
     result = sid_score(predicted, true)
     assert result == expected_sid
