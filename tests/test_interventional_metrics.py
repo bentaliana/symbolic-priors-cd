@@ -5,9 +5,13 @@ verified by hand or by inline manual computation. Probabilistic tests use
 fixed seeds and sufficient samples to keep failure probability negligible.
 """
 
+import importlib.metadata
+
+import gadjid
 import numpy as np
 import pytest
 
+from symbolic_priors_cd.data.scm_generator import generate_linear_gaussian_scm
 from symbolic_priors_cd.metrics import mmd_rbf_unbiased, mmd_sensitivity_sweep, sid_score
 
 
@@ -256,7 +260,7 @@ def test_mmd_sensitivity_sweep_degenerate_median_raises():
 
 
 # ---------------------------------------------------------------------------
-# sid_score: identity, input validation, and cyclic-input rejection
+# SID identity on fixed DAGs, input validation, and cyclic-input rejection
 # ---------------------------------------------------------------------------
 
 
@@ -320,6 +324,357 @@ def test_sid_validation_self_loop_in_true():
     B[0, 0] = True
     with pytest.raises(ValueError, match="self-loops"):
         sid_score(_empty_dag(3), B)
+
+
+# ---------------------------------------------------------------------------
+# SID backend availability
+# ---------------------------------------------------------------------------
+
+
+def test_sid_backend_gadjid_importable():
+    """gadjid must be importable and expose a callable sid attribute."""
+    assert callable(gadjid.sid)
+
+
+def test_sid_backend_gadjid_parent_aid_callable():
+    """gadjid must expose a callable parent_aid attribute."""
+    assert callable(gadjid.parent_aid)
+
+
+def test_sid_backend_gadjid_pinned_version():
+    """The installed gadjid version must match the pinned project dependency."""
+    assert importlib.metadata.version("gadjid") == "0.1.0"
+
+
+# ---------------------------------------------------------------------------
+# SID identity on fixed DAGs
+# ---------------------------------------------------------------------------
+
+
+def _chain_dag(n: int) -> np.ndarray:
+    """Return the n-node chain DAG 0->1->...->n-1 as a bool adjacency."""
+    A = _empty_dag(n)
+    for i in range(n - 1):
+        A[i, i + 1] = True
+    return A
+
+
+def _fork_dag() -> np.ndarray:
+    """Return the 3-node fork DAG 0->{1,2} as a bool adjacency."""
+    A = _empty_dag(3)
+    A[0, 1] = True
+    A[0, 2] = True
+    return A
+
+
+def _collider_dag() -> np.ndarray:
+    """Return the 3-node collider DAG {0,1}->2 as a bool adjacency."""
+    A = _empty_dag(3)
+    A[0, 2] = True
+    A[1, 2] = True
+    return A
+
+
+def test_sid_score_identity_fixed_dags():
+    """sid_score(G, G) must be 0 for each fixed DAG structure."""
+    fixed_dags = [
+        ("empty n=3",      _empty_dag(3)),
+        ("chain 0->1->2",  _chain_dag(3)),
+        ("fork 0->{1,2}",  _fork_dag()),
+        ("collider {0,1}->2", _collider_dag()),
+        ("chain n=5",      _chain_dag(5)),
+    ]
+    for name, G in fixed_dags:
+        assert sid_score(G, G) == 0, f"identity failed for {name}"
+
+
+# ---------------------------------------------------------------------------
+# SID identity on generated DAGs
+# ---------------------------------------------------------------------------
+
+# 20 (n_nodes, expected_edges, seed) cases covering sparse, ER2, and dense
+# density regimes across n in {3, 5, 8}.
+_RANDOM_DAG_CASES = (
+    (3, 2, 0), (3, 2, 1), (3, 3, 2), (3, 3, 3), (3, 1, 4), (3, 2, 5), (3, 3, 6),
+    (5, 5, 0), (5, 5, 1), (5, 10, 2), (5, 10, 3), (5, 3, 4), (5, 8, 5), (5, 10, 6),
+    (8, 8, 0), (8, 8, 1), (8, 16, 2), (8, 16, 3), (8, 4, 4), (8, 10, 5),
+)
+
+
+def test_sid_score_identity_random_dags():
+    """sid_score(G, G) must be 0 for every generated valid DAG."""
+    assert len(_RANDOM_DAG_CASES) >= 20, "test setup: need at least 20 cases"
+    for n_nodes, expected_edges, seed in _RANDOM_DAG_CASES:
+        scm = generate_linear_gaussian_scm(n_nodes, expected_edges, seed=seed)
+        G = scm.adjacency
+        result = sid_score(G, G)
+        assert result == 0, (
+            f"identity failed for n={n_nodes} expected_edges={expected_edges} "
+            f"seed={seed}: sid_score(G, G) = {result}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# SID raw-count extraction
+# ---------------------------------------------------------------------------
+
+
+def test_sid_score_returns_int_mistake_count():
+    """sid_score must return the raw integer mistake count, not the normalised float.
+
+    Fixture: predicted=empty 3x3, true=chain 0->1->2.
+    The backend returns (normalised_distance, mistake_count). The wrapper must
+    return only the int mistake_count and discard the float normalised score.
+    """
+    predicted = _empty_dag(3)
+    true = _chain_dag(3)
+
+    result = sid_score(predicted, true)
+
+    # Must be a Python int.
+    assert type(result) is int, f"expected int, got {type(result)}"
+
+    # Must match the backend mistake count directly.
+    true_int8 = true.astype(np.int8)
+    pred_int8 = predicted.astype(np.int8)
+    backend = gadjid.sid(true_int8, pred_int8, edge_direction="from row to column")
+    assert result == backend[1], "wrapper must return backend[1] (mistake_count)"
+
+    # Must not be the normalised float.
+    assert result != backend[0], (
+        "wrapper must not return the normalised distance (backend[0])"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SID argument order and asymmetry
+# ---------------------------------------------------------------------------
+
+
+def test_sid_score_argument_order_asymmetric():
+    """sid_score(predicted, true) and sid_score(true, predicted) must differ.
+
+    Fixture: predicted=empty 3x3, true=chain 0->1->2. The project-facing
+    argument order is (predicted, true); the backend order is (true, predicted).
+    The two calls return different counts because SID is asymmetric.
+    """
+    predicted = _empty_dag(3)
+    true = _chain_dag(3)
+    assert sid_score(predicted, true) == 3
+    assert sid_score(true, predicted) == 0
+
+
+# ---------------------------------------------------------------------------
+# SID backend-call mapping
+# ---------------------------------------------------------------------------
+
+
+def test_sid_score_wrapper_calls_gadjid_with_flipped_args_and_pinned_edge_direction(
+    monkeypatch,
+):
+    """sid_score must flip argument order and pin edge_direction when calling gadjid.sid.
+
+    This test is the primary safeguard against accidental argument-order flips
+    or edge_direction regressions. It does not depend on any specific DAG pair.
+    """
+    import symbolic_priors_cd.metrics.interventional as interventional_module
+
+    predicted = _empty_dag(3)
+    true = _chain_dag(3)
+
+    calls = []
+
+    def fake_sid(*args, **kwargs):
+        calls.append((args, kwargs))
+        return (0.123, 7)
+
+    monkeypatch.setattr(interventional_module.gadjid, "sid", fake_sid)
+
+    result = sid_score(predicted, true)
+
+    assert len(calls) == 1, "gadjid.sid must be called exactly once"
+    pos_args, kw_args = calls[0]
+
+    # First positional arg: true cast to int8.
+    np.testing.assert_array_equal(pos_args[0], true.astype(np.int8))
+    assert pos_args[0].dtype == np.int8, "first backend arg must be int8"
+
+    # Second positional arg: predicted cast to int8.
+    np.testing.assert_array_equal(pos_args[1], predicted.astype(np.int8))
+    assert pos_args[1].dtype == np.int8, "second backend arg must be int8"
+
+    # edge_direction must be pinned.
+    assert kw_args.get("edge_direction") == "from row to column"
+
+    # Return value must be int(fake_return[1]).
+    assert result == 7
+    assert type(result) is int
+
+
+# ---------------------------------------------------------------------------
+# SID parent_aid agreement
+# ---------------------------------------------------------------------------
+
+
+def test_gadjid_sid_matches_parent_aid_on_fixed_dags():
+    """gadjid.sid and gadjid.parent_aid must return identical tuples on DAG inputs.
+
+    This test locks the documented identity parent_aid == sid on DAG inputs.
+    A divergence would indicate a gadjid release change that invalidates the
+    upstream R-SID transitive cross-validation chain.
+    """
+    chain = _chain_dag(3).astype(np.int8)
+    empty = _empty_dag(3).astype(np.int8)
+    fork = _fork_dag().astype(np.int8)
+    collider = _collider_dag().astype(np.int8)
+    chain5 = _chain_dag(5).astype(np.int8)
+
+    pairs = [
+        (chain,    empty,    "chain vs empty"),
+        (empty,    chain,    "empty vs chain"),
+        (chain,    fork,     "chain vs fork"),
+        (fork,     collider, "fork vs collider"),
+        (collider, chain5[:3, :3], "collider vs 3-node subchain"),
+    ]
+
+    # Use a shared 5-node pair too.
+    pairs.append((chain5, np.zeros((5, 5), dtype=np.int8), "chain5 vs empty5"))
+
+    for g_true, g_guess, label in pairs:
+        assert g_true.shape == g_guess.shape, f"shape mismatch in pair {label}"
+        sid_result = gadjid.sid(
+            g_true, g_guess, edge_direction="from row to column"
+        )
+        aid_result = gadjid.parent_aid(
+            g_true, g_guess, edge_direction="from row to column"
+        )
+        # Assert full tuple equality: mistake counts must be identical,
+        # normalised distances must be identical.
+        assert sid_result[1] == aid_result[1], (
+            f"sid != parent_aid mistake_count for pair {label}: "
+            f"sid={sid_result[1]}, parent_aid={aid_result[1]}"
+        )
+        assert sid_result[0] == pytest.approx(aid_result[0], abs=1e-12), (
+            f"sid != parent_aid normalised distance for pair {label}: "
+            f"sid={sid_result[0]}, parent_aid={aid_result[0]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# SID edge-direction sensitivity
+# ---------------------------------------------------------------------------
+
+
+def test_sid_backend_edge_direction_sensitivity_witness():
+    """gadjid.sid must be sensitive to edge_direction on at least one DAG pair.
+
+    Fixture: true=fork 0->{1,2}, predicted={1->2} (single edge). Under
+    'from row to column' the int8 matrices code different DAGs than under
+    'from column to row', so the mistake counts must differ.
+
+    This test confirms the two edge_direction values are semantically distinct
+    and provides a concrete witness for the project convention choice.
+    """
+    # true: fork 0 -> {1, 2}
+    true_int8 = np.zeros((3, 3), dtype=np.int8)
+    true_int8[0, 1] = 1
+    true_int8[0, 2] = 1
+
+    # predicted: single edge 1 -> 2
+    pred_int8 = np.zeros((3, 3), dtype=np.int8)
+    pred_int8[1, 2] = 1
+
+    r2c = gadjid.sid(true_int8, pred_int8, edge_direction="from row to column")
+    c2r = gadjid.sid(true_int8, pred_int8, edge_direction="from column to row")
+
+    assert r2c != c2r, (
+        "edge_direction sensitivity witness failed: r2c and c2r are equal "
+        "on this pair, which means the pair does not distinguish the two "
+        "conventions; choose a different witness pair."
+    )
+
+
+# ---------------------------------------------------------------------------
+# SID dtype contract
+# ---------------------------------------------------------------------------
+
+
+def test_sid_score_rejects_int8_input_from_caller():
+    """sid_score must raise TypeError when the caller passes int8 predicted."""
+    with pytest.raises(TypeError, match="bool"):
+        sid_score(np.zeros((3, 3), dtype=np.int8), _empty_dag(3))
+
+
+def test_sid_score_rejects_int64_input():
+    """sid_score must raise TypeError when the caller passes int64 predicted."""
+    with pytest.raises(TypeError, match="bool"):
+        sid_score(np.zeros((3, 3), dtype=np.int64), _empty_dag(3))
+
+
+def test_sid_score_rejects_uint8_input():
+    """sid_score must raise TypeError when the caller passes uint8 predicted."""
+    with pytest.raises(TypeError, match="bool"):
+        sid_score(np.zeros((3, 3), dtype=np.uint8), _empty_dag(3))
+
+
+def test_sid_score_rejects_float64_input():
+    """sid_score must raise TypeError when the caller passes float64 predicted."""
+    with pytest.raises(TypeError, match="bool"):
+        sid_score(np.zeros((3, 3), dtype=np.float64), _empty_dag(3))
+
+
+# ---------------------------------------------------------------------------
+# SID invalid-graph rejection
+# ---------------------------------------------------------------------------
+
+
+def test_sid_score_rejects_cyclic_true():
+    """A cyclic true DAG must raise ValueError containing 'cycle'."""
+    cycle = np.array(
+        [[False, True, False],
+         [False, False, True],
+         [True, False, False]]
+    )
+    with pytest.raises(ValueError, match="cycle"):
+        sid_score(_empty_dag(3), cycle)
+
+
+def test_sid_score_rejects_bidirected_pair():
+    """A bidirected pair in predicted (a directed 2-cycle) must raise ValueError.
+
+    A bidirected pair A[i,j]=True and A[j,i]=True is a directed 2-cycle.
+    The acyclicity check catches it and raises ValueError with 'cycle'.
+    The rejection message says 'cycle' rather than 'bidirected' because the
+    project checks acyclicity, not symmetry, to classify this invalid pattern.
+    """
+    bidirected = np.array(
+        [[False, True, False],
+         [True, False, False],
+         [False, False, False]]
+    )
+    with pytest.raises(ValueError, match="cycle"):
+        sid_score(bidirected, _empty_dag(3))
+
+
+# ---------------------------------------------------------------------------
+# SID invalid-input no-number behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_sid_score_raises_on_invalid_input_not_a_number():
+    """sid_score must raise ValueError on a cyclic predicted graph.
+
+    This test asserts that the function raises an exception rather than
+    returning a numeric fallback (such as an SHD value or zero).
+    No assertion is made about any numeric return value.
+    """
+    cycle = np.array(
+        [[False, True, False],
+         [False, False, True],
+         [True, False, False]]
+    )
+    with pytest.raises(ValueError, match="cycle"):
+        sid_score(cycle, _empty_dag(3))
 
 
 @pytest.mark.skip(reason="expected_sid is not yet set; unskip once the expected value is confirmed")
