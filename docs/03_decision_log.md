@@ -979,3 +979,41 @@ confirmed to agree with `parent_aid` on DAG inputs. This makes `gadjid` safer an
 maintainable than an internal re-implementation of the Peters and Buhlmann SID algorithm,
 which would require separate verification against an external reference. Adding the dependency
 in a dedicated commit, with a pinned version, keeps the adoption auditable and reversible.
+
+---
+
+15/05/2026 -- SID verification closed
+
+Decision:
+
+- `gadjid==0.1.0` is the adopted SID backend.
+- `sid_score(predicted_dag, true_dag) -> int` is implemented.
+- Project-facing argument order is predicted first, true second. The internal call
+  flips once at the boundary to `gadjid.sid(true_int8, predicted_int8, edge_direction="from row to column")[1]`.
+- The raw integer mistake count is returned; the normalised SID score is discarded.
+- Project-side validation (bool dtype, square 2D, no self-loops, acyclicity) rejects
+  all invalid or non-DAG inputs before any backend call.
+- The deferred SID scaffold was replaced by an active backend-reference test asserting
+  `sid_score(empty 3x3, chain 0->1->2) == 3`.
+- The `None -> "deferred"` path was removed from `_derive_sid_status` and
+  `check_sid_self_zero`. Both functions now return `int` directly.
+- `require_sid` on `assert_ground_truth_compatibility` is retained in the signature as
+  a backward-compatible no-op. It no longer has any gate effect. Removing it is a small
+  compatibility follow-up and is not a current blocker.
+- The regression test set covers: backend importability and pinned version, identity on
+  fixed and generated DAGs, raw-count extraction, argument-order asymmetry,
+  backend-call mapping (monkeypatched), edge-direction sensitivity witness,
+  `sid == parent_aid` agreement on fixed pairs, dtype contract (int8/int64/uint8/float64
+  rejected), invalid-graph rejection (cyclic, bidirected, self-loop, non-square, shape
+  mismatch), and no numeric fallback on invalid input.
+- Full suite result at closure: 384 passed, 0 skipped, 2 warnings. The 2 warnings are
+  the pre-existing `RuntimeWarning: invalid value encountered in matmul/subtract` from
+  `test_dagma_wrapper_residuals.py::test_non_finite_sigma_sets_unavailable_unresolved_noise_policy`,
+  unchanged and unrelated to SID.
+
+Consequence:
+
+- The selection study is now unblocked from the SID side.
+- The selection study has not yet been run and must still follow the documented
+  base-model selection protocol.
+- This does not begin prior-loss implementation or DCDI Commit 11.
