@@ -174,10 +174,6 @@ def test_assert_gate_multiple_failures_all_in_message():
 # ---------------------------------------------------------------------------
 
 
-def test_derive_sid_status_none_is_deferred():
-    assert _derive_sid_status(None) == "deferred"
-
-
 def test_derive_sid_status_zero_is_passed():
     assert _derive_sid_status(0) == "passed"
 

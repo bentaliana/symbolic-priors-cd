@@ -677,19 +677,15 @@ def test_sid_score_raises_on_invalid_input_not_a_number():
         sid_score(cycle, _empty_dag(3))
 
 
-@pytest.mark.skip(reason="expected_sid is not yet set; unskip once the expected value is confirmed")
-def test_sid_preregistered_hand_computed():
-    """SID for predicted=empty 3x3 against true=chain 0->1->2.
+def test_sid_score_empty_predicted_vs_true_chain_returns_backend_reference_count():
+    """sid_score(empty 3x3, chain 0->1->2) must return the backend-confirmed count.
 
-    true: 0->1->2 (chain)
-    predicted: empty (no edges)
-
-    Set expected_sid to the confirmed integer value before unskipping.
+    Fixture: predicted = empty 3-node graph, true = chain 0->1->2.
+    The raw SID mistake count for this pair is 3, confirmed by the gadjid backend.
+    This test pins that count as a regression anchor.
     """
     true = np.array([[False, True,  False],
                      [False, False, True],
                      [False, False, False]])
     predicted = _empty_dag(3)
-    expected_sid: int | None = None
-    result = sid_score(predicted, true)
-    assert result == expected_sid
+    assert sid_score(predicted, true) == 3

@@ -6,10 +6,6 @@ All four checks must pass before any model comparison begins:
 2. MMD between two independent same-intervention batches is near zero.
 3. MMD between two independent observational batches is near zero.
 4. do(X_j = x) clamps the target column exactly.
-
-When no SID backend is wired in, ``sid_score`` raises
-``NotImplementedError`` and ``check_sid_self_zero`` returns ``None``.
-The assert-wrapper gate handles this via an explicit ``require_sid`` flag.
 """
 
 from __future__ import annotations
@@ -30,26 +26,22 @@ from symbolic_priors_cd.metrics.interventional import mmd_rbf_unbiased, sid_scor
 class CompatibilityReport(TypedDict):
     """Structured output from :func:`run_ground_truth_compatibility_checks`."""
 
-    sid_self_zero_status: Literal["passed", "deferred", "failed"]
-    sid_self_zero_value: int | None
+    sid_self_zero_status: Literal["passed", "failed"]
+    sid_self_zero_value: int
     mmd_same_intervention: float
     mmd_same_observational: float
     do_clamping_max_deviation: float
 
 
-def _derive_sid_status(
-    value: int | None,
-) -> Literal["passed", "deferred", "failed"]:
-    if value is None:
-        return "deferred"
+def _derive_sid_status(value: int) -> Literal["passed", "failed"]:
     return "passed" if value == 0 else "failed"
 
 
-def check_sid_self_zero(true_dag: np.ndarray) -> int | None:
-    """Call ``sid_score(true_dag, true_dag)`` and return the result.
+def check_sid_self_zero(true_dag: np.ndarray) -> int:
+    """Call ``sid_score(true_dag, true_dag)`` and return the integer result.
 
-    Returns ``None`` if SID is not yet implemented (``NotImplementedError``).
-    Any input-validation error from ``sid_score`` propagates unchanged.
+    Any error from ``sid_score`` (input validation, backend failure) propagates
+    unchanged.
 
     Parameters
     ----------
@@ -58,14 +50,10 @@ def check_sid_self_zero(true_dag: np.ndarray) -> int | None:
 
     Returns
     -------
-    int or None
-        ``0`` if the check passes; any other integer if it fails; ``None`` if
-        no SID backend is available.
+    int
+        ``0`` if the check passes; any other integer if it fails.
     """
-    try:
-        return sid_score(true_dag, true_dag)
-    except NotImplementedError:
-        return None
+    return sid_score(true_dag, true_dag)
 
 
 def check_mmd_same_intervention(
@@ -221,7 +209,6 @@ def assert_ground_truth_compatibility(
     Gate logic:
 
     - ``sid_self_zero_status == "failed"`` is always a hard error.
-    - ``sid_self_zero_status == "deferred"`` fails only when ``require_sid=True``.
     - Both MMD checks use ``abs(value) < mmd_tolerance`` (unbiased MMD can be
       slightly negative).
     - Clamping uses ``value < clamp_tolerance``.
@@ -235,7 +222,7 @@ def assert_ground_truth_compatibility(
     clamp_tolerance : float
         Upper bound on the maximum absolute clamping deviation.
     require_sid : bool
-        If ``True``, a deferred SID check is treated as a failure.
+        Accepted for backward compatibility; no longer has any effect.
 
     Raises
     ------
@@ -251,8 +238,6 @@ def assert_ground_truth_compatibility(
         failures.append(
             f"SID self-zero check failed (returned {report['sid_self_zero_value']})"
         )
-    elif status == "deferred" and require_sid:
-        failures.append("SID is deferred but require_sid=True")
 
     mmd_iv = report["mmd_same_intervention"]
     if abs(mmd_iv) >= mmd_tolerance:
