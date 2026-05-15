@@ -6,8 +6,8 @@ Provides helpers for:
 - drawing model-frame samples via linear-Gaussian ancestral sampling
   conditioned on a thresholded adjacency.
 
-Raw-unit roundtrip (preprocessor inverse-transform) is added in a
-subsequent commit.
+Raw-unit roundtrip (preprocessor inverse-transform) is handled by the
+wrapper layer, not here.
 """
 
 from __future__ import annotations

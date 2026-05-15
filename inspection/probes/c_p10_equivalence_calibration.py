@@ -1,8 +1,7 @@
 """C-P10: equivalence calibration probe.
 
 Runs the wrapper training loop on the calibrated equivalence-test setup
-and prints the observed schedule events. The output of this script is
-recorded verbatim in docs/04e_equivalence_calibration_results.md.
+and prints the observed schedule events.
 
 The probe is read-only with respect to project source and external
 repositories. CPU only. No dependency is installed.

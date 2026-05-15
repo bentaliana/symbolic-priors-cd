@@ -2,14 +2,10 @@
 
 The behavioural-equivalence tests compare run_dcdi_training_loop against
 a hand-replicated reference loop derived from the inspected DCDI source
-at external/source_inspection/dcdi/dcdi/train.py (training step around
-lines 124-162, validation evaluation around lines 178-200, gamma/mu
-schedule around lines 269-296).
+at external/source_inspection/dcdi/dcdi/train.py 
 
-Calibration constants used here (SCM and data seeds, iteration window,
-expected schedule events) are frozen in
-docs/04e_equivalence_calibration_results.md and captured by
-inspection/probes/c_p10_equivalence_calibration.py.
+Calibration constants (SCM and data seeds, iteration window, expected
+schedule events) are fixed through inspecting inspection/probes/c_p10_equivalence_calibration.py.
 """
 
 from __future__ import annotations
@@ -35,7 +31,7 @@ from dcdi.utils.penalty import compute_penalty  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Calibration constants (frozen, see docs/04e_equivalence_calibration_results.md)
+# Calibration constants 
 # ---------------------------------------------------------------------------
 
 _NUM_VARS = 3
@@ -481,9 +477,7 @@ def test_lagrangian_schedule_equivalence():
     """Gamma- and mu-update iteration indices match exactly between loops.
 
     A schedule mismatch is an algorithmic divergence, not a numerical
-    artefact, and must fail regardless of trajectory closeness. The
-    calibration document records the expected event indices observed by
-    the probe; this test verifies both loops reproduce the same events.
+    artefact, and must fail regardless of trajectory closeness. This test verifies both loops reproduce the same events.
     """
     result_w, result_r = _run_wrapper_and_reference()
 
@@ -497,14 +491,13 @@ def test_lagrangian_schedule_equivalence():
         f"differs from reference = {result_r['mu_update_iters']}"
     )
 
-    # Sanity: the calibration probe recorded specific events; the loops
-    # should reproduce them when run against this commit's source.
+    # Sanity: the calibration probe recorded specific events; any correct
+    # implementation of the training loop must reproduce them.
     assert result_w.gamma_update_iters == [280, 400], (
         f"Observed gamma_update_iters = {result_w.gamma_update_iters} "
         "differs from the calibration record [280, 400]; "
         "re-run inspection/probes/c_p10_equivalence_calibration.py "
-        "and update docs/04e_equivalence_calibration_results.md if the "
-        "observed events have drifted."
+        "if the observed events have drifted."
     )
     assert result_w.mu_update_iters == [400], (
         f"Observed mu_update_iters = {result_w.mu_update_iters} "

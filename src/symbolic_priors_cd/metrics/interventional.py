@@ -209,7 +209,7 @@ def sid_score(predicted_dag: np.ndarray, true_dag: np.ndarray) -> int:
     ValueError
         If inputs are not square, shapes differ, or self-loops are present.
     NotImplementedError
-        Always , SID computation is deferred pending explicit verification.
+        Always; no SID backend is wired in.
     """
     _validate_adjacency(predicted_dag, "predicted_dag")
     _validate_adjacency(true_dag, "true_dag")

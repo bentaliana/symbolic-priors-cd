@@ -7,8 +7,9 @@ All four checks must pass before any model comparison begins:
 3. MMD between two independent observational batches is near zero.
 4. do(X_j = x) clamps the target column exactly.
 
-SID is currently deferred (NotImplementedError). The assert-wrapper gate
-handles this via an explicit ``require_sid`` flag.
+When no SID backend is wired in, ``sid_score`` raises
+``NotImplementedError`` and ``check_sid_self_zero`` returns ``None``.
+The assert-wrapper gate handles this via an explicit ``require_sid`` flag.
 """
 
 from __future__ import annotations
@@ -59,7 +60,7 @@ def check_sid_self_zero(true_dag: np.ndarray) -> int | None:
     -------
     int or None
         ``0`` if the check passes; any other integer if it fails; ``None`` if
-        SID is deferred.
+        no SID backend is available.
     """
     try:
         return sid_score(true_dag, true_dag)

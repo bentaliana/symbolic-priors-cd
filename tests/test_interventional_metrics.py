@@ -256,7 +256,7 @@ def test_mmd_sensitivity_sweep_degenerate_median_raises():
 
 
 # ---------------------------------------------------------------------------
-# sid_score , stub validation and NotImplementedError contract
+# sid_score: input validation and NotImplementedError contract
 # ---------------------------------------------------------------------------
 
 
@@ -265,7 +265,7 @@ def _empty_dag(n: int) -> np.ndarray:
 
 
 def test_sid_valid_inputs_raise_not_implemented():
-    """Valid bool DAG matrices must raise NotImplementedError (implementation deferred)."""
+    """Valid bool DAG matrices must raise NotImplementedError while no backend is wired in."""
     A = np.array([[False, True], [False, False]])
     B = _empty_dag(2)
     with pytest.raises(NotImplementedError):
@@ -273,7 +273,7 @@ def test_sid_valid_inputs_raise_not_implemented():
 
 
 def test_sid_not_implemented_message_content():
-    """NotImplementedError message must state that SID is deferred."""
+    """NotImplementedError message identifies the missing SID implementation."""
     A = _empty_dag(3)
     with pytest.raises(NotImplementedError, match="SID implementation is deferred"):
         sid_score(A, A)

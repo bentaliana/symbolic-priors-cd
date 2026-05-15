@@ -20,7 +20,7 @@ from symbolic_priors_cd.data.scm_generator import LinearGaussianSCM
 class Intervention:
     """A single-node hard intervention: do(X_target = value).
 
-    Only single-node hard interventions are supported so far as per model selection settings.
+    Only single-node hard interventions are supported.
     """
 
     target: int

@@ -42,7 +42,6 @@ that a clean external backend is available on the project environment.
   the skipped SID scaffold has been unskipped or deliberately
   replaced. The block is reaffirmed in
   `docs/phase_2c_dagma_readout.md` Section 12 and the
-  "Current phase" block of `CLAUDE.md`.
 
 ## 2. Backend decision
 

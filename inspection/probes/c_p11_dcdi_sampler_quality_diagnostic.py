@@ -1,14 +1,18 @@
 """C-P11: DCDI sampler-quality diagnostic probe.
 
-Reproduces the failing setup of the original Commit 10 sampler-quality tests
-verbatim, and records every datum needed to interpret the failure. Two
-additional diagnostic MMD comparisons are added on top of the original four:
+Runs the DCDI sampler-quality setup and records every datum needed to
+interpret the result. Four MMD comparisons are computed:
 
+- Wrapper-vs-truth MMD (paired against ground-truth batches).
+- Correct vs wrong structure MMD ratio, where the wrong-structure variant
+  deletes the strongest true downstream edge from the learned thresholded
+  adjacency.
 - MMD under the TRUE SCM adjacency, using DCDI's learned conditionals.
 - MMD under the learned thresholded adjacency augmented with the strongest
   missing true edge (only when the augmented adjacency is acyclic).
 
-These two help separate "structure was wrong" from "conditionals were wrong".
+The last two help separate "structure was wrong" from "conditionals were
+wrong".
 
 This probe is read-only with respect to project source and external
 repositories. CPU only. No dependency is installed.
@@ -44,7 +48,8 @@ from symbolic_priors_cd.wrappers.dcdi import (  # noqa: E402
 from symbolic_priors_cd.wrappers.preprocessing import CentredOnlyTransform  # noqa: E402
 
 
-# Frozen settings (must reproduce the Commit 10 test setup exactly)
+# Frozen settings for this probe (fixture-specific; do not edit without
+# rerunning the probe and updating any downstream records).
 NUM_VARS = 3
 EXPECTED_EDGES = 3
 SCM_SEED = 0
@@ -202,7 +207,7 @@ def main():
     )
     wrapper_vs_truth = _median_paired(wrapper_paired, gt_paired)
     print()
-    print("Wrapper-vs-truth (original Commit 10 MC-floor comparison)")
+    print("Wrapper-vs-truth (paired MC-floor comparison)")
     print(f"  wrapper seed_base={WRAPPER_SEED_BASE}, "
           f"gt seed_base={GT_PAIRED_SEED_BASE}")
     print(f"  wrapper_vs_truth_mmd = {wrapper_vs_truth:.6e}")
@@ -253,7 +258,7 @@ def main():
         print(f"  correct_mmd = {correct_mmd:.6e}")
         print(f"  wrong_mmd   = {wrong_mmd:.6e}")
         print(f"  ratio wrong / correct = {ratio:.3f}")
-        print("  Commit 10 acceptance threshold required ratio >= 1.5")
+        print("  Sampler-quality acceptance threshold: ratio >= 1.5")
 
     # Diagnostic A: MMD under the TRUE SCM adjacency
     true_adj = scm.adjacency.copy()
