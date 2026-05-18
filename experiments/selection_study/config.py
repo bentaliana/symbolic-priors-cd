@@ -304,6 +304,17 @@ class Configuration:
                 f"{CONFIGURATION_HASH_ALGORITHM_NAME!r}; "
                 f"got {self.configuration_hash_algorithm!r}"
             )
+        unknown_population_keys = [
+            name
+            for name, _ in self.seed_populations
+            if name not in VALID_SEED_POPULATIONS
+        ]
+        if unknown_population_keys:
+            raise ValueError(
+                "seed_populations contains key(s) not in "
+                f"VALID_SEED_POPULATIONS={VALID_SEED_POPULATIONS}: "
+                f"{', '.join(repr(k) for k in unknown_population_keys)}"
+            )
 
     def to_canonical_dict(self) -> dict[str, Any]:
         """Return the Configuration as a primitive-typed dict.

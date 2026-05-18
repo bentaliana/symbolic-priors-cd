@@ -370,6 +370,70 @@ def test_dcdi_run_records_non_null_seeds_when_applicable() -> None:
     assert payload["seed_dagma"] is None
 
 
+def test_configuration_rejects_unknown_seed_population_key() -> None:
+    """Configuration validation rejects ``seed_populations`` keys that
+    are not members of ``VALID_SEED_POPULATIONS``.
+
+    A single unknown key produces a ``ValueError`` whose message names
+    that key. Multiple unknown keys present at construction time are
+    all reported in a single error message.
+    """
+    from experiments.selection_study.config import VALID_SEED_POPULATIONS
+
+    assert "banana" not in VALID_SEED_POPULATIONS
+    assert "apple" not in VALID_SEED_POPULATIONS
+
+    with pytest.raises(ValueError) as excinfo_single:
+        Configuration(
+            model="dagma",
+            condition="centred_only",
+            seed_torch=None,
+            seed_numpy=None,
+            seed_dagma=None,
+            seed_populations=(
+                ("banana", (1, 2)),
+                ("calibration", (3, 4)),
+            ),
+            intervention_set=(),
+            phase_b_configurations=(),
+            threshold_robustness_triple=(0.2, 0.3, 0.4),
+            wrapper_api_reference=(
+                "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+            ),
+        )
+    message_single = str(excinfo_single.value)
+    assert "seed_populations" in message_single
+    assert "banana" in message_single
+
+    with pytest.raises(ValueError) as excinfo_multi:
+        Configuration(
+            model="dagma",
+            condition="centred_only",
+            seed_torch=None,
+            seed_numpy=None,
+            seed_dagma=None,
+            seed_populations=(
+                ("banana", (1, 2)),
+                ("calibration", (3, 4)),
+                ("apple", (5,)),
+            ),
+            intervention_set=(),
+            phase_b_configurations=(),
+            threshold_robustness_triple=(0.2, 0.3, 0.4),
+            wrapper_api_reference=(
+                "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+            ),
+        )
+    message_multi = str(excinfo_multi.value)
+    assert "seed_populations" in message_multi
+    assert "banana" in message_multi, (
+        f"first unknown key not named in error: {message_multi!r}"
+    )
+    assert "apple" in message_multi, (
+        f"second unknown key not named in error: {message_multi!r}"
+    )
+
+
 def test_dagma_with_non_null_seed_torch_is_rejected() -> None:
     """Validation rejects a DAGMA Configuration with a non-null seed."""
     with pytest.raises(ValueError) as excinfo:
