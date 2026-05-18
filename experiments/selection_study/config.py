@@ -38,7 +38,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 CONFIGURATION_HASH_ALGORITHM_NAME = "sha256_canonical_json_sorted_keys"
@@ -218,8 +218,8 @@ class Configuration:
         algorithm-name constants matching this module's values.
     """
 
-    model: str
-    condition: str
+    model: Literal["dagma", "dcdi"]
+    condition: Literal["centred_only", "standardised"]
     seed_torch: int | None
     seed_numpy: int | None
     seed_dagma: int | None
@@ -315,6 +315,47 @@ class Configuration:
                 f"VALID_SEED_POPULATIONS={VALID_SEED_POPULATIONS}: "
                 f"{', '.join(repr(k) for k in unknown_population_keys)}"
             )
+        seen_population_names: set[str] = set()
+        duplicate_population_names: list[str] = []
+        for population_name, _ in self.seed_populations:
+            if population_name in seen_population_names:
+                if population_name not in duplicate_population_names:
+                    duplicate_population_names.append(population_name)
+            else:
+                seen_population_names.add(population_name)
+        if duplicate_population_names:
+            raise ValueError(
+                "seed_populations contains duplicate population "
+                "name(s): "
+                + ", ".join(
+                    repr(n) for n in duplicate_population_names
+                )
+                + "; each population name may appear at most once"
+            )
+        for population_name, seeds in self.seed_populations:
+            for seed_value in seeds:
+                if isinstance(seed_value, bool):
+                    raise ValueError(
+                        "seed_populations["
+                        f"{population_name!r}] contains a bool "
+                        f"seed value {seed_value!r}; seeds must "
+                        "be int (not bool)"
+                    )
+                if not isinstance(seed_value, int):
+                    raise ValueError(
+                        "seed_populations["
+                        f"{population_name!r}] contains a non-int "
+                        f"seed value {seed_value!r} (type "
+                        f"{type(seed_value).__name__}); seeds "
+                        "must be int"
+                    )
+                if seed_value < 0:
+                    raise ValueError(
+                        "seed_populations["
+                        f"{population_name!r}] contains a negative "
+                        f"seed value {seed_value}; seeds must be "
+                        ">= 0"
+                    )
 
     def to_canonical_dict(self) -> dict[str, Any]:
         """Return the Configuration as a primitive-typed dict.
@@ -679,7 +720,7 @@ def _configuration_from_dict(data: Any) -> Configuration:
     seed_populations: tuple[tuple[str, tuple[int, ...]], ...] = tuple(
         (
             str(population_name),
-            tuple(int(seed) for seed in seeds),
+            tuple(seeds),
         )
         for population_name, seeds in sorted(
             seed_populations_raw.items()
