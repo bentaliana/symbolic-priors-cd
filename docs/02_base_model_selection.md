@@ -3,7 +3,7 @@
 ## Status
 
 Frozen protocol for base-model selection.  
-Version 1.3.  
+Version 1.4.  
 This document defines how the thesis chooses between DAGMA-linear and DCDI-G as the base differentiable causal discovery model for the main study.
 
 ---
@@ -13,6 +13,7 @@ This document defines how the thesis chooses between DAGMA-linear and DCDI-G as 
 - **v1.1** 22/04/2026: Initial selection study protocol created.
 - **v1.2** (this amendment): froze selection-study tactical details supported by `docs/04a_orientation_audit.md`, `docs/04b_source_inspection.md`, and `docs/04c_runtime_probe_results.md`. Changes include: ER2 wording clarification; data-variant rename to centred-only and standardised; explicit DAGMA hyperparameter overrides plus wrapper preconditions (`X.copy()` rule, continuous-`W` preservation, internal `w_threshold=0.0` with project threshold 0.3 applied externally); DCDI wrapper preconditions (`normalize=False`, low-level imports only, no `dcdi.train`); wrapper-side MMD sampling policy with DAGMA residual-fitted noise as primary and unit-variance as sensitivity check; project-owned preprocessing with explicit transform equations; expanded run logging including continuous edge objects and sampler statuses; MMD-unavailable tie rule with quantitative thresholds; calibration-versus-evaluation seed-split fix preventing leakage; threshold robustness reporting at neighbouring thresholds; SID gate before scientific completeness; determinism scope statement; hard-constraint warning; and Section 9 update reflecting the new tactical constants.
 - **v1.3**: integrated the DCDI structural-mask probe from `docs/04d_dcdi_mask_probe_results.md`; clarified that DCDI MMD sampling must enforce the thresholded graph through `model.adjacency` plus saturated `log_alpha`; fixed internal consistency issues in Criterion 3 wording, intervention-unit wording, Section 6 tie-breaker logic, Phase B seed accounting, paper-aligned reproduction-cell specification, and minor editorial issues.
+- **v1.4**: editorial amendment removing stale deferred-SID phrasing now that SID is implemented and verified (see `docs/phase_2d_sid_readout.md` and the 15/05/2026 SID closure entry in `docs/03_decision_log.md`). Edits: Section 3.4 SID logging bullet rewritten as a plain mandatory integer field with no deferred branch; Section 7 item 5 threshold-robustness wording updated to drop "SID once integrated"; Section 7 item 6 replaced with a closing statement that SID is implemented and verified and that selection-study conclusions are no longer deferred on the SID side. No frozen tactical constant changed; no change to the lexicographic decision rule, the disqualification conditions, the tie-breaker logic, the timeline and budget, or the seed-discipline statement.
 
 ---
 
@@ -194,7 +195,7 @@ Each run must save:
 - model configuration (including the explicit DAGMA overrides from Section 3.3 and the DCDI starting-point values)
 - runtime
 - SHD
-- SID (once verified SID is integrated; before then, SID is logged as deferred, see Section 7)
+- SID
 - MMD primary value (residual-fitted DAGMA noise; native DCDI conditionals) and MMD sensitivity value (unit-variance DAGMA noise)
 - bandwidth-sweep MMD values at 0.5x, 1.0x, and 2.0x of the median heuristic (per Section 4.2)
 - validation NLL where applicable
@@ -461,11 +462,11 @@ The selection study must produce:
    - and justification;
 3. archived trained models or saved native edge objects for each run;
 4. a written declaration of the selected base model;
-5. a **threshold robustness report**. Using the saved continuous edge objects, recompute headline boolean-adjacency metrics (SHD, SID once integrated, edge counts) at the project default threshold and at two neighbouring thresholds. The threshold triples are:
+5. a **threshold robustness report**. Using the saved continuous edge objects, recompute headline boolean-adjacency metrics (SHD, SID, edge counts) at the project default threshold and at two neighbouring thresholds. The threshold triples are:
    - DAGMA: `{0.2, 0.3, 0.4}` applied to `abs(W_continuous)`;
    - DCDI: `{0.4, 0.5, 0.6}` applied to `model.get_w_adj()`.
      Report whether the selection-relevant ordering of the two candidates is stable across the three threshold values. The continuous edge objects saved per Section 3.4 make this re-computation possible without retraining;
-6. an **explicit gating statement on SID**. The selection study CANNOT be declared scientifically complete until verified SID is integrated into the project's metrics layer and the SID pre-registered scaffold test in `tests/test_interventional_metrics.py` is unskipped. SID-dependent claims (including any conclusion that depends on Criterion 1a) remain **deferred** until the gate is satisfied. The selection-study report MUST state this gate explicitly whenever it is reporting SID-dependent results before SID is verified.
+6. a record that **SID is implemented and verified**. SID is provided by `sid_score` in the project metrics layer using the `gadjid==0.1.0` backend; verification is recorded in `docs/phase_2d_sid_readout.md` and the 15/05/2026 SID closure entry in `docs/03_decision_log.md`. Selection-study conclusions are no longer deferred on the SID side.
 
 ---
 

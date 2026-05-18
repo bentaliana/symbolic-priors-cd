@@ -1017,3 +1017,69 @@ Consequence:
 - The selection study has not yet been run and must still follow the documented
   base-model selection protocol.
 - This does not begin prior-loss implementation or DCDI Commit 11.
+
+
+
+18/05/2026 -- Selection-study results schema frozen
+
+Decision:
+
+- docs/08a_experiment_tracking_and_results_schema.md is added as the
+  frozen local result-storage and tracking contract for the base-
+  model selection study, at schema_version = 1.
+- The canonical run identifier is derived deterministically from
+  (model, condition, seed_population, seed_replicate_index,
+  configuration_hash). configuration_hash is the SHA-256 digest of
+  the canonical JSON serialisation of config_resolved with sorted
+  keys; the algorithm name is recorded per run via
+  configuration_hash_algorithm.
+- Local files under results/model_selection/... are the authoritative
+  experiment record. W&B and any equivalent external tracking tool
+  are optional mirrors only. Every reportable thesis value traces to
+  a local file.
+- The per-intervention list in Section 6.10 is the source of truth
+  for MMD. Run-level MMD aggregates (mmd_primary,
+  mmd_sensitivity_unit_variance, mmd_bandwidth_sweep,
+  mmd_available_count, mmd_missing_count, mmd_bandwidth_used_value)
+  are derived convenience fields that must be consistent with the
+  per-intervention list.
+- The schema introduces one taxonomy value (mmd_status =
+  unavailable_other) that extends the docs/04 sampler_status
+  taxonomy to cover MMD-specific failures. Future alignment is a
+  docs/04 amendment concern, not a schema_version concern.
+- Two open follow-ups are surfaced in Section 16 and must be
+  resolved before the selection-study runner is written:
+    - Section 16.1: docs/02 vs docs/03 seed-discipline conflict on
+      whether the DAGMA fit calls torch.manual_seed, np.random.seed,
+      and dagma.utils.set_random_seed.
+    - Section 16.4: docs/02 v1.4 editorial amendment to remove
+      deferred-SID phrasing from docs/02 Section 3.4 and Section 7
+      item 6.
+
+Reason:
+
+The selection-study runner cannot be designed defensibly without a
+frozen contract for what every fit records to disk. Without that
+contract, the MMD-unavailable / reliability-limited rule in
+docs/02_base_model_selection.md becomes unenforceable from saved
+records, threshold-robustness reporting would require retraining,
+and post-hoc rationalisation is structurally unprevented. The
+contract is intentionally narrow: it freezes the selection-study
+schema only; main-study extensions are introduced through future
+schema_version bumps.
+
+Consequence:
+
+The next implementation artefact is docs/08_base_model_selection_plan.md,
+which will follow the commit-structured planning pattern of docs/05
+and docs/06 with a numbered commit sequence, per-commit acceptance
+criteria, and explicit gate commits (schema-conformance gate and
+end-to-end smoke-check gate). The Section 16.1 seed-discipline
+conflict is expected to be resolved as part of the runner's
+configuration and seed-derivation policy commit, not as a standalone
+prerequisite. The Section 16.4 docs/02 v1.4 editorial amendment is a
+small follow-up that should land before docs/08 is drafted, so that
+docs/08 cites a consistent docs/02.
+
+Prior-loss implementation remains deferred. DCDI Commit 11 remains
+paused. DAGMA is not selected.
