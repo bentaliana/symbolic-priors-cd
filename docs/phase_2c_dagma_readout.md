@@ -275,6 +275,17 @@ base model.
   unpausing it; DCDI Commit 11 is gated on a project-level review of
   C-P11 / C-P12 plus the selection-study outcome, not on DAGMA's
   C-P13 result.
+- C-P11 and C-P13 used a small 3-node linear-Gaussian diagnostic
+  fixture. The upcoming base-model selection study is conditioned on
+  the thesis's intended 10-node ER2 linear-Gaussian synthetic SCM
+  regime. That regime is deliberate: the downstream prior-corruption
+  experiments are planned within the same synthetic linear-Gaussian
+  setting. C-P11/C-P13 and the selection-study results should not be
+  read as general claims about DAGMA or DCDI performance in nonlinear,
+  non-Gaussian, or interventional-training settings.
+- The formal base-model decision depends on the documented selection
+  study under `docs/02_base_model_selection.md` and has not yet been
+  made.
 
 ## 10. Status of loss-hook / prior-penalty work
 
@@ -289,24 +300,26 @@ base model.
   paused per `docs/03_decision_log.md` pending a project-level
   review of the C-P11 / C-P12 findings and the full base-model
   selection study.
-- Loss-hook or prior-penalty work should wait until both
-  verified SID integration is complete and the base-model selection
-  study has produced a defensible decision. Starting prior-penalty
-  work before either of those would risk locking effort into a
+- Loss-hook or prior-penalty work should wait until the base-model
+  selection study has produced a defensible decision. Starting
+  prior-penalty work before then would risk locking effort into a
   candidate that the selection study has not endorsed.
 
 ## 11. Remaining blockers and deferred work
 
-- Verified SID integration. The SID metric is interface-stubbed
-  (`tests/test_interventional_metrics.py` retains a skipped scaffold
-  test) but no verified implementation exists. SID is the primary
-  base-model selection criterion in `docs/02`.
-- Selection-study runner / execution. No runner has been written
-  yet. The runner must invoke DAGMA (and DCDI, if still in scope)
-  fits at multi-seed scale, log diagnostics, and apply the criterion
-  ordering frozen in `docs/02`.
-- Final base-model decision. Cannot be made before the selection
-  study is run and SID is verified.
+- SID is now closed as a blocker. Implementation, verification, and
+  regression test suite are complete (see `docs/phase_2d_sid_readout.md`).
+  MMD and SHD have also been cross-checked against independent references
+  (see `docs/04j_mmd_shd_reference_crosscheck.md`).
+- Experiment tracking / results schema. A results schema and logging
+  layer are needed before the selection-study runner can be written.
+  This is the next immediate step.
+- Selection-study runner / execution. No runner has been written yet.
+  The runner must invoke DAGMA (and DCDI, if still in scope) fits at
+  multi-seed scale, log diagnostics, and apply the criterion ordering
+  frozen in `docs/02`.
+- Final base-model decision. Cannot be made before the selection study
+  is run.
 - Selected-model loss/prior injection. Deferred to after selection.
 - Main prior-corruption experiments. Frozen in `docs/01` but blocked
   on selection plus the loss-hook implementation.
@@ -314,31 +327,22 @@ base model.
 
 ## 12. Next critical path
 
-Verified SID integration is now the critical path. Until SID is
-verified, no base-model selection result can be reported as
-scientifically complete, no matter how convincing C-P13 or other
-diagnostics look on individual fixtures.
+SID implementation and verification are now closed (see
+`docs/phase_2d_sid_readout.md`). MMD and SHD cross-checks are also
+complete (see `docs/04j_mmd_shd_reference_crosscheck.md`). The metric
+layer is verified.
 
-The next subphase should:
+The next critical path is:
 
-- be planned in advance under the same plan-then-implement
-  discipline used for the DCDI and DAGMA wrapper subphases (this is
-  the pattern that caught the iteration-budget formula error
-  uncovered during Commit 10);
-- adopt a verified SID implementation (either re-implemented against
-  a hand-checkable small DAG or imported from an authoritative
-  reference with a faithfulness gate, modelled on the DAGMA
-  source-faithfulness gate);
-- unskip the SID scaffold test
-  (`tests/test_interventional_metrics.py`) and add the verified-SID
-  acceptance tests required by `docs/02`;
-- preserve the existing `(predicted, true)` argument-order convention
-  recorded in `docs/03`;
-- not weaken any evaluator standard, and not introduce a SID
-  fallback that silently degrades on invalid DAGs (failed SID
-  remains a hard error per `docs/03`).
+1. Experiment tracking and results schema. Design and implement a
+   logging/results schema for the selection-study runner before writing
+   the runner itself.
+2. Base-model selection planning and execution. Write the runner,
+   execute the selection study under the protocol in
+   `docs/02_base_model_selection.md`, and record the outcome.
 
-Selection-study execution is the subphase after SID verification.
+Prior-loss implementation remains deferred until after base-model
+selection produces a defensible decision.
 
 ## 13. Handoff instructions
 
@@ -364,10 +368,10 @@ Selection-study execution is the subphase after SID verification.
   entry there.
 - Do not unpause DCDI Commit 11 unless explicitly instructed after a
   project-level review of the DCDI sampler-quality findings.
-- Do not begin DAGMA prior-penalty integration before verified SID
-  and a defensible selection result. If DAGMA is later selected, the
-  loss-hook integration plan is a new artefact and must come before
-  any source patch.
+- Do not begin DAGMA prior-penalty integration before a defensible
+  selection result. If DAGMA is later selected, the loss-hook
+  integration plan is a new artefact and must come before any source
+  patch.
 
 ## Interpretation guardrails
 
@@ -395,5 +399,6 @@ cites C-P13:
   thresholding-suppression failure modes on this fixture; they were
   not applicable because no true edges were missing. Those failure
   modes remain untested here.
-- The next implementation step on the project critical path is
-  verified SID, not loss-term injection.
+- SID verification is now closed. The next implementation step on the
+  project critical path is base-model selection execution, not
+  loss-term injection.
