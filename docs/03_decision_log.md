@@ -1083,3 +1083,77 @@ docs/08 cites a consistent docs/02.
 
 Prior-loss implementation remains deferred. DCDI Commit 11 remains
 paused. DAGMA is not selected.
+
+
+---
+
+
+18/05/2026 -- Section 16.1 seed-discipline conflict resolved by Option A; docs/02 amended to v1.5
+
+Decision:
+
+- The seed-discipline conflict between docs/02_base_model_selection.md
+  Section 3.5 v1.4 (which mandated uniform seed-setter calls across
+  all candidates) and docs/03_decision_log.md 13/05/2026 (which
+  recorded that the DAGMA fit does not call torch.manual_seed,
+  np.random.seed, or dagma.utils.set_random_seed) is closed.
+- The conflict was surfaced in
+  docs/08a_experiment_tracking_and_results_schema.md Section 16.1
+  and named two eligible resolution options:
+  - Option A: amend docs/02 Section 3.5 to relax the uniform
+    seed-setter requirement for candidates whose fit path is
+    verified-deterministic by construction. The DAGMA wrapper stays
+    unchanged. For DAGMA runs, the seed_torch, seed_numpy, and
+    seed_dagma fields in the run record are null.
+  - Option B: amend the DAGMA wrapper source and docs/03 to make
+    the DAGMA fit path call torch.manual_seed, np.random.seed, and
+    dagma.utils.set_random_seed at fit time, so the corresponding
+    fields in the run record are always non-null.
+- Option A is chosen.
+
+Reason:
+
+1. DAGMA fit is verified-deterministic. docs/04b_source_inspection.md
+   D-6 confirms no internal random initialisation; W starts at zero;
+   Adam is deterministic given fixed gradients. The runtime probe at
+   docs/04c_runtime_probe_results.md D-P2 confirms this empirically.
+   The seed setters are no-ops for the DAGMA fit path.
+2. The DAGMA wrapper hermetic design was deliberate.
+   docs/06_dagma_wrapper_implementation_plan.md Section 6 explicitly
+   forbids importing dagma.utils on the grounds that
+   dagma.utils.set_random_seed mutates global NumPy state.
+3. Recording a seed value for a setter that was never called would
+   be misleading. Null is the honest record.
+4. Global RNG mutation has side effects beyond the wrapper, and the
+   project has been moving away from this pattern.
+5. docs/02 Section 3.5 was written before the source inspection and
+   runtime probes. docs/03 13/05/2026 represents the more informed
+   position. The proper resolution is to update the protocol, not to
+   undo the evidence-based wrapper decision.
+
+Consequence:
+
+- docs/02_base_model_selection.md is amended to v1.5. The change is
+  scoped to Section 3.5 and the change log: the uniform seed-setter
+  requirement is relaxed to apply only to candidates whose fit path
+  depends on global RNG state. DCDI continues to record non-null
+  seed_torch and seed_numpy. DAGMA records null for seed_torch,
+  seed_numpy, and seed_dagma. No frozen tactical constant in
+  Section 9 is changed. The lexicographic decision rule, the
+  disqualification conditions, the tie-breaker logic, the timeline,
+  the budget, the model shortlist, the thresholds, the MMD policy,
+  the metric definitions, and the calibration/evaluation seed split
+  are unchanged.
+- The DAGMA wrapper at src/symbolic_priors_cd/wrappers/dagma.py is
+  unchanged by this decision.
+- The DCDI wrapper is unchanged by this decision.
+- The selection-study runner's configuration schema and per-purpose
+  seed-derivation rule are implemented at
+  experiments/selection_study/config.py per the commit-structured
+  planning pattern of docs/08_base_model_selection_plan.md Commit 2.
+- This amendment is reproducibility and seed-discipline only. No new
+  scientific commitment is introduced.
+- DAGMA is not selected by this commit. The base-model selection
+  study has not been run.
+- Prior-loss implementation is not started by this commit.
+- DCDI Commit 11 is not resumed by this commit.
