@@ -609,3 +609,183 @@ def test_algorithm_name_constants_match_module_values() -> None:
         CONFIGURATION_HASH_ALGORITHM_NAME
         == "sha256_canonical_json_sorted_keys"
     )
+
+
+def test_seed_populations_rejects_duplicate_population_labels() -> None:
+    """Duplicate seed-population names are rejected by validation.
+
+    The contract is that each valid population name in
+    ``VALID_SEED_POPULATIONS`` may appear at most once in
+    ``seed_populations``; a duplicate is treated as a configuration
+    error rather than a silent merge.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            model="dagma",
+            condition="centred_only",
+            seed_torch=None,
+            seed_numpy=None,
+            seed_dagma=None,
+            seed_populations=(
+                ("calibration", (1, 2)),
+                ("calibration", (3, 4)),
+            ),
+            intervention_set=(),
+            phase_b_configurations=(),
+            threshold_robustness_triple=(0.2, 0.3, 0.4),
+            wrapper_api_reference=(
+                "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+            ),
+        )
+    message = str(excinfo.value)
+    assert "seed_populations" in message
+    assert "duplicate" in message.lower()
+    assert "calibration" in message
+
+
+def test_seed_populations_rejects_negative_seed_values() -> None:
+    """Negative seed values are rejected by validation."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            model="dagma",
+            condition="centred_only",
+            seed_torch=None,
+            seed_numpy=None,
+            seed_dagma=None,
+            seed_populations=(("calibration", (1, -2, 3)),),
+            intervention_set=(),
+            phase_b_configurations=(),
+            threshold_robustness_triple=(0.2, 0.3, 0.4),
+            wrapper_api_reference=(
+                "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+            ),
+        )
+    message = str(excinfo.value)
+    assert "seed_populations" in message
+    assert "calibration" in message
+    assert "-2" in message
+    assert ">=" in message
+
+
+def test_seed_populations_rejects_bool_seed_values() -> None:
+    """Bool seed values are rejected explicitly (bool subclasses int).
+
+    Without the bool guard, Python would silently accept ``True`` and
+    ``False`` as seeds 1 and 0 because ``bool`` is a subclass of
+    ``int``. The guard distinguishes the two types at validation
+    time.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            model="dagma",
+            condition="centred_only",
+            seed_torch=None,
+            seed_numpy=None,
+            seed_dagma=None,
+            seed_populations=(("calibration", (1, True, 3)),),
+            intervention_set=(),
+            phase_b_configurations=(),
+            threshold_robustness_triple=(0.2, 0.3, 0.4),
+            wrapper_api_reference=(
+                "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+            ),
+        )
+    message = str(excinfo.value)
+    assert "seed_populations" in message
+    assert "calibration" in message
+    assert "bool" in message.lower()
+
+
+def test_seed_populations_rejects_non_int_seed_values() -> None:
+    """Non-int seed values are rejected by validation.
+
+    A float in the seed tuple is the canonical regression case: a
+    silent ``int(seed)`` cast would have truncated ``1.5`` to ``1``;
+    the explicit ``isinstance`` check rejects it instead.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            model="dagma",
+            condition="centred_only",
+            seed_torch=None,
+            seed_numpy=None,
+            seed_dagma=None,
+            seed_populations=(("calibration", (1, 1.5, 3)),),
+            intervention_set=(),
+            phase_b_configurations=(),
+            threshold_robustness_triple=(0.2, 0.3, 0.4),
+            wrapper_api_reference=(
+                "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+            ),
+        )
+    message = str(excinfo.value)
+    assert "seed_populations" in message
+    assert "calibration" in message
+    assert "1.5" in message
+    assert "int" in message
+
+
+def test_load_config_rejects_seed_populations_with_bool_seed(
+    tmp_path: Path,
+) -> None:
+    """A JSON config with a bool seed value is rejected by load_config.
+
+    Proves the validation chain fires from disk through
+    ``_configuration_from_dict`` into ``__post_init__`` without
+    silent ``int(...)`` truncation of ``True`` to ``1``.
+    """
+    payload = {
+        "model": "dagma",
+        "condition": "centred_only",
+        "seed_torch": None,
+        "seed_numpy": None,
+        "seed_dagma": None,
+        "seed_populations": {"calibration": [True]},
+        "intervention_set": [],
+        "phase_b_configurations": [],
+        "threshold_robustness_triple": [0.2, 0.3, 0.4],
+        "wrapper_api_reference": (
+            "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+        ),
+    }
+    file_path = tmp_path / "bool_seed.json"
+    file_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError) as excinfo:
+        load_config(file_path)
+    message = str(excinfo.value)
+    assert "seed_populations" in message
+    assert "bool" in message.lower()
+
+
+def test_valid_models_matches_configuration_model_field_type() -> None:
+    """``VALID_MODELS`` matches the ``Literal`` on ``Configuration.model``.
+
+    The contract locks the single-source-of-truth between the module
+    constant and the dataclass field annotation. Any drift between the
+    two (for example, adding a new model name to the ``Literal`` but
+    forgetting to extend the constant) is caught here.
+    """
+    import typing
+
+    hints = typing.get_type_hints(Configuration)
+    args = typing.get_args(hints["model"])
+    assert set(args) == set(config_module.VALID_MODELS), (
+        f"VALID_MODELS={config_module.VALID_MODELS} does not match "
+        f"Configuration.model Literal args={args}"
+    )
+
+
+def test_valid_conditions_matches_configuration_condition_field_type() -> None:
+    """``VALID_CONDITIONS`` matches the ``Literal`` on ``condition``.
+
+    Mirror of the model contract for the preprocessing-condition
+    field.
+    """
+    import typing
+
+    hints = typing.get_type_hints(Configuration)
+    args = typing.get_args(hints["condition"])
+    assert set(args) == set(config_module.VALID_CONDITIONS), (
+        f"VALID_CONDITIONS={config_module.VALID_CONDITIONS} does not "
+        f"match Configuration.condition Literal args={args}"
+    )

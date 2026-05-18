@@ -231,8 +231,6 @@ def test_every_stub_module_callable_raises_not_implemented_error() -> None:
     )
 
     stub_callables: list[tuple[object, tuple[object, ...]]] = [
-        (identity.derive_run_id, (None,)),
-        (identity.derive_run_directory, (None,)),
         (preflight.run_preflight, (None,)),
         (pipeline.run_single_fit, (None,)),
         (sampling.compute_per_intervention_records, (None,)),
