@@ -1327,3 +1327,108 @@ Consequence:
 - Prior-loss implementation is not started by this commit.
 - This decision is wrapper-assembly only. No new scientific
   commitment is introduced.
+
+---
+
+## 19/05/2026 — Configuration extended with SCM-generation parameters for offline threshold robustness
+
+### Decision
+
+Four SCM-generation fields are added as first-class members of the
+selection-study runner's `Configuration` dataclass in
+`experiments/selection_study/config.py`:
+
+- `n_nodes: int = 3`
+- `expected_edges: int = 3`
+- `noise_scale: float = 1.0`
+- `weight_magnitude_range: tuple[float, float] = (0.5, 2.0)`
+
+These fields enter `to_canonical_dict`, participate in
+`configuration_hash`, and are required by `load_config` when
+reading a configuration file from disk. The pipeline's
+`run_single_fit` now reads them from the resolved configuration
+when constructing the SCM, in place of the previous module-level
+`SCHEMA_GATE_N_NODES` and `SCHEMA_GATE_EXPECTED_EDGES` constants
+(which are removed from `pipeline.py`). The remaining schema-gate
+constants (`SCHEMA_GATE_N_TRAIN`, `SCHEMA_GATE_N_VAL_DCDI`,
+`SCHEMA_GATE_DCDI_N_ITER`, `SCHEMA_GATE_DCDI_CONFIG_KWARGS`,
+`SCHEMA_GATE_MMD_N_SAMPLES`) remain in place and are separate
+Phase A/B concerns.
+
+### Reason
+
+Commit 7 (offline threshold-robustness re-computation) exposed
+that the existing run record was insufficient to reconstruct the
+true graph from saved fields alone. `run.json` persisted
+`graph_seed` but not the remaining inputs to
+`generate_linear_gaussian_scm`, so offline metric recomputation
+on a saved run could not, by construction, produce the same
+true adjacency that the run was scored against. The minimum
+project-level fix considered two options:
+
+- SCM-A: extend `Configuration` with the four SCM-generation
+  fields. The fields enter `configuration_hash`, so any change
+  to the SCM regime forces a new run identity; the existing
+  schema-gate cell is preserved by the four default values; the
+  Phase A/B runners will need these fields anyway under
+  `docs/02_base_model_selection.md` Section 9. The selection-study
+  protocol's SCM regime is part of the experimental configuration,
+  not an off-protocol environment detail, so it belongs in
+  `configuration_hash`.
+- SCM-B: write a sibling artefact such as `scm_generation_spec.json`
+  alongside `run.json`. Smaller code surface, but the SCM regime
+  would not enter `configuration_hash` and consumers would carry
+  an extra path next to every run.
+
+SCM-A is chosen because the SCM regime is part of the
+experimental configuration and must participate in
+`configuration_hash`. SCM-B would have decoupled the SCM regime
+from the run identity, which is the wrong direction for a study
+that selects a base model under a fixed protocol cell.
+
+### What does NOT change
+
+- `docs/01_research_question_and_commitments.md`,
+  `docs/02_base_model_selection.md`,
+  `docs/04_wrapper_api_contract.md`,
+  `docs/05_dcdi_wrapper_implementation_plan.md`,
+  `docs/06_dagma_wrapper_implementation_plan.md`,
+  `docs/08_base_model_selection_plan.md`, and
+  `docs/08a_experiment_tracking_and_results_schema.md` are
+  unchanged.
+- No selection criterion changes; no evaluation rule changes; no
+  metric primitive changes; no wrapper changes.
+- The `run.json` schema_version remains `1`. The new fields
+  appear inside `config_resolved`, which is already a passthrough
+  of the resolved configuration; no new top-level mandatory key
+  is introduced.
+- The schema-gate cell is preserved by the four default values
+  (`n_nodes=3`, `expected_edges=3`, `noise_scale=1.0`,
+  `weight_magnitude_range=(0.5, 2.0)`). The existing
+  schema-gate fits behave identically except that the SCM
+  parameters now travel through `Configuration` and
+  `config_resolved`.
+
+### Consequence
+
+- Existing schema-gate runs computed before this entry would no
+  longer round-trip byte-for-byte because the canonical JSON,
+  and hence `configuration_hash`, now also covers the four SCM
+  fields. No persistent run records are being migrated by this
+  entry; the change is forward-looking for the Commit-7 and
+  Phase A/B work that has not yet been executed.
+- The Phase A/B runner configurations must explicitly set
+  `n_nodes=10`, `expected_edges=20`, and the noise / weight
+  parameters required by `docs/02_base_model_selection.md`
+  Section 9 (ER2: `expected_edges = 2 * n_nodes`). The defaults
+  exist only to preserve the schema-gate cell; they are not
+  authoritative for the real selection study.
+- Commit 7's offline threshold-robustness re-computation now
+  has a fully reconstructable true-graph path from saved fields
+  alone, without touching `pipeline.py` or any wrapper module
+  at recomputation time.
+- The `docs/02_base_model_selection.md` constants for the real
+  selection study (`n_nodes=10`, `expected_edges=20`) are
+  unchanged by this entry; they will be supplied at Phase A/B
+  configuration construction time.
+

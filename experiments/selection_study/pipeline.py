@@ -47,9 +47,11 @@ from symbolic_priors_cd.metrics import shd, sid_score
 
 # Schema-conformance gate constants. These exist only to drive the
 # schema-conformance gate test pipeline; they are not the
-# selection-study constants and have no scientific meaning.
-SCHEMA_GATE_N_NODES = 3
-SCHEMA_GATE_EXPECTED_EDGES = 3
+# selection-study constants and have no scientific meaning. SCM
+# generation parameters now live on the Configuration object and
+# enter the pipeline via the resolved-config dict, so they are not
+# duplicated here. Training-budget and MMD-sample gate constants
+# remain module-level until Phase A/B planning resolves them.
 SCHEMA_GATE_N_TRAIN = 64
 SCHEMA_GATE_N_VAL_DCDI = 32
 SCHEMA_GATE_DCDI_N_ITER = 30
@@ -458,11 +460,24 @@ def run_single_fit(
     # path exists and is not a directory.
     create_run_directory(run_dir)
 
-    # Build the toy SCM and sample training data.
+    # Build the SCM using the resolved configuration's SCM-generation
+    # fields. The resolved config carries n_nodes, expected_edges,
+    # noise_scale, and weight_magnitude_range so the run record fully
+    # captures the SCM regime and offline threshold robustness can
+    # reconstruct the true graph from saved fields alone.
+    scm_n_nodes_value = resolved_config["n_nodes"]
+    scm_expected_edges_value = resolved_config["expected_edges"]
+    scm_noise_scale_value = resolved_config["noise_scale"]
+    scm_weight_range_value = resolved_config["weight_magnitude_range"]
     scm = generate_linear_gaussian_scm(
-        n_nodes=SCHEMA_GATE_N_NODES,
-        expected_edges=SCHEMA_GATE_EXPECTED_EDGES,
+        n_nodes=int(scm_n_nodes_value),
+        expected_edges=int(scm_expected_edges_value),
         seed=entry.graph_seed,
+        noise_scale=float(scm_noise_scale_value),
+        weight_magnitude_range=(
+            float(scm_weight_range_value[0]),
+            float(scm_weight_range_value[1]),
+        ),
     )
     x_train_raw = sample_observational(
         scm, n_samples=SCHEMA_GATE_N_TRAIN, rng=entry.train_data_seed

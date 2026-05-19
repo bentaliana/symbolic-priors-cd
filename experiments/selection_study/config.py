@@ -228,6 +228,10 @@ class Configuration:
     phase_b_configurations: tuple[PhaseBConfiguration, ...]
     threshold_robustness_triple: tuple[float, float, float]
     wrapper_api_reference: str
+    n_nodes: int = 3
+    expected_edges: int = 3
+    noise_scale: float = 1.0
+    weight_magnitude_range: tuple[float, float] = (0.5, 2.0)
     seed_derivation_rule: str = field(default=SEED_DERIVATION_RULE_NAME)
     configuration_hash_algorithm: str = field(
         default=CONFIGURATION_HASH_ALGORITHM_NAME
@@ -357,6 +361,117 @@ class Configuration:
                         ">= 0"
                     )
 
+        # SCM-generation field validation. These fields participate
+        # in the configuration_hash and drive run-time SCM
+        # construction; defaults preserve the schema-gate cell so
+        # existing fixtures keep working until Phase A/B configs
+        # override with the real selection-study values.
+        if isinstance(self.n_nodes, bool) or not isinstance(
+            self.n_nodes, int
+        ):
+            raise ValueError(
+                "n_nodes must be a plain int (not bool); "
+                f"got {self.n_nodes!r} of type "
+                f"{type(self.n_nodes).__name__}"
+            )
+        if self.n_nodes < 2:
+            raise ValueError(
+                f"n_nodes must be >= 2; got {self.n_nodes}"
+            )
+        if isinstance(self.expected_edges, bool) or not isinstance(
+            self.expected_edges, int
+        ):
+            raise ValueError(
+                "expected_edges must be a plain int (not bool); "
+                f"got {self.expected_edges!r} of type "
+                f"{type(self.expected_edges).__name__}"
+            )
+        if self.expected_edges < 0:
+            raise ValueError(
+                "expected_edges must be >= 0; "
+                f"got {self.expected_edges}"
+            )
+        max_edges = self.n_nodes * (self.n_nodes - 1) // 2
+        if self.expected_edges > max_edges:
+            raise ValueError(
+                "expected_edges must be <= n_nodes*(n_nodes-1)//2"
+                f"={max_edges} for n_nodes={self.n_nodes}; "
+                f"got {self.expected_edges}"
+            )
+        if isinstance(self.noise_scale, bool) or not isinstance(
+            self.noise_scale, (int, float)
+        ):
+            raise ValueError(
+                "noise_scale must be a finite positive number "
+                "(not bool); "
+                f"got {self.noise_scale!r} of type "
+                f"{type(self.noise_scale).__name__}"
+            )
+        noise_scale_float = float(self.noise_scale)
+        if not (
+            noise_scale_float == noise_scale_float
+            and noise_scale_float not in (float("inf"), float("-inf"))
+            and noise_scale_float > 0.0
+        ):
+            raise ValueError(
+                "noise_scale must be a finite positive number; "
+                f"got {self.noise_scale!r}"
+            )
+        if not isinstance(self.weight_magnitude_range, (tuple, list)):
+            raise ValueError(
+                "weight_magnitude_range must be a length-2 tuple "
+                "or list of finite positive numbers; "
+                f"got {self.weight_magnitude_range!r} of type "
+                f"{type(self.weight_magnitude_range).__name__}"
+            )
+        if len(self.weight_magnitude_range) != 2:
+            raise ValueError(
+                "weight_magnitude_range must have exactly 2 values "
+                "(low, high); "
+                f"got {len(self.weight_magnitude_range)}"
+            )
+        low_raw, high_raw = self.weight_magnitude_range
+        for label, value in (("low", low_raw), ("high", high_raw)):
+            if isinstance(value, bool) or not isinstance(
+                value, (int, float)
+            ):
+                raise ValueError(
+                    f"weight_magnitude_range {label} must be a "
+                    "finite positive number (not bool); "
+                    f"got {value!r} of type {type(value).__name__}"
+                )
+            value_float = float(value)
+            if not (
+                value_float == value_float
+                and value_float not in (
+                    float("inf"), float("-inf")
+                )
+                and value_float > 0.0
+            ):
+                raise ValueError(
+                    f"weight_magnitude_range {label} must be a "
+                    f"finite positive number; got {value!r}"
+                )
+        if not (float(low_raw) <= float(high_raw)):
+            raise ValueError(
+                "weight_magnitude_range must satisfy "
+                "0 < low <= high; "
+                f"got (low={low_raw!r}, high={high_raw!r})"
+            )
+
+        # Frozen-dataclass storage normalisation. The fields are
+        # validated above against the raw inputs; here they are
+        # coerced to canonical immutable forms so a list passed at
+        # construction time cannot be mutated through its outside
+        # reference and leak through to the Configuration, and so
+        # an int passed for noise_scale is stored as a float.
+        object.__setattr__(self, "noise_scale", float(self.noise_scale))
+        object.__setattr__(
+            self,
+            "weight_magnitude_range",
+            (float(low_raw), float(high_raw)),
+        )
+
     def to_canonical_dict(self) -> dict[str, Any]:
         """Return the Configuration as a primitive-typed dict.
 
@@ -388,6 +503,13 @@ class Configuration:
                 for value in self.threshold_robustness_triple
             ],
             "wrapper_api_reference": self.wrapper_api_reference,
+            "n_nodes": int(self.n_nodes),
+            "expected_edges": int(self.expected_edges),
+            "noise_scale": float(self.noise_scale),
+            "weight_magnitude_range": [
+                float(self.weight_magnitude_range[0]),
+                float(self.weight_magnitude_range[1]),
+            ],
             "seed_derivation_rule": self.seed_derivation_rule,
             "configuration_hash_algorithm": (
                 self.configuration_hash_algorithm
@@ -655,6 +777,10 @@ _REQUIRED_FIELDS: tuple[str, ...] = (
     "phase_b_configurations",
     "threshold_robustness_triple",
     "wrapper_api_reference",
+    "n_nodes",
+    "expected_edges",
+    "noise_scale",
+    "weight_magnitude_range",
 )
 
 
@@ -780,6 +906,40 @@ def _configuration_from_dict(data: Any) -> Configuration:
     seed_numpy_raw = data["seed_numpy"]
     seed_dagma_raw = data["seed_dagma"]
 
+    n_nodes_raw = data["n_nodes"]
+    if isinstance(n_nodes_raw, bool) or not isinstance(
+        n_nodes_raw, int
+    ):
+        raise ValueError(
+            "configuration JSON field 'n_nodes' must be an int "
+            f"(not bool); got {n_nodes_raw!r}"
+        )
+    expected_edges_raw = data["expected_edges"]
+    if isinstance(expected_edges_raw, bool) or not isinstance(
+        expected_edges_raw, int
+    ):
+        raise ValueError(
+            "configuration JSON field 'expected_edges' must be an "
+            f"int (not bool); got {expected_edges_raw!r}"
+        )
+    noise_scale_raw = data["noise_scale"]
+    if isinstance(noise_scale_raw, bool) or not isinstance(
+        noise_scale_raw, (int, float)
+    ):
+        raise ValueError(
+            "configuration JSON field 'noise_scale' must be a "
+            f"number (not bool); got {noise_scale_raw!r}"
+        )
+    weight_magnitude_range_raw = data["weight_magnitude_range"]
+    if (
+        not isinstance(weight_magnitude_range_raw, list)
+        or len(weight_magnitude_range_raw) != 2
+    ):
+        raise ValueError(
+            "configuration JSON field 'weight_magnitude_range' "
+            "must be a JSON array of length 2"
+        )
+
     return Configuration(
         model=str(data["model"]),
         condition=str(data["condition"]),
@@ -797,6 +957,13 @@ def _configuration_from_dict(data: Any) -> Configuration:
         phase_b_configurations=phase_b_configurations,
         threshold_robustness_triple=threshold_robustness_triple,
         wrapper_api_reference=str(data["wrapper_api_reference"]),
+        n_nodes=int(n_nodes_raw),
+        expected_edges=int(expected_edges_raw),
+        noise_scale=float(noise_scale_raw),
+        weight_magnitude_range=(
+            float(weight_magnitude_range_raw[0]),
+            float(weight_magnitude_range_raw[1]),
+        ),
         seed_derivation_rule=str(
             data.get(
                 "seed_derivation_rule", SEED_DERIVATION_RULE_NAME

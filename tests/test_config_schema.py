@@ -747,6 +747,10 @@ def test_load_config_rejects_seed_populations_with_bool_seed(
         "wrapper_api_reference": (
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
         ),
+        "n_nodes": 3,
+        "expected_edges": 3,
+        "noise_scale": 1.0,
+        "weight_magnitude_range": [0.5, 2.0],
     }
     file_path = tmp_path / "bool_seed.json"
     file_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -789,3 +793,307 @@ def test_valid_conditions_matches_configuration_condition_field_type() -> None:
         f"VALID_CONDITIONS={config_module.VALID_CONDITIONS} does not "
         f"match Configuration.condition Literal args={args}"
     )
+
+
+# --------------------------------------------------------------------------- #
+# SCM-generation fields on Configuration
+# --------------------------------------------------------------------------- #
+
+
+def _make_dagma_kwargs() -> dict[str, Any]:
+    """Return a minimal-valid kwargs dict for a DAGMA Configuration."""
+    return {
+        "model": "dagma",
+        "condition": "centred_only",
+        "seed_torch": None,
+        "seed_numpy": None,
+        "seed_dagma": None,
+        "seed_populations": (("calibration", (1,)),),
+        "intervention_set": (),
+        "phase_b_configurations": (),
+        "threshold_robustness_triple": (0.2, 0.3, 0.4),
+        "wrapper_api_reference": (
+            "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+        ),
+    }
+
+
+def test_canonical_dict_includes_scm_generation_fields() -> None:
+    """``to_canonical_dict`` carries the four SCM-generation fields."""
+    config = _make_dagma_configuration()
+    payload = config.to_canonical_dict()
+    assert payload["n_nodes"] == config.n_nodes
+    assert payload["expected_edges"] == config.expected_edges
+    assert payload["noise_scale"] == float(config.noise_scale)
+    assert payload["weight_magnitude_range"] == [
+        float(config.weight_magnitude_range[0]),
+        float(config.weight_magnitude_range[1]),
+    ]
+
+
+def test_load_config_preserves_scm_generation_fields(
+    tmp_path: Path,
+) -> None:
+    """A round-trip through ``load_config`` preserves the four fields."""
+    original = Configuration(
+        **{
+            **_make_dagma_kwargs(),
+            "n_nodes": 4,
+            "expected_edges": 3,
+            "noise_scale": 0.5,
+            "weight_magnitude_range": (0.7, 1.8),
+        }
+    )
+    file_path = tmp_path / "with_scm.json"
+    _dump_config_to_json(original, file_path)
+    loaded = load_config(file_path)
+    assert loaded.n_nodes == 4
+    assert loaded.expected_edges == 3
+    assert loaded.noise_scale == 0.5
+    assert loaded.weight_magnitude_range == (0.7, 1.8)
+    assert loaded == original
+
+
+def test_configuration_hash_changes_when_n_nodes_changes() -> None:
+    """Changing ``n_nodes`` produces a different ``configuration_hash``."""
+    base = Configuration(**_make_dagma_kwargs())
+    other = Configuration(
+        **{
+            **_make_dagma_kwargs(),
+            "n_nodes": 10,
+            "expected_edges": 20,
+        }
+    )
+    assert configuration_hash(base) != configuration_hash(other)
+
+
+def test_configuration_hash_changes_when_noise_scale_changes() -> None:
+    """Changing ``noise_scale`` produces a different ``configuration_hash``."""
+    base = Configuration(**_make_dagma_kwargs())
+    other = Configuration(
+        **{**_make_dagma_kwargs(), "noise_scale": 0.5}
+    )
+    assert configuration_hash(base) != configuration_hash(other)
+
+
+def test_configuration_hash_changes_when_weight_range_changes() -> None:
+    """Changing ``weight_magnitude_range`` changes ``configuration_hash``."""
+    base = Configuration(**_make_dagma_kwargs())
+    other = Configuration(
+        **{
+            **_make_dagma_kwargs(),
+            "weight_magnitude_range": (0.7, 1.5),
+        }
+    )
+    assert configuration_hash(base) != configuration_hash(other)
+
+
+def test_configuration_rejects_n_nodes_bool() -> None:
+    """``n_nodes`` must be a plain int, not ``bool``."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), "n_nodes": True})
+    assert "n_nodes" in str(excinfo.value)
+    assert "bool" in str(excinfo.value).lower()
+
+
+def test_configuration_rejects_n_nodes_below_two() -> None:
+    """``n_nodes`` must be >= 2."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), "n_nodes": 1})
+    message = str(excinfo.value)
+    assert "n_nodes" in message
+    assert ">=" in message or "2" in message
+
+
+def test_configuration_rejects_n_nodes_non_int() -> None:
+    """``n_nodes`` must be an integer type."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), "n_nodes": 3.0})
+    assert "n_nodes" in str(excinfo.value)
+
+
+def test_configuration_rejects_expected_edges_bool() -> None:
+    """``expected_edges`` must be a plain int, not ``bool``."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{**_make_dagma_kwargs(), "expected_edges": False}
+        )
+    assert "expected_edges" in str(excinfo.value)
+    assert "bool" in str(excinfo.value).lower()
+
+
+def test_configuration_rejects_expected_edges_negative() -> None:
+    """``expected_edges`` must be >= 0."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{**_make_dagma_kwargs(), "expected_edges": -1}
+        )
+    assert "expected_edges" in str(excinfo.value)
+
+
+def test_configuration_rejects_expected_edges_above_dag_maximum() -> None:
+    """``expected_edges`` must not exceed ``n_nodes*(n_nodes-1)//2``."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dagma_kwargs(),
+                "n_nodes": 3,
+                "expected_edges": 10,
+            }
+        )
+    message = str(excinfo.value)
+    assert "expected_edges" in message
+    assert "n_nodes" in message
+
+
+def test_configuration_rejects_noise_scale_zero() -> None:
+    """``noise_scale`` must be strictly positive."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), "noise_scale": 0.0})
+    assert "noise_scale" in str(excinfo.value)
+
+
+def test_configuration_rejects_noise_scale_negative() -> None:
+    """A negative ``noise_scale`` is rejected."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), "noise_scale": -1.0})
+    assert "noise_scale" in str(excinfo.value)
+
+
+def test_configuration_rejects_noise_scale_bool() -> None:
+    """``noise_scale`` must not be a ``bool``."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), "noise_scale": True})
+    assert "noise_scale" in str(excinfo.value)
+    assert "bool" in str(excinfo.value).lower()
+
+
+def test_configuration_rejects_noise_scale_non_finite() -> None:
+    """A non-finite ``noise_scale`` is rejected."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{**_make_dagma_kwargs(), "noise_scale": float("inf")}
+        )
+    assert "noise_scale" in str(excinfo.value)
+
+
+def test_configuration_rejects_weight_range_wrong_length() -> None:
+    """``weight_magnitude_range`` must contain exactly two values."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dagma_kwargs(),
+                "weight_magnitude_range": (0.5,),
+            }
+        )
+    assert "weight_magnitude_range" in str(excinfo.value)
+
+
+def test_configuration_rejects_weight_range_non_positive() -> None:
+    """``weight_magnitude_range`` low must be strictly positive."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dagma_kwargs(),
+                "weight_magnitude_range": (0.0, 2.0),
+            }
+        )
+    assert "weight_magnitude_range" in str(excinfo.value)
+
+
+def test_configuration_rejects_weight_range_low_greater_than_high() -> None:
+    """``weight_magnitude_range`` must satisfy ``low <= high``."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dagma_kwargs(),
+                "weight_magnitude_range": (2.0, 1.0),
+            }
+        )
+    assert "weight_magnitude_range" in str(excinfo.value)
+
+
+def test_configuration_rejects_weight_range_bool_member() -> None:
+    """No ``bool`` value is accepted inside ``weight_magnitude_range``."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dagma_kwargs(),
+                "weight_magnitude_range": (True, 2.0),
+            }
+        )
+    assert "weight_magnitude_range" in str(excinfo.value)
+    assert "bool" in str(excinfo.value).lower()
+
+
+def test_weight_magnitude_range_normalised_to_tuple() -> None:
+    """A list ``weight_magnitude_range`` is stored as a tuple of floats."""
+    config = Configuration(
+        **{
+            **_make_dagma_kwargs(),
+            "weight_magnitude_range": [0.5, 2.0],
+        }
+    )
+    assert isinstance(config.weight_magnitude_range, tuple)
+    assert config.weight_magnitude_range == (0.5, 2.0)
+    assert all(
+        isinstance(value, float)
+        for value in config.weight_magnitude_range
+    )
+
+
+def test_weight_magnitude_range_isolated_from_input_list_mutation() -> None:
+    """Mutating the input list after construction does not leak in."""
+    original = [0.5, 2.0]
+    config = Configuration(
+        **{
+            **_make_dagma_kwargs(),
+            "weight_magnitude_range": original,
+        }
+    )
+    original[0] = 99.0
+    original[1] = -7.0
+    assert config.weight_magnitude_range == (0.5, 2.0)
+
+
+def test_noise_scale_int_input_stored_as_float() -> None:
+    """An ``int`` ``noise_scale`` is stored as a ``float``."""
+    config = Configuration(
+        **{**_make_dagma_kwargs(), "noise_scale": 1}
+    )
+    assert isinstance(config.noise_scale, float)
+    assert config.noise_scale == 1.0
+
+
+def test_load_config_rejects_missing_n_nodes(tmp_path: Path) -> None:
+    """A JSON config without the SCM fields is rejected by load_config."""
+    payload = {
+        "model": "dagma",
+        "condition": "centred_only",
+        "seed_torch": None,
+        "seed_numpy": None,
+        "seed_dagma": None,
+        "seed_populations": {"calibration": [1]},
+        "intervention_set": [],
+        "phase_b_configurations": [],
+        "threshold_robustness_triple": [0.2, 0.3, 0.4],
+        "wrapper_api_reference": (
+            "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+        ),
+    }
+    file_path = tmp_path / "no_scm.json"
+    file_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError) as excinfo:
+        load_config(file_path)
+    message = str(excinfo.value)
+    assert "missing required field" in message
+    for field_name in (
+        "n_nodes",
+        "expected_edges",
+        "noise_scale",
+        "weight_magnitude_range",
+    ):
+        assert field_name in message, (
+            f"missing-field error did not name {field_name!r}: "
+            f"{message!r}"
+        )

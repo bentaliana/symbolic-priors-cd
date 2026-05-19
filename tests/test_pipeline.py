@@ -32,8 +32,6 @@ from experiments.selection_study.pipeline import (
     InvalidGraphForSchemaGateError,
     SCHEMA_GATE_DCDI_CONFIG_KWARGS,
     SCHEMA_GATE_DCDI_N_ITER,
-    SCHEMA_GATE_EXPECTED_EDGES,
-    SCHEMA_GATE_N_NODES,
     SCHEMA_GATE_N_TRAIN,
     SCHEMA_GATE_N_VAL_DCDI,
     resolve_wrapper,
@@ -360,6 +358,26 @@ def test_dagma_toy_run_produces_loadable_run_json(tmp_path) -> None:
     assert record["sampler_policy_used"] == "residual_fitted"
 
 
+def test_dagma_run_records_scm_generation_fields_in_config_resolved(
+    tmp_path,
+) -> None:
+    """``config_resolved`` carries the SCM-generation fields end-to-end."""
+    config = _make_dagma_config()
+    manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
+    json_path = run_single_fit(
+        manifest, 0, run_root=tmp_path / "runs"
+    )
+    record = load_run(json_path).data
+    resolved = record["config_resolved"]
+    assert resolved["n_nodes"] == config.n_nodes
+    assert resolved["expected_edges"] == config.expected_edges
+    assert resolved["noise_scale"] == float(config.noise_scale)
+    assert resolved["weight_magnitude_range"] == [
+        float(config.weight_magnitude_range[0]),
+        float(config.weight_magnitude_range[1]),
+    ]
+
+
 def test_dagma_run_artefacts_exist_and_load(tmp_path) -> None:
     """thresholded_adjacency.npz and continuous_edge_object.npz exist and load."""
     config = _make_dagma_config()
@@ -373,14 +391,15 @@ def test_dagma_run_artefacts_exist_and_load(tmp_path) -> None:
     cont_path = run_dir / "continuous_edge_object.npz"
     assert adj_path.exists() and cont_path.exists()
 
+    expected_n_nodes = config.n_nodes
     with np.load(adj_path) as f:
         adj = f["thresholded_adjacency"]
     assert adj.dtype == bool
-    assert adj.shape == (SCHEMA_GATE_N_NODES, SCHEMA_GATE_N_NODES)
+    assert adj.shape == (expected_n_nodes, expected_n_nodes)
 
     with np.load(cont_path) as f:
         w = f["W_continuous"]
-    assert w.shape == (SCHEMA_GATE_N_NODES, SCHEMA_GATE_N_NODES)
+    assert w.shape == (expected_n_nodes, expected_n_nodes)
     assert w.dtype == np.float64
 
 
