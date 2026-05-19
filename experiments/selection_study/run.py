@@ -1,17 +1,20 @@
 """Command-line entry point for the selection-study runner.
 
 The CLI accepts four flags: ``--help``, ``--config``, ``--dry-run``,
-and ``--resume``. Only the ``--help`` path is functional in the
-current state. Every non-help execution path raises
-``NotImplementedError`` with a message naming the unimplemented path.
-No model fit is reachable from any code path in this module.
+and ``--resume``. The ``--dry-run`` path is functional: it runs
+preflight manifest enumeration and validation and exits. All other
+non-help execution paths raise ``NotImplementedError`` with a message
+naming the unimplemented path. No model fit is reachable from any code
+path in this module.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,7 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(
+    argv: Sequence[str] | None = None,
+    *,
+    _base_dir: Path | None = None,
+    _manifest_dir: Path | None = None,
+) -> None:
     """Run the selection-study runner CLI.
 
     Parameters
@@ -66,21 +74,57 @@ def main(argv: Sequence[str] | None = None) -> None:
     argv : sequence of str or None, optional
         Argument vector. When ``None``, ``argparse`` reads
         ``sys.argv[1:]``.
+    _base_dir : pathlib.Path or None, optional
+        Testing hook: override the run-storage base directory passed to
+        ``preflight.run_preflight``. When ``None``, the preflight default
+        is used.
+    _manifest_dir : pathlib.Path or None, optional
+        Testing hook: override the manifest-storage directory passed to
+        ``preflight.run_preflight``. When ``None``, the preflight default
+        is used.
 
     Raises
     ------
+    ValueError
+        If ``--dry-run`` is passed without ``--config``.
     NotImplementedError
-        For every execution path other than ``--help``. The message
-        names the unimplemented path.
+        For execution paths other than ``--help`` and ``--dry-run``.
+        The message names the unimplemented path.
+    SystemExit
+        With status 1 if preflight validation fails.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.dry_run:
-        raise NotImplementedError(
-            "experiments.selection_study.run --dry-run is not "
-            "implemented yet."
+        if args.config is None:
+            raise ValueError(
+                "--dry-run requires --config PATH; no configuration file "
+                "was supplied."
+            )
+        from experiments.selection_study.preflight import (
+            ManifestValidationError,
+            run_preflight,
         )
+
+        preflight_kwargs: dict[str, Path] = {}
+        if _base_dir is not None:
+            preflight_kwargs["base_dir"] = _base_dir
+        if _manifest_dir is not None:
+            preflight_kwargs["manifest_dir"] = _manifest_dir
+
+        try:
+            manifest_path = run_preflight(
+                Path(args.config), **preflight_kwargs
+            )
+            _LOGGER.info(
+                "preflight passed; manifest saved to %s", manifest_path
+            )
+        except ManifestValidationError as exc:
+            _LOGGER.error("preflight validation failed: %s", exc)
+            sys.exit(1)
+        return
+
     if args.resume:
         raise NotImplementedError(
             "experiments.selection_study.run --resume is not "

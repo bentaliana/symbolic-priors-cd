@@ -149,17 +149,6 @@ def test_runner_source_contains_no_dagma_or_dcdi_or_wrapper_imports() -> None:
             )
 
 
-def test_dry_run_raises_not_implemented_error() -> None:
-    """``--dry-run`` is a placeholder and must raise
-    ``NotImplementedError`` rather than invoking a fit.
-    """
-    from experiments.selection_study.run import main
-
-    with pytest.raises(NotImplementedError) as excinfo:
-        main(["--dry-run"])
-    assert "--dry-run" in str(excinfo.value)
-
-
 def test_resume_raises_not_implemented_error() -> None:
     """``--resume`` is a placeholder and must raise
     ``NotImplementedError`` rather than invoking a fit.
@@ -231,7 +220,6 @@ def test_every_stub_module_callable_raises_not_implemented_error() -> None:
     )
 
     stub_callables: list[tuple[object, tuple[object, ...]]] = [
-        (preflight.run_preflight, (None,)),
         (pipeline.run_single_fit, (None,)),
         (sampling.compute_per_intervention_records, (None,)),
         (threshold_robustness.recompute_at_thresholds, ("run-id",)),
