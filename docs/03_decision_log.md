@@ -1432,3 +1432,87 @@ that selects a base model under a fixed protocol cell.
   unchanged by this entry; they will be supplied at Phase A/B
   configuration construction time.
 
+---
+
+## 20/05/2026 — Threshold robustness records structured SHD/SID unavailability
+
+### Decision
+
+The per-threshold records emitted by
+`experiments/selection_study/threshold_robustness.py` carry two
+new explicit fields, `shd_unavailable_reason` and
+`sid_unavailable_reason`, alongside the existing `shd` and `sid`
+fields. Each metric is now reported under one of two mutually
+exclusive forms:
+
+- a concrete integer value with the corresponding
+  `*_unavailable_reason` set to `None`, or
+- the value `None` with a non-empty string in the corresponding
+  `*_unavailable_reason`.
+
+Specifically:
+
+- SHD is unavailable when the predicted adjacency at a threshold
+  classifies as `invalid_shape` (square-shape pre-condition fails)
+  or `self_loop` (predicted-diagonal pre-condition fails). For
+  `valid_dag`, `cyclic`, and `bidirected` predictions, SHD is
+  computed unconditionally and the reason is `None`.
+- SID is unavailable for every non-`valid_dag` status because the
+  SID primitive requires a valid DAG. For `valid_dag` predictions
+  SID is computed and the reason is `None`.
+
+An internal invariant check raises `RuntimeError` if either
+mutual-exclusion pair is ever violated.
+
+### Reason
+
+The Commit-7 cleanup pass surfaced a boundary case: the project
+SHD primitive in `src/symbolic_priors_cd/metrics/structural.py`
+correctly rejects any predicted adjacency with non-zero diagonal
+entries. A neighbouring threshold inside a robustness sweep can
+legitimately produce a `self_loop` adjacency, and the structured-
+metric-unavailability pattern is the appropriate way to record
+this without weakening the source metric, inventing a fallback
+inside the runner, or silently emitting `shd=None`.
+
+### What does NOT change
+
+- `src/` is unchanged. The SHD primitive's strict adjacency
+  validation in
+  `src/symbolic_priors_cd/metrics/_graph_validation.py` is
+  preserved verbatim.
+- `experiments/selection_study/config.py`,
+  `experiments/selection_study/pipeline.py`,
+  `experiments/selection_study/loader.py`,
+  `experiments/selection_study/preflight.py`,
+  `experiments/selection_study/identity.py`,
+  `experiments/selection_study/sampling.py`, and
+  `experiments/selection_study/run.py` are unchanged by this
+  entry.
+- The primary `run.json` schema is unchanged. The top-level
+  `sid: int` invariant on `run.json` still holds; the
+  schema-conformance gate still refuses to write a partial
+  primary record when the primary threshold yields a non-`valid_dag`
+  graph. Nullable `sid` exists only inside threshold-robustness
+  records.
+- The four-field SCM persistence introduced on 19/05/2026 is
+  unaffected; `configuration_hash` still covers `n_nodes`,
+  `expected_edges`, `noise_scale`, and `weight_magnitude_range`.
+- No selection criterion or evaluation rule is changed by this
+  entry.
+
+### Consequence
+
+- Threshold-robustness consumers (the eventual selection-study
+  report) can disaggregate metric availability at each threshold
+  by reading the explicit reason fields. Self-loop thresholds no
+  longer raise; they are reported as `shd=None` with an explicit
+  reason that names the failing pre-condition.
+- The primary-threshold reconciliation against `run.json["shd"]`
+  and `run.json["sid"]` remains exact integer equality; the
+  primary threshold of any successful run is always `valid_dag`,
+  so the new `*_unavailable_reason` fields are `None` at the
+  primary index.
+- No `run.json` migration is required. The new fields live only
+  in the sibling `threshold_robustness.json` artefact and the
+  in-memory record returned by `recompute_at_thresholds`.
