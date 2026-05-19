@@ -121,7 +121,7 @@ def _make_dcdi_config(
         phase_b_configurations=(_PHASE_B_CFG,),
         threshold_robustness_triple=(0.4, 0.5, 0.6),
         wrapper_api_reference=(
-            "symbolic_priors_cd.wrappers.dcdi:DcdiWrapper"
+            "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper"
         ),
         seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
         configuration_hash_algorithm=CONFIGURATION_HASH_ALGORITHM_NAME,
