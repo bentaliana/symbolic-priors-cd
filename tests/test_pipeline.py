@@ -312,12 +312,21 @@ def _verify_run_json_against_schema(
     assert record["thresholded_adjacency"] == "thresholded_adjacency.npz"
     assert record["continuous_edge_object"] == "continuous_edge_object.npz"
     assert record["shd_reversal_cost"] == 2
-    assert record["mmd_primary"] is None
-    assert record["mmd_sensitivity_unit_variance"] is None
+    # mmd_primary and mmd_sensitivity_unit_variance may be float or
+    # None depending on sampler_status and whether the primary policy
+    # is residual_fitted.
+    assert (
+        record["mmd_primary"] is None
+        or isinstance(record["mmd_primary"], float)
+    )
+    assert (
+        record["mmd_sensitivity_unit_variance"] is None
+        or isinstance(record["mmd_sensitivity_unit_variance"], float)
+    )
     assert record["validation_nll"] is None
     assert isinstance(record["mmd_bandwidth_sweep"], dict)
     assert set(record["mmd_bandwidth_sweep"].keys()) == {"0.5x", "1.0x", "2.0x"}
-    assert record["mmd_bandwidth_used_value"] == {}
+    assert isinstance(record["mmd_bandwidth_used_value"], dict)
     assert isinstance(record["wrapper_warnings"], list)
     assert isinstance(record["convergence_failure_notes"], str)
 
@@ -403,7 +412,7 @@ def test_dagma_run_id_matches_directory(tmp_path) -> None:
 
 
 def test_dagma_intervention_records_match_section_6_10(tmp_path) -> None:
-    """Per-intervention records honour the Section 6.10 consistency rules."""
+    """Per-intervention records honour the schema's consistency rules."""
     config = _make_dagma_config()
     manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
     entry = manifest.entries[0]
@@ -412,17 +421,16 @@ def test_dagma_intervention_records_match_section_6_10(tmp_path) -> None:
 
     interventions = record["interventions"]
     assert len(interventions) == len(config.intervention_set)
-    available = sum(
-        1 for r in interventions if r["mmd_status"] == "available"
-    )
+    available_records = [
+        r for r in interventions if r["mmd_status"] == "available"
+    ]
+    available = len(available_records)
     missing = len(interventions) - available
     assert record["mmd_available_count"] == available
     assert record["mmd_missing_count"] == missing
     assert record["mmd_available_count"] + record["mmd_missing_count"] == (
         len(interventions)
     )
-    # For Commit 5 no MMD is computed; every record must have
-    # mmd_value=None and mmd_status in the allowed enum.
     allowed_mmd_statuses = {
         "available",
         "unavailable_invalid_graph",
@@ -431,21 +439,37 @@ def test_dagma_intervention_records_match_section_6_10(tmp_path) -> None:
         "unavailable_other",
     }
     for r in interventions:
-        assert r["mmd_value"] is None
         assert r["mmd_status"] in allowed_mmd_statuses
-        assert r["bandwidth_used"] is None
         assert set(r["bandwidth_sweep"].keys()) == {"0.5x", "1.0x", "2.0x"}
-        # Section 6.10 consistency rules.
+        # Consistency rules between sampler_status_for_intervention,
+        # mmd_status, and mmd_value.
         if r["sampler_status_for_intervention"] != "available":
             assert r["mmd_status"] == r["sampler_status_for_intervention"]
+            assert r["mmd_value"] is None
+            assert r["bandwidth_used"] is None
+        elif r["mmd_status"] == "available":
+            assert isinstance(r["mmd_value"], float)
+            assert np.isfinite(r["mmd_value"])
+            assert r["bandwidth_sweep"]["1.0x"] == r["mmd_value"]
+            assert isinstance(r["bandwidth_used"], float)
+            assert r["bandwidth_used"] > 0.0
+            assert r["n_ground_truth_samples"] > 0
+            assert r["n_model_samples"] > 0
         else:
             assert r["mmd_status"] == "unavailable_other"
+            assert r["mmd_value"] is None
     # Seeds match the manifest entry.
     seeds_map = dict(entry.per_intervention_seeds)
     for r in interventions:
         s = seeds_map[r["intervention_id"]]
         assert r["ground_truth_sampling_seed"] == s.ground_truth_sampling_seed
         assert r["model_sampling_seed"] == s.model_sampling_seed
+    # mmd_bandwidth_used_value mirrors each record's bandwidth_used.
+    for r in interventions:
+        assert (
+            record["mmd_bandwidth_used_value"][r["intervention_id"]]
+            == r["bandwidth_used"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -711,6 +735,59 @@ def test_invalid_graph_stop_leaves_empty_run_directory(tmp_path) -> None:
     assert contents == [], (
         f"invalid-graph stop left artefacts in run_dir: {contents!r}"
     )
+
+
+def test_pipeline_dagma_toy_run_writes_non_null_mmd_primary(tmp_path) -> None:
+    """A DAGMA toy fit with an available sampler writes a real mmd_primary.
+
+    The pipeline must produce a non-null arithmetic-mean mmd_primary,
+    a non-null mmd_sensitivity_unit_variance (because DAGMA's primary
+    policy is residual_fitted), per-intervention records with
+    mmd_status='available' and finite mmd_value, and aggregate
+    fields equal to the means of the available per-intervention
+    values.
+    """
+    config = _make_dagma_config()
+    manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
+    json_path = run_single_fit(manifest, 0, run_root=tmp_path / "runs")
+    record = load_run(json_path).data
+
+    if record["sampler_status"] != "available":
+        pytest.skip(
+            "test requires an available DAGMA sampler from the toy fit"
+        )
+
+    assert record["mmd_primary"] is not None
+    assert isinstance(record["mmd_primary"], float)
+    assert np.isfinite(record["mmd_primary"])
+    assert record["mmd_available_count"] > 0
+    assert record["mmd_available_count"] == len(record["interventions"])
+    assert record["mmd_missing_count"] == 0
+
+    assert record["mmd_sensitivity_unit_variance"] is not None
+    assert isinstance(record["mmd_sensitivity_unit_variance"], float)
+    assert np.isfinite(record["mmd_sensitivity_unit_variance"])
+
+    available = [
+        r for r in record["interventions"] if r["mmd_status"] == "available"
+    ]
+    assert len(available) == len(record["interventions"])
+    expected_primary = float(
+        np.mean([r["mmd_value"] for r in available])
+    )
+    assert record["mmd_primary"] == pytest.approx(expected_primary, abs=1e-12)
+    for key in ("0.5x", "1.0x", "2.0x"):
+        expected_sweep = float(
+            np.mean([r["bandwidth_sweep"][key] for r in available])
+        )
+        assert record["mmd_bandwidth_sweep"][key] == pytest.approx(
+            expected_sweep, abs=1e-12
+        )
+
+    for r in available:
+        assert record["mmd_bandwidth_used_value"][r["intervention_id"]] == (
+            r["bandwidth_used"]
+        )
 
 
 def test_invalid_graph_stop_leaves_empty_run_directory_dcdi(tmp_path) -> None:

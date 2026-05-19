@@ -35,6 +35,9 @@ from experiments.selection_study.identity import (
     derive_run_id,
 )
 from experiments.selection_study.preflight import Manifest
+from experiments.selection_study.sampling import (
+    compute_per_intervention_records,
+)
 from symbolic_priors_cd.data import (
     generate_linear_gaussian_scm,
     sample_observational,
@@ -331,74 +334,6 @@ def _map_planned_sampling_policy_to_schema(planned: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Intervention record builder
-# ---------------------------------------------------------------------------
-
-
-def _build_intervention_records(
-    intervention_set: list[dict[str, Any]],
-    per_intervention_seeds_map: dict[str, Any],
-    preprocessor: Any,
-    sampler_status: str,
-    sampler_unavailable_reason: Optional[str],
-) -> list[dict[str, Any]]:
-    """Build per-intervention records.
-
-    No MMD is computed in this commit; ``mmd_value`` is ``None`` and
-    ``mmd_status`` follows the consistency rule in the schema:
-    when the sampler is mechanically unavailable, ``mmd_status``
-    equals ``sampler_status_for_intervention``; when the sampler is
-    available, ``mmd_status`` is ``"unavailable_other"`` because no
-    MMD was computed for any other reason.
-    """
-    records: list[dict[str, Any]] = []
-    for inter in intervention_set:
-        iid = str(inter["intervention_id"])
-        target = int(inter["target_node"])
-        value_raw = float(inter["value_raw"])
-        if iid not in per_intervention_seeds_map:
-            raise KeyError(
-                "per_intervention_seeds is missing intervention_id "
-                f"{iid!r}"
-            )
-        seeds = per_intervention_seeds_map[iid]
-        value_model = float(
-            preprocessor.transform_intervention_value(value_raw, target)
-        )
-        if sampler_status == "available":
-            mmd_status = "unavailable_other"
-            sampler_reason: Optional[str] = None
-        else:
-            mmd_status = sampler_status
-            sampler_reason = sampler_unavailable_reason
-        records.append(
-            {
-                "intervention_id": iid,
-                "target_node": target,
-                "value_raw": value_raw,
-                "value_model_frame": value_model,
-                "ground_truth_sampling_seed": int(
-                    seeds.ground_truth_sampling_seed
-                ),
-                "model_sampling_seed": int(seeds.model_sampling_seed),
-                "n_ground_truth_samples": 0,
-                "n_model_samples": 0,
-                "mmd_value": None,
-                "mmd_status": mmd_status,
-                "bandwidth_used": None,
-                "bandwidth_sweep": {
-                    "0.5x": None,
-                    "1.0x": None,
-                    "2.0x": None,
-                },
-                "sampler_status_for_intervention": sampler_status,
-                "sampler_reason": sampler_reason,
-            }
-        )
-    return records
-
-
-# ---------------------------------------------------------------------------
 # Top-level pipeline entry
 # ---------------------------------------------------------------------------
 
@@ -409,7 +344,7 @@ def run_single_fit(
     *,
     run_root: Path,
 ) -> Path:
-    """Run a single toy fit and emit a docs/08a-conforming run.json.
+    """Run a single toy fit and emit a schema-conforming run.json.
 
     Parameters
     ----------
@@ -637,21 +572,29 @@ def run_single_fit(
         loss_history_status = "unavailable_no_api"
 
     per_intervention_seeds_map = dict(entry.per_intervention_seeds)
-    intervention_records = _build_intervention_records(
-        list(resolved_config.get("intervention_set", [])),
-        per_intervention_seeds_map,
-        preprocessor,
-        sampler_status,
-        sampler_unavailable_reason,
-    )
-    mmd_available_count = sum(
-        1 for r in intervention_records if r["mmd_status"] == "available"
-    )
-    mmd_missing_count = len(intervention_records) - mmd_available_count
-    invalid_graph_for_this_run = graph_status != "valid_dag"
     sampler_policy_used = _map_planned_sampling_policy_to_schema(
         entry.planned_sampling_policy
     )
+    mmd_result = compute_per_intervention_records(
+        scm=scm,
+        wrapper=wrapper,
+        sampler_status=sampler_status,
+        sampler_unavailable_reason=sampler_unavailable_reason,
+        sampler_policy_used=sampler_policy_used,
+        intervention_set=list(resolved_config.get("intervention_set", [])),
+        per_intervention_seeds_map=per_intervention_seeds_map,
+        preprocessor=preprocessor,
+    )
+    intervention_records = mmd_result["records"]
+    mmd_primary = mmd_result["mmd_primary"]
+    mmd_sensitivity_unit_variance = mmd_result[
+        "mmd_sensitivity_unit_variance"
+    ]
+    mmd_bandwidth_sweep = mmd_result["mmd_bandwidth_sweep"]
+    mmd_bandwidth_used_value = mmd_result["mmd_bandwidth_used_value"]
+    mmd_available_count = mmd_result["mmd_available_count"]
+    mmd_missing_count = mmd_result["mmd_missing_count"]
+    invalid_graph_for_this_run = graph_status != "valid_dag"
 
     record: dict[str, Any] = {
         "run_id": run_id,
@@ -696,13 +639,9 @@ def run_single_fit(
         "continuous_edge_object": "continuous_edge_object.npz",
         "shd": shd_value,
         "sid": sid_value,
-        "mmd_primary": None,
-        "mmd_sensitivity_unit_variance": None,
-        "mmd_bandwidth_sweep": {
-            "0.5x": None,
-            "1.0x": None,
-            "2.0x": None,
-        },
+        "mmd_primary": mmd_primary,
+        "mmd_sensitivity_unit_variance": mmd_sensitivity_unit_variance,
+        "mmd_bandwidth_sweep": mmd_bandwidth_sweep,
         "validation_nll": None,
         "sampler_status": sampler_status,
         "sampler_status_reason": (
@@ -715,7 +654,7 @@ def run_single_fit(
         "mmd_missing_count": int(mmd_missing_count),
         "invalid_graph_for_this_run": bool(invalid_graph_for_this_run),
         "shd_reversal_cost": _SHD_REVERSAL_COST,
-        "mmd_bandwidth_used_value": {},
+        "mmd_bandwidth_used_value": mmd_bandwidth_used_value,
         "mmd_clip_policy": _MMD_CLIP_POLICY,
         "sid_backend": _SID_BACKEND,
         "sid_backend_version": _SID_BACKEND_VERSION,
