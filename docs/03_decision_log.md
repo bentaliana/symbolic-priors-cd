@@ -1157,3 +1157,173 @@ Consequence:
   study has not been run.
 - Prior-loss implementation is not started by this commit.
 - DCDI Commit 11 is not resumed by this commit.
+
+---
+
+19/05/2026 - DCDI public wrapper assembly resumed as limited exception to docs/05 pause; Commit 11 loss-hook remains paused; C-P11 review remains pending
+
+1. Blocker discovered during Commit 5 investigation
+
+Decision:
+
+- The Commit 5 schema-conformance gate investigation reached a hard
+  stop: the public `DCDIWrapper` class required by
+  `experiments/selection_study/pipeline.resolve_wrapper(
+  "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper")` did not exist in
+  `src/symbolic_priors_cd/wrappers/`.
+- The DCDI infrastructure that does exist (`_dcdi_training`,
+  `_dcdi_sampling`, `_dcdi_utils`, the in-module thresholding helper
+  `_predict_adjacency_at`, and the `_graph_status` classifiers)
+  collectively contains every mechanism needed for a Commit-5 toy
+  end-to-end fit, but no public class assembled them behind a
+  unified surface returning a `WrapperDiagnostics` record.
+
+Reason:
+The selection-study runner in Commit 5 cannot proceed without a
+public DCDI wrapper class. The remaining private modules already
+expose the underlying mechanism. Building the public class is
+therefore a strictly mechanical assembly, not a research step.
+
+2. Scope of the limited exception
+
+Decision:
+
+- A public `DCDIWrapper` class is added to
+  `src/symbolic_priors_cd/wrappers/dcdi.py`. The class consumes the
+  existing private helpers verbatim. The wrapper does not
+  reimplement training, sampling, thresholding, or status
+  classification.
+- The class exposes five public methods: `fit`,
+  `native_edge_continuous`, `thresholded_adjacency`,
+  `sample_interventional`, and `get_diagnostics`. The shape mirrors
+  the existing `DAGMAWrapper` pattern at
+  `src/symbolic_priors_cd/wrappers/dagma.py`.
+- The `fit` signature is
+  `fit(X_train, *, X_val, preprocessor, seed, n_iter, config=None)`.
+  `X_val` and `n_iter` are present (and absent from the DAGMA
+  pattern) because the consumed private training function
+  `_dcdi_training.run_dcdi_training_loop` requires them and because
+  `docs/05_dcdi_wrapper_implementation_plan.md` Section 9 freezes
+  the validation-data API as caller-supplied with no internal split
+  and no internal generation.
+- `DCDIConfig` is re-exported from `_dcdi_training` via a
+  module-level `__getattr__` so importing
+  `symbolic_priors_cd.wrappers` does not eagerly load the pinned
+  DCDI source. The lazy import preserves the convention recorded in
+  the wrappers package docstring.
+- The wrapper is registered in
+  `src/symbolic_priors_cd/wrappers/__init__.py` alongside
+  `DAGMAWrapper` and `DCDIConfig`.
+
+Reason:
+The wrapper is mechanical assembly only. Every component it consumes
+already passed its own commit-level acceptance test (DCDI Commits 1
+through 9 are green per `docs/phase_2b_dcdi_readout.md`). Adding a
+public class to expose those components does not change any
+algorithm, any selection criterion, any threshold, any seed
+discipline rule, or any evaluation rule. The exception is narrowly
+scoped to unblock `docs/08_base_model_selection_plan.md` Commit 5.
+
+3. What remains paused
+
+Decision:
+
+- DCDI Commit 11 (loss-hook injection): paused. The wrapper does NOT
+  expose a `set_loss_hook` method. The `WrapperDiagnostics.loss_hook_name`
+  field is always `None`. The private training function's
+  `loss_hook` parameter remains accessible only through the private
+  module path; the public wrapper does not wire it up.
+- C-P11 review (`docs/04f_dcdi_sampler_quality_diagnostic.md`):
+  unchanged. The diagnostic remains as it stands. No threshold has
+  been weakened. No silent graph repair has been introduced. The
+  sampler-quality concern is a base-model / wrapper-design open
+  question to be resolved at project level.
+- DCDI Commits 12, 13, and 14 (diagnostics polish, full-convergence
+  integration, public-API docstring stabilisation): not started in
+  this commit. The wrapper exposes diagnostics, but the full-
+  convergence integration test and the public-API stabilisation
+  pass remain deferred to their original commits.
+- Prior-loss implementation: not started.
+
+4. Sampler-status discipline (CRITICAL)
+
+Decision:
+
+- `sampler_status` on the wrapper reports MECHANICAL availability
+  only. Concretely: `valid_dag` and a callable sampling API map to
+  `"available"`; non-`valid_dag` maps to
+  `"unavailable_invalid_graph"`. The wrapper does NOT degrade
+  `sampler_status` based on the QUALITY of the learned structure.
+- C-P11 was a structure-quality failure (the learned graph missed
+  strong true edges while the thresholded graph was a valid DAG and
+  the sampling API was callable). Marking the sampler unavailable
+  on structure-quality grounds would hide the C-P11 concern behind
+  a status flag and pre-empt the project-level review. The wrapper
+  refuses to do this.
+- Structure-quality concerns continue to surface in downstream
+  metrics (SHD, SID, MMD) and in the
+  `docs/08a_experiment_tracking_and_results_schema.md` Section 6.10
+  per-intervention MMD records, not in `sampler_status`.
+
+Reason:
+The status taxonomy in `docs/04_wrapper_api_contract.md` Section 7
+defines `sampler_status` as a mechanical-availability axis, not a
+quality axis. Conflating the two would make MMD-unavailable rates
+incomparable across runs and would silently weaken the C-P11
+diagnostic by encoding a quality judgement into a mechanical-status
+field. The selection-study report logic in
+`docs/02_base_model_selection.md` Section 6 Case 6 reads
+`sampler_status` as a mechanical signal and would mis-attribute
+structure failures to sampler failures if the wrapper conflated
+them.
+
+5. What does NOT change
+
+Decision:
+
+- No selection criterion changes. The lexicographic decision rule
+  (`docs/02_base_model_selection.md` Section 2), the
+  disqualification conditions (Section 5), the tie-breaker logic
+  (Section 6), the timeline (Section 8), the budget (Section 8),
+  the synthetic cell (Section 3.1), the intervention values
+  (Section 4.2), the SID tie margin, the catastrophic SHD-
+  degradation threshold, the threshold robustness triples, the
+  DCDI threshold of `0.5`, the DAGMA threshold of `0.3`, and the
+  calibration/evaluation seed split all remain as frozen.
+- No evaluation rule changes. SID, SHD, MMD, and the
+  MMD-unavailable rule (Section 6 Case 6) are unchanged.
+- No metric primitive changes. `metrics/structural.py`,
+  `metrics/interventional.py`, and `metrics/sanity_checks.py` are
+  unchanged.
+- No private DCDI module changes.
+  `src/symbolic_priors_cd/wrappers/_dcdi_training.py`,
+  `_dcdi_sampling.py`, and `_dcdi_utils.py` are consumed as-is.
+- No DAGMA wrapper changes.
+  `src/symbolic_priors_cd/wrappers/dagma.py` and the DAGMA private
+  helpers are unchanged.
+- `docs/02_base_model_selection.md`,
+  `docs/04_wrapper_api_contract.md`,
+  `docs/05_dcdi_wrapper_implementation_plan.md`, and
+  `docs/08a_experiment_tracking_and_results_schema.md` are
+  unchanged.
+- The Commit-5 schema-conformance gate has NOT been opened by this
+  decision. This entry only unblocks the wrapper-resolution step
+  that Commit 5 will later perform.
+
+Consequence:
+
+- The selection-study runner's `pipeline.resolve_wrapper(...)` step
+  can now dereference `symbolic_priors_cd.wrappers.dcdi:DCDIWrapper`
+  to a class object. The Commit-5 toy end-to-end fit can proceed
+  for both DAGMA and DCDI candidates.
+- The C-P11 sampler-quality concern remains the binding open
+  question for the DCDI candidate. The wrapper does not pre-empt
+  this concern. Any selection-study conclusion that uses MMD for
+  DCDI must still account for `docs/04f` per
+  `docs/02_base_model_selection.md` Section 6 Case 6.
+- DAGMA is not selected by this commit. The base-model selection
+  study has not been run.
+- DCDI Commit 11 is not resumed by this commit.
+- Prior-loss implementation is not started by this commit.
+- This decision is wrapper-assembly only. No new scientific
+  commitment is introduced.
