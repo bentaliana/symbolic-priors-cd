@@ -3,7 +3,7 @@
 ## Status
 
 Frozen protocol for base-model selection.  
-Version 1.5.  
+Version 1.6.  
 This document defines how the thesis chooses between DAGMA-linear and DCDI-G as the base differentiable causal discovery model for the main study.
 
 ---
@@ -15,6 +15,7 @@ This document defines how the thesis chooses between DAGMA-linear and DCDI-G as 
 - **v1.3**: integrated the DCDI structural-mask probe from `docs/04d_dcdi_mask_probe_results.md`; clarified that DCDI MMD sampling must enforce the thresholded graph through `model.adjacency` plus saturated `log_alpha`; fixed internal consistency issues in Criterion 3 wording, intervention-unit wording, Section 6 tie-breaker logic, Phase B seed accounting, paper-aligned reproduction-cell specification, and minor editorial issues.
 - **v1.4**: editorial amendment removing stale deferred-SID phrasing now that SID is implemented and verified (see `docs/phase_2d_sid_readout.md` and the 15/05/2026 SID closure entry in `docs/03_decision_log.md`). Edits: Section 3.4 SID logging bullet rewritten as a plain mandatory integer field with no deferred branch; Section 7 item 5 threshold-robustness wording updated to drop "SID once integrated"; Section 7 item 6 replaced with a closing statement that SID is implemented and verified and that selection-study conclusions are no longer deferred on the SID side. No frozen tactical constant changed; no change to the lexicographic decision rule, the disqualification conditions, the tie-breaker logic, the timeline and budget, or the seed-discipline statement.
 - **v1.5**: editorial amendment relaxing the Section 3.5 uniform seed-setter requirement to apply only to candidates whose fit path depends on global RNG state. For candidates verified-deterministic by construction (DAGMA, per `docs/04b_source_inspection.md` D-6 and `docs/04c_runtime_probe_results.md` D-P2), the wrapper MUST NOT call the corresponding global RNG setters, and the corresponding seed fields in the run record MUST be null; null in these fields means the corresponding setter was not called because the fit is deterministic by construction. DCDI seed discipline is preserved; DCDI continues to call `torch.manual_seed` and `np.random.seed` per the implemented wrapper. This amendment resolves the `docs/08a_experiment_tracking_and_results_schema.md` Section 16.1 conflict by adopting Option A and is recorded as Commit 2 of `docs/08_base_model_selection_plan.md`. No frozen tactical constant in Section 9 changed; no change to the lexicographic decision rule, the disqualification conditions, the tie-breaker logic, or the timeline and budget. The DAGMA wrapper at `src/symbolic_priors_cd/wrappers/dagma.py` is unchanged.
+- **v1.6**: real-run constants and Phase B sparsity-fairness amendment, prior to the runner's Configuration extension and Commit 8 Phase A work. Six classes of change: (a) DCDI training-budget ceiling frozen at `dcdi_num_train_iter = 300000` from the C-P15 pilot recorded in `docs/08d_dcdi_training_budget_pilot.md` and the corresponding 20/05/2026 `docs/03` entry; the ceiling is a budget, not a hyperparameter, and must not be varied by Phase B or held-out evaluation. (b) DAGMA paper-aligned optimisation values added (`warm_iter = 20000`, `max_iter = 70000`, Adam `lr = 3e-4`, `(beta_1, beta_2) = (0.99, 0.999)`) per DAGMA paper Section C.1.1; these override library defaults at the call site. The DAGMA paper specifies a relative-loss convergence rule, but the current wrapper does not implement or expose a separate observed early-stopping iteration count, so DAGMA `n_iterations` remains `None` at the run-record top level and the configured optimisation upper bound is recorded under `model_specific_diagnostics`. No new DAGMA early-stopping mechanism is introduced. (c) Phase B sparsity calibration symmetrised upward: DAGMA receives a 5-value `lambda1` grid `{0.01, 0.025, 0.05, 0.1, 0.25}` centred on the paper anchor `0.05`; DCDI's previous wide sparsity sweep is replaced with a 5-value `reg_coeff` grid `{0.01, 0.03, 0.1, 0.3, 1.0}` centred on the upstream anchor `0.1`. Each grid is model-native, not numerically matched across models, and frozen before execution; no post-hoc grid expansion is permitted. (d) Section 4.2 MMD sample-size wording tightened to read `mmd_n_samples = 1000` as a top-level Configuration field that enters `configuration_hash`. (e) C-P11-style sampler-quality diagnostic must be rerun at the real DCDI budget before held-out interpretation; the original C-P11 at 30 000 iterations on a 3-node fixture is scoped as under-budget evidence and is not binding against real-budget DCDI. (f) Section 9 tactical-constants block extended with the corresponding bullets. No change to the lexicographic decision rule, disqualification conditions, tie-breaker logic, intervention values, threshold values, threshold robustness triples, calibration/evaluation seed split, timeline, or budget. No source code or wrapper change is introduced by this document.
 
 ---
 
@@ -143,7 +144,7 @@ Any mismatch between the paper-reported cell and the project reproduction cell m
 
 #### Phase B: equal-budget local calibration
 
-After the reproduction pass, each model is given a small equal-budget local calibration opportunity on the selection study cell. The budget is **5 configurations per model and 2 calibration seeds per configuration**. The selected configuration from Phase B is then evaluated on **5 held-out evaluation seeds** that do not overlap with the 2 calibration seeds. The total seed budget per model is therefore 2 calibration seeds plus 5 held-out evaluation seeds, drawn from independent populations and recorded.
+After the reproduction pass, each model is given a small equal-budget local calibration opportunity on the selection study cell. The budget is **exactly 5 configurations per model and 2 calibration seeds per configuration**. The 5 DAGMA configurations are the 5 values of the `lambda1` grid frozen in the DAGMA starting point; the 5 DCDI configurations are the 5 values of the `reg_coeff` grid frozen in the DCDI starting point. Each grid is model-native and is frozen before execution. No post-hoc grid expansion is allowed after seeing calibration or held-out results. The selected configuration from Phase B is then evaluated on **5 held-out evaluation seeds** that do not overlap with the 2 calibration seeds. The total seed budget per model is therefore 2 calibration seeds plus 5 held-out evaluation seeds, drawn from independent populations and recorded.
 
 Calibration and evaluation seeds must not overlap. This prevents the leakage path where the configuration is selected on the same seeds it is later evaluated on. If compute pressure forces reuse, the resulting Criterion 1 numbers must be reported as **descriptive** rather than as held-out evaluation, and the selection-study report must state explicitly that the seed pools overlap.
 
@@ -152,33 +153,66 @@ Calibration and evaluation seeds must not overlap. This prevents the leakage pat
 Use the following explicit configuration values for DAGMA-linear in the selection study. These override library defaults because library defaults diverge from the supplementary configuration referenced in the DAGMA paper:
 
 - number of iterations: `T = 4`
-- L1 coefficient: `lambda1 = 0.05`
+- L1 coefficient anchor: `lambda1 = 0.05`
 - log-det parameter sequence: `s = [1.0, 0.9, 0.8, 0.7]`
 - initial central-path coefficient: `mu_init = 1.0`
 - decay factor: `mu_factor = 0.1`
 - in-library threshold passed to `DagmaLinear.fit`: `w_threshold = 0.0`
 - project-level threshold applied externally to `abs(W_continuous)` at the wrapper output boundary: `0.3`
+- per-stage inner Adam iterations (non-final stages, `t in {0, 1, 2}`): `warm_iter = 20000`
+- final-stage inner Adam iterations (`t = 3`): `max_iter = 70000`
+- Adam learning rate: `lr = 3e-4`
+- Adam betas: `beta_1 = 0.99`, `beta_2 = 0.999`
+
+The five optimisation values `warm_iter`, `max_iter`, `lr`, `beta_1`, `beta_2` are paper-aligned and adopted from DAGMA paper Section C.1.1. They override the DAGMA library defaults (`warm_iter = 30000`, `max_iter = 60000` for the inner iteration counts). The library defaults were not adopted as protocol values; only the paper-aligned values above are in force.
+
+The DAGMA paper additionally specifies a relative-loss convergence rule (relative error between subsequent iterations less than `10^-6`) which permits early termination inside a stage. The current project DAGMA wrapper does not implement or expose a separate observed early-stopping iteration count; each stage runs to its configured `warm_iter` or `max_iter` budget. Consequently, the top-level `n_iterations` field in a DAGMA run record remains `None`, and the configured optimisation upper bound is recorded under `model_specific_diagnostics` only. No new DAGMA early-stopping mechanism is introduced by this document; the configured DAGMA budget is the configured upper bound, not an observed iteration count.
 
 Wrapper preconditions for DAGMA-linear:
 
 - The wrapper MUST pass `X.copy()` to `DagmaLinear.fit` because DAGMA mutates its input array in place during L2 mean-centering (verified by probe D-P4 in `docs/04c_runtime_probe_results.md`).
 - The wrapper MUST save the continuous `W_est` immediately after `fit` returns, before applying the project-level threshold. The continuous matrix is the native edge object required by the wrapper contract; it is used for threshold robustness reporting (Section 7) and for model-generated MMD sampling (Section 4.2).
 
+Phase B sparsity sweep for DAGMA:
+
+- `lambda1` is the only Phase B knob for DAGMA.
+- Phase B grid: `lambda1 in {0.01, 0.025, 0.05, 0.1, 0.25}`.
+- The anchor value `0.05` matches the DAGMA paper Section C.1.1 default; the four neighbouring values give a pre-registered local sparsity sweep with approximately half-decade spacing.
+- The grid is model-native; it is NOT numerically matched to the DCDI grid because `lambda1` (DAGMA) and `reg_coeff` (DCDI) are on different scales.
+- The grid is frozen before execution. The grid endpoints, the number of grid points, and the anchor value MUST NOT be expanded or changed after seeing calibration or held-out results.
+
 Any local calibration in Phase B that changes a value above must be logged explicitly.
 
 ##### DCDI-G starting point
 
-Use the official DCDI-G implementation with a small held-out validation split and a restricted local search around the paper-style sparsity regularisation setup.
+Use the official DCDI-G implementation with a paper-aligned hyperparameter table and a pre-registered local sparsity sweep.
 
 - Lagrangian multiplier: `gamma_0 = 0`
 - penalty coefficient: `mu_0 = 10^-8`
 - Xavier initialization
-- adjacency-matrix entries initialised at or near 1.0
-- learning rate: `10^-3`
-- penalty update factor: `n = 2`; decrease threshold: 0.9
-- stopping criterion: `h(Lambda) < 10^-8`
-- RMSprop optimiser; minibatch size = 64
-- sparsity coefficient: 5 values spanning `10^-7` to `10^2`
+- adjacency-matrix entries initialised at or near 1.0 (the edge-present state)
+- learning rate: `lr = 10^-3`
+- penalty update factor: `n = 2`; decrease threshold: `0.9`
+- stopping criterion: `h(Lambda) < 10^-8` (`h_threshold = 1e-8`)
+- RMSprop optimiser; minibatch size: `train_batch_size = 64`
+- MLP architecture: `hidden_units = 16`, `hidden_layers = 2`, leaky-ReLU activation
+- training-budget ceiling: `dcdi_num_train_iter = 300000` as a hard maximum with the existing patience-based early stopping
+- stop-check window: `stop_crit_win = 100`
+- training patience: `train_patience = 5`
+- DCDI validation split: from the `n_train = 1000` observational sample (Section 9), DCDI uses an 80/20 split into `800` fit samples and `200` validation samples; no additional validation data is drawn.
+
+The DCDI hyperparameters above are paper-aligned with DCDI Appendix B.5 / Table 2; the patience-cadence values (`stop_crit_win`, `train_patience`) match the DCDI repository argparse defaults. `dcdi_num_train_iter = 300000` is pilot-derived from the C-P15 reproduction-seed pilot recorded in `docs/08d_dcdi_training_budget_pilot.md` and frozen by the 20/05/2026 `docs/03` entry. The upstream second-stage permanent-thresholding patience parameter (`train_patience_post`) is not part of the selection-study protocol because the current project wrapper does not implement that second-stage mechanism; DCDI runs are interpreted through the implemented first patience gate, `first_stop_iteration`, and `final_iteration`.
+
+`dcdi_num_train_iter` is a training-budget ceiling, not a Phase B hyperparameter. It MUST NOT be varied using held-out evaluation records, it MUST NOT appear as one of the five Phase B configurations, and any change requires a contemporaneous `docs/03` entry. The patience gate decides the actual stop iteration on every run, so converged runs use only the iterations they need regardless of the ceiling.
+
+Phase B sparsity sweep for DCDI:
+
+- `reg_coeff` is the only Phase B knob for DCDI.
+- Phase B grid: `reg_coeff in {0.01, 0.03, 0.1, 0.3, 1.0}`.
+- The anchor value `0.1` matches the DCDI upstream argparse default; the four neighbouring values give a pre-registered local sparsity sweep with approximately half-decade spacing.
+- The grid replaces the earlier DCDI sparsity treatment of "5 values spanning `10^-7` to `10^2`". The narrower local sweep is intentional: the wider span included sparsity values incompatible with the selection-study cell.
+- The grid is model-native; it is NOT numerically matched to the DAGMA grid because `reg_coeff` (DCDI) and `lambda1` (DAGMA) are on different scales.
+- The grid is frozen before execution. The grid endpoints, the number of grid points, and the anchor value MUST NOT be expanded or changed after seeing calibration or held-out results.
 
 Wrapper preconditions for DCDI-G:
 
@@ -311,7 +345,7 @@ Neither DAGMA nor DCDI exposes a built-in sampler under arbitrary `do(X_j = v)`.
 12. For each batch, traverse nodes in topological order of `A_thresh`. For each non-target node, call `model.forward_given_params(x, weights, biases)` and select the density parameters for that node, then build the conditional Normal via `model.get_distribution(...)` and draw a sample. At the intervention target, clamp the (model-frame) value. The minimal call pattern (`mask=None, regime=None`) is sufficient in observational mode (verified by probes C-P5 and C-P7 in `docs/04c_runtime_probe_results.md`).
 13. Transform raw intervention values into the model frame before clamping and generated samples back to raw SCM units before MMD comparison, using the equations in Section 4.4.
 
-The MMD sampling RNG seed and the seed-derivation rule MUST be logged per Section 3.4. Sample size for MMD comparison defaults to 1000 model-generated samples per intervention condition, matching the observational sample size frozen in Section 9.
+The MMD sampling RNG seed and the seed-derivation rule MUST be logged per Section 3.4. Sample size for MMD comparison is `mmd_n_samples = 1000` model-generated samples per intervention condition, matching the observational sample size frozen in Section 9. `mmd_n_samples` is a real-run selection-study constant: it MUST be carried as a top-level `Configuration` field, appear inside `config_resolved`, and participate in `configuration_hash`. It MUST NOT remain a schema-gate constant. The MMD estimator, the median-heuristic bandwidth policy, the `0.5x / 1.0x / 2.0x` sensitivity sweep, and the negative-unbiased-MMD handling rules are unchanged.
 
 ### 4.3 Criterion 2: Prior-injection ergonomics
 
@@ -469,6 +503,12 @@ The selection study must produce:
      Report whether the selection-relevant ordering of the two candidates is stable across the three threshold values. The continuous edge objects saved per Section 3.4 make this re-computation possible without retraining;
 6. a record that **SID is implemented and verified**. SID is provided by `sid_score` in the project metrics layer using the `gadjid==0.1.0` backend; verification is recorded in `docs/phase_2d_sid_readout.md` and the 15/05/2026 SID closure entry in `docs/03_decision_log.md`. Selection-study conclusions are no longer deferred on the SID side.
 
+### C-P11 real-budget reapplication policy
+
+The original C-P11 DCDI sampler-quality diagnostic in `docs/04f_dcdi_sampler_quality_diagnostic.md` was run at `n_iter = 30000` on a 3-node fixture (`docs/04f` recorded `converged = False` and `final_h = 5.31e-04`). At those settings DCDI never reached its acyclicity threshold. C-P11 is therefore scoped as **under-budget / under-scale diagnostic evidence** and is **not binding evidence against real-budget DCDI** at the selection-study cell.
+
+A C-P11-style sampler-quality diagnostic MUST be rerun at the real DCDI budget (`dcdi_num_train_iter = 300000`, patience gate enabled) on a 10-node ER2 fixture before any held-out evaluation result is interpreted as evidence about DCDI's interventional adequacy. The rerun does NOT block Phase A reproduction or Phase B calibration; both phases may proceed in parallel. The rerun MUST be complete before final held-out claims about DCDI sampler quality are accepted into the selection-study report. If the rerun produces structure / sampler-quality concerns analogous to the original C-P11 outcome, the MMD-unavailable / reliability-limited rule in Section 6 Case 6 applies as currently written.
+
 ---
 
 ## 8. Timeline and budget
@@ -504,19 +544,31 @@ If the selection study is still inconclusive after the time/budget ceiling, appl
 The following constants are frozen for the selection study only and do **not** automatically propagate to the main study:
 
 - selection study graph: 10-node ER2, with `expected_edges = 2 * n_nodes = 20`
-- observational sample size: 1000
+- training observational sample size: `n_train = 1000` total samples per run
+- DCDI validation split: 800 fit samples and 200 validation samples drawn deterministically from the `n_train = 1000` observational batch; DCDI only
+- MMD model-batch size: `mmd_n_samples = 1000` model-generated samples per intervention condition
 - Phase B seed split: **2 calibration seeds per configuration** plus **5 held-out evaluation seeds**, non-overlapping
 - intervention values: \(\{-2, +2\}\)
 - catastrophic SHD-degradation threshold: >50%
 - SID tie margin inside Criterion 1: 10%
 - DAGMA in-library threshold (passed to `DagmaLinear.fit`): **0.0**, so the continuous matrix is preserved
 - DAGMA project-level threshold (applied externally to `abs(W_continuous)`): **0.3**
+- DAGMA per-stage inner Adam iterations (non-final stages): `warm_iter = 20000`
+- DAGMA final-stage inner Adam iterations: `max_iter = 70000`
+- DAGMA Adam values: `lr = 3e-4`, `beta_1 = 0.99`, `beta_2 = 0.999`
+- DAGMA Phase B `lambda1` grid: `{0.01, 0.025, 0.05, 0.1, 0.25}`, anchor `0.05`
 - DCDI threshold (applied to `model.get_w_adj()`): **0.5**
+- DCDI training-budget ceiling: `dcdi_num_train_iter = 300000` hard maximum with patience-based early stopping (pilot-derived; see `docs/08d`)
+- DCDI patience values: `stop_crit_win = 100`, `train_patience = 5`
+- DCDI optimiser settings: `lr = 1e-3`, `train_batch_size = 64`, RMSprop, `h_threshold = 1e-8`
+- DCDI MLP architecture: `hidden_units = 16`, `hidden_layers = 2`, leaky-ReLU, Xavier initialisation
+- DCDI Phase B `reg_coeff` grid: `{0.01, 0.03, 0.1, 0.3, 1.0}`, anchor `0.1` (replaces the previous "5 values spanning `10^-7` to `10^2`" treatment)
 - DAGMA MMD-sampling noise policy: **residual-fitted per-node noise** is the primary policy; **unit-variance noise** is a sensitivity check
 - DCDI MMD-sampling API: `forward_given_params` plus `get_distribution`, with the minimal call pattern (mask=None, regime=None) verified by probes C-P5 through C-P7
 - DCDI data normalisation: `normalize=False` in `DataManagerFile`; project preprocessing is upstream of the wrapper
 - threshold robustness triples: DAGMA `{0.2, 0.3, 0.4}` on `abs(W_continuous)`, DCDI `{0.4, 0.5, 0.6}` on `model.get_w_adj()`
 - reproduction-then-equal-budget calibration structure
+- C-P11 real-budget reapplication required before final held-out interpretation (see Section 7 "C-P11 real-budget reapplication policy")
 
 ### Notes
 

@@ -1666,3 +1666,114 @@ and any associated `docs/03` entries:
 
 The full readout of the pilot evidence and the per-seed table
 is in `docs/08d_dcdi_training_budget_pilot.md`.
+
+---
+
+## 20/05/2026 -- docs/02 v1.6 real-run constants and Phase B sparsity policy frozen
+
+### Decision
+
+`docs/02_base_model_selection.md` is amended to **v1.6**. The
+amendment encodes the remaining real-run protocol decisions
+audited in `docs/08c_real_run_constants_and_training_budget_audit.md`
+and corroborated by the C-P15 pilot
+(`docs/08d_dcdi_training_budget_pilot.md`).
+
+Summary of `docs/02` v1.6 amendments:
+
+- Section 3.3 DAGMA-linear starting point extended with the
+  paper-aligned optimisation values from DAGMA paper
+  Section C.1.1: `warm_iter = 20000`, `max_iter = 70000`,
+  Adam `lr = 3e-4`, `(beta_1, beta_2) = (0.99, 0.999)`. These
+  override library defaults at the call site. The DAGMA paper's
+  relative-loss convergence rule is documented; the project
+  wrapper does not implement or expose a separate observed
+  early-stopping iteration count, so the DAGMA run record's
+  top-level `n_iterations` field remains `None` and the
+  configured optimisation upper bound is recorded under
+  `model_specific_diagnostics`.
+- Section 3.3 DAGMA Phase B sparsity is now a five-value sweep
+  on `lambda1 in {0.01, 0.025, 0.05, 0.1, 0.25}`, anchored on
+  the paper value `0.05`. The previous pinned-only treatment is
+  superseded.
+- Section 3.3 DCDI-G starting point extended with:
+  `dcdi_num_train_iter = 300000` hard ceiling with patience-based
+  early stopping (pilot-derived in `docs/08d`),
+  `stop_crit_win = 100`, `train_patience = 5`, MLP architecture
+  (`hidden_units = 16`, `hidden_layers = 2`, leaky-ReLU, Xavier),
+  and an 80/20 DCDI validation split (800 fit, 200 validation)
+  drawn from the `n_train = 1000` observational batch.
+- Section 3.3 DCDI Phase B sparsity is now a five-value local
+  sweep on `reg_coeff in {0.01, 0.03, 0.1, 0.3, 1.0}` anchored
+  on the upstream default `0.1`. The previous "5 values
+  spanning `10^-7` to `10^2`" treatment is superseded.
+- Phase B paragraph in Section 3.3 reads as exactly 5
+  configurations per model in each model's native
+  parameterisation, frozen before execution, with no post-hoc
+  grid expansion allowed after seeing calibration or held-out
+  results.
+- Section 4.2 MMD-sample wording tightened: `mmd_n_samples = 1000`
+  is now a top-level `Configuration` field that enters
+  `configuration_hash`. It must not remain a schema-gate
+  constant. Estimator, bandwidth policy, sensitivity sweep, and
+  negative-MMD handling are unchanged.
+- Section 7 has a new "C-P11 real-budget reapplication policy"
+  subsection. The original C-P11 is scoped as under-budget
+  diagnostic evidence; a C-P11-style sampler-quality diagnostic
+  must be rerun at the real DCDI budget on a 10-node ER2
+  fixture before any held-out evaluation result is interpreted
+  as evidence about DCDI's interventional adequacy.
+- Section 9 tactical-constants block is extended with the
+  corresponding bullets: `n_train = 1000`, DCDI 800/200 split,
+  `mmd_n_samples = 1000`, DAGMA `warm_iter`, `max_iter`, Adam
+  values, DAGMA `lambda1` Phase B grid, DCDI training-budget
+  ceiling, DCDI patience values, DCDI optimiser settings, DCDI
+  MLP architecture, DCDI `reg_coeff` Phase B grid, and the
+  C-P11 reapplication requirement.
+
+### Reason
+
+This entry closes the remaining Category A real-run protocol
+decisions identified by `docs/08c` Sections 4 (DAGMA budget
+choice), 5 (Phase B sparsity policy), 3 (C-P11 reapplication),
+6 (MMD sample-size policy), and 8 (Configuration / hash
+policy), before the runner's `Configuration` extension and the
+Phase A runner work in Commit 8 of
+`docs/08_base_model_selection_plan.md`. `docs/02` now precedes
+the Configuration implementation: any field added to
+`Configuration` must be traceable to a `docs/02` v1.6 bullet.
+
+### What does NOT change
+
+- No source code changed in this commit. No `src/`,
+  `experiments/selection_study/`, or `tests/` edits are made by
+  this `docs/02` amendment; the Configuration extension is the
+  separate next step.
+- No selection criterion change, no evaluation rule change, no
+  metric primitive change. The lexicographic decision rule,
+  disqualification conditions, tie-breaker logic, intervention
+  values, threshold values, threshold robustness triples,
+  calibration/evaluation seed split, timeline, and budget are
+  preserved.
+- DCDI Commit 11 (loss-hook injection) remains paused. This
+  amendment is wrapper-API consumer policy only; it does not
+  reopen loss-hook work.
+- Visual / reporting artefact requirements for notebook
+  inspection are NOT newly amended in `docs/02` v1.6. The
+  existing local-file-authoritative reporting plan recorded in
+  `docs/02` Section 3.4, Section 3.5, and the `docs/08a`
+  schema continues to govern those artefacts. Any future
+  notebook-side visualisation surface is a separate document.
+
+### Consequence
+
+- The runner's `Configuration` extension may now proceed: every
+  new field has a corresponding `docs/02` v1.6 bullet, and the
+  v1.6 amendment is the source of truth for the values that
+  must enter `configuration_hash`.
+- Phase A and Phase B may proceed in parallel with the C-P11
+  real-budget rerun. Held-out evaluation interpretation for
+  DCDI MUST NOT be completed until the C-P11 rerun result is
+  available or `docs/03` records an explicit scoping decision.
+- `docs/02_base_model_selection.md` is now at v1.6. Subsequent
+  amendments use the same change-log discipline.
