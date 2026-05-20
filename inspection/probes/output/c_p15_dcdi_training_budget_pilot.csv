@@ -1,0 +1,3 @@
+mode,seed,graph_seed,validation_data_seed,train_data_seed,n_total,n_fit_samples,n_val_samples,num_train_iter_cap,final_iteration,first_stop_iteration,second_stop_iteration,final_h,graph_status,sampler_status,training_status,runtime_seconds,validation_nll_trajectory_summary
+smoke,101,101,4212,8020,200,160,40,200,200,not_exposed,not_exposed,0.941726565361023,bidirected,unavailable_invalid_graph,max_iter,2.6881886000046507,not_exposed
+smoke,102,102,4213,8021,200,160,40,200,200,not_exposed,not_exposed,0.9417036771774292,bidirected,unavailable_invalid_graph,max_iter,1.976745199994184,not_exposed
