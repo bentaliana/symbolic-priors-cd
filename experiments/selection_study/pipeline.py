@@ -45,20 +45,12 @@ from symbolic_priors_cd.data import (
 from symbolic_priors_cd.metrics import shd, sid_score
 
 
-# Schema-conformance gate constants. These exist only to drive the
-# schema-conformance gate test pipeline; they are not the
-# selection-study constants and have no scientific meaning. SCM
-# generation parameters now live on the Configuration object and
-# enter the pipeline via the resolved-config dict, so they are not
-# duplicated here. Training-budget and MMD-sample gate constants
-# remain module-level until Phase A/B planning resolves them.
-SCHEMA_GATE_N_TRAIN = 64
-SCHEMA_GATE_N_VAL_DCDI = 32
-SCHEMA_GATE_DCDI_N_ITER = 30
-SCHEMA_GATE_DCDI_CONFIG_KWARGS = {
-    "stop_crit_win": 10,
-    "train_batch_size": 8,
-}
+# Schema-gate sampling and training-budget values previously hard-
+# coded here are now read from the resolved Configuration. The
+# pipeline consumes ``n_train``, ``mmd_n_samples``, the DAGMA
+# optimisation fields, and the DCDI training fields directly from
+# ``resolved_config`` so the run record's ``config_resolved``
+# always matches the values the pipeline used.
 
 _SCHEMA_VERSION = 1
 _SHD_REVERSAL_COST = 2
@@ -196,6 +188,34 @@ def _resolve_dcdi_config_class() -> type:
     """Dynamically import the DCDIConfig dataclass."""
     dcdi_module = importlib.import_module(_DCDI_MODULE)
     return getattr(dcdi_module, "DCDIConfig")
+
+
+_DAGMA_MODULE = "symbolic_priors_cd.wrappers.dagma"
+
+
+def _resolve_dagma_config_class() -> type:
+    """Dynamically import the DAGMAConfig dataclass."""
+    dagma_module = importlib.import_module(_DAGMA_MODULE)
+    return getattr(dagma_module, "DAGMAConfig")
+
+
+def _split_train_validation(
+    x_raw: np.ndarray,
+    *,
+    permutation_seed: int,
+    n_val: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministically split a single observational batch.
+
+    Returns ``(x_fit, x_val)`` where ``x_val`` has exactly ``n_val``
+    rows. The permutation is driven by ``permutation_seed`` so
+    repeat calls with the same input produce the same split.
+    """
+    rng = np.random.default_rng(int(permutation_seed))
+    permutation = rng.permutation(x_raw.shape[0])
+    val_indices = permutation[:int(n_val)]
+    fit_indices = permutation[int(n_val):]
+    return x_raw[fit_indices], x_raw[val_indices]
 
 
 # ---------------------------------------------------------------------------
@@ -479,24 +499,45 @@ def run_single_fit(
             float(scm_weight_range_value[1]),
         ),
     )
+
+    # Observational sample count for training is read from the
+    # resolved configuration, not from a module constant. The
+    # Configuration validation guarantees n_train > 0.
+    n_train_value = int(resolved_config["n_train"])
     x_train_raw = sample_observational(
-        scm, n_samples=SCHEMA_GATE_N_TRAIN, rng=entry.train_data_seed
+        scm, n_samples=n_train_value, rng=entry.train_data_seed
     )
 
-    # Sample validation data only when the candidate uses one. The
-    # validation_data_seed presence was validated upfront.
+    # DCDI splits its validation set from the same observational
+    # batch via a deterministic permutation seeded by
+    # validation_data_seed. DAGMA does not use validation data.
     x_val_raw: Optional[np.ndarray] = None
+    x_fit_raw = x_train_raw
     if entry.model == "dcdi":
-        x_val_raw = sample_observational(
-            scm,
-            n_samples=SCHEMA_GATE_N_VAL_DCDI,
-            rng=entry.validation_data_seed,
+        n_val_dcdi_value = resolved_config["n_val_dcdi"]
+        if n_val_dcdi_value is None:
+            raise ValueError(
+                "DCDI configuration requires n_val_dcdi in "
+                "config_resolved; got None"
+            )
+        validation_seed = entry.validation_data_seed
+        if validation_seed is None:
+            raise ValueError(
+                "DCDI manifest entry has validation_data_seed=None; "
+                "expected a non-negative integer"
+            )
+        x_fit_raw, x_val_raw = _split_train_validation(
+            x_train_raw,
+            permutation_seed=int(validation_seed),
+            n_val=int(n_val_dcdi_value),
         )
 
-    # Preprocess: fit on training data only and reuse for validation.
+    # Preprocess: fit on the fit batch only and reuse the same
+    # preprocessor for the validation batch and for any later
+    # raw-to-model frame conversions.
     preprocessor = _make_preprocessor(entry.condition)
-    preprocessor.fit(x_train_raw)
-    x_train_model = preprocessor.transform(x_train_raw)
+    preprocessor.fit(x_fit_raw)
+    x_fit_model = preprocessor.transform(x_fit_raw)
     x_val_model = (
         preprocessor.transform(x_val_raw) if x_val_raw is not None else None
     )
@@ -511,11 +552,24 @@ def run_single_fit(
 
     t_start = time.perf_counter()
     if entry.model == "dagma":
+        # DAGMA optimisation values come from Configuration; the
+        # other DAGMAConfig fields (T, lambda1, s, mu_init,
+        # mu_factor, w_threshold_internal, project_threshold,
+        # h_diagnostic_threshold) are not top-level Configuration
+        # fields and stay at their DAGMAConfig defaults.
+        dagma_config_cls = _resolve_dagma_config_class()
+        dagma_config = dagma_config_cls(
+            warm_iter=int(resolved_config["dagma_warm_iter"]),
+            max_iter=int(resolved_config["dagma_max_iter"]),
+            lr=float(resolved_config["dagma_lr"]),
+            beta_1=float(resolved_config["dagma_beta_1"]),
+            beta_2=float(resolved_config["dagma_beta_2"]),
+        )
         wrapper.fit(
-            x_train_model,
+            x_fit_model,
             preprocessor=preprocessor,
             seed=entry.train_data_seed,
-            config=None,
+            config=dagma_config,
         )
         # DAGMA does not call torch / numpy / dagma global seed setters.
     elif entry.model == "dcdi":
@@ -523,13 +577,25 @@ def run_single_fit(
         # validated value is held in dcdi_fit_seed.
         assert dcdi_fit_seed is not None
         dcdi_config_cls = _resolve_dcdi_config_class()
-        dcdi_config = dcdi_config_cls(**SCHEMA_GATE_DCDI_CONFIG_KWARGS)
+        dcdi_config = dcdi_config_cls(
+            h_threshold=float(resolved_config["dcdi_h_threshold"]),
+            lr=float(resolved_config["dcdi_lr"]),
+            train_batch_size=int(
+                resolved_config["dcdi_train_batch_size"]
+            ),
+            train_patience=int(
+                resolved_config["dcdi_train_patience"]
+            ),
+            stop_crit_win=int(resolved_config["dcdi_stop_crit_win"]),
+            num_layers=int(resolved_config["dcdi_hidden_layers"]),
+            hid_dim=int(resolved_config["dcdi_hidden_units"]),
+        )
         wrapper.fit(
-            x_train_model,
+            x_fit_model,
             X_val=x_val_model,
             preprocessor=preprocessor,
             seed=dcdi_fit_seed,
-            n_iter=SCHEMA_GATE_DCDI_N_ITER,
+            n_iter=int(resolved_config["dcdi_num_train_iter"]),
             config=dcdi_config,
         )
         seed_torch_recorded = dcdi_fit_seed
@@ -599,6 +665,7 @@ def run_single_fit(
         intervention_set=list(resolved_config.get("intervention_set", [])),
         per_intervention_seeds_map=per_intervention_seeds_map,
         preprocessor=preprocessor,
+        n_samples=int(resolved_config["mmd_n_samples"]),
     )
     intervention_records = mmd_result["records"]
     mmd_primary = mmd_result["mmd_primary"]

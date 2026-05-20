@@ -54,8 +54,8 @@ _PHASE_B = PhaseBConfiguration(
 
 
 _DAGMA_SCHEMA_GATE_FIELDS = dict(
-    dagma_warm_iter=30000,
-    dagma_max_iter=60000,
+    dagma_warm_iter=20000,
+    dagma_max_iter=70000,
     dagma_lr=3e-4,
     dagma_beta_1=0.99,
     dagma_beta_2=0.999,

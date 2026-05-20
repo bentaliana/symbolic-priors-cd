@@ -30,10 +30,6 @@ from experiments.selection_study.loader import load_run
 from experiments.selection_study.pipeline import (
     DcdiSeedMismatchError,
     InvalidGraphForSchemaGateError,
-    SCHEMA_GATE_DCDI_CONFIG_KWARGS,
-    SCHEMA_GATE_DCDI_N_ITER,
-    SCHEMA_GATE_N_TRAIN,
-    SCHEMA_GATE_N_VAL_DCDI,
     resolve_wrapper,
     run_single_fit,
 )
@@ -131,8 +127,8 @@ _PHASE_B = PhaseBConfiguration(
 
 
 _DAGMA_SCHEMA_GATE_FIELDS = dict(
-    dagma_warm_iter=30000,
-    dagma_max_iter=60000,
+    dagma_warm_iter=20000,
+    dagma_max_iter=70000,
     dagma_lr=3e-4,
     dagma_beta_1=0.99,
     dagma_beta_2=0.999,
@@ -854,3 +850,294 @@ def test_invalid_graph_stop_leaves_empty_run_directory_dcdi(tmp_path) -> None:
     assert contents == [], (
         f"invalid-graph stop left artefacts in run_dir: {contents!r}"
     )
+
+
+
+# ---------------------------------------------------------------------------
+# Configuration-driven pipeline behaviour
+# ---------------------------------------------------------------------------
+
+
+def _make_dagma_config_with(**overrides) -> Configuration:
+    """Return a DAGMA Configuration with the listed field overrides."""
+    return Configuration(
+        model="dagma",
+        condition="centred_only",
+        seed_torch=None,
+        seed_numpy=None,
+        seed_dagma=None,
+        seed_populations=(("calibration", (10,)),),
+        intervention_set=(_INTERVENTION_A, _INTERVENTION_B),
+        phase_b_configurations=(_PHASE_B,),
+        threshold_robustness_triple=(0.2, 0.3, 0.4),
+        wrapper_api_reference=(
+            "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+        ),
+        seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
+        configuration_hash_algorithm=CONFIGURATION_HASH_ALGORITHM_NAME,
+        **{**_DAGMA_SCHEMA_GATE_FIELDS, **overrides},
+    )
+
+
+def _make_dcdi_config_with(**overrides) -> Configuration:
+    """Return a DCDI Configuration with the listed field overrides."""
+    return Configuration(
+        model="dcdi",
+        condition="centred_only",
+        seed_torch=42,
+        seed_numpy=42,
+        seed_dagma=None,
+        seed_populations=(("calibration", (10,)),),
+        intervention_set=(_INTERVENTION_A, _INTERVENTION_B),
+        phase_b_configurations=(_PHASE_B,),
+        threshold_robustness_triple=(0.4, 0.5, 0.6),
+        wrapper_api_reference=(
+            "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper"
+        ),
+        seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
+        configuration_hash_algorithm=CONFIGURATION_HASH_ALGORITHM_NAME,
+        **{**_DCDI_SCHEMA_GATE_FIELDS, **overrides},
+    )
+
+
+def test_pipeline_uses_config_n_train_for_observational_sampling(
+    tmp_path, monkeypatch,
+) -> None:
+    """``run_single_fit`` requests ``config.n_train`` SCM samples."""
+    import experiments.selection_study.pipeline as pipeline_module
+
+    config = _make_dagma_config_with(n_train=37)
+    manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
+    captured: list[int] = []
+    original_sample = pipeline_module.sample_observational
+
+    def spy_sample(*args, **kwargs):
+        captured.append(int(kwargs.get("n_samples")))
+        return original_sample(*args, **kwargs)
+
+    monkeypatch.setattr(
+        pipeline_module, "sample_observational", spy_sample
+    )
+    run_single_fit(manifest, 0, run_root=tmp_path / "runs")
+    assert captured, "sample_observational was not invoked"
+    assert captured[0] == 37, (
+        f"first observational draw used {captured[0]}, expected 37"
+    )
+
+
+def test_pipeline_passes_config_mmd_n_samples_into_mmd(
+    tmp_path, monkeypatch,
+) -> None:
+    """The MMD call receives ``config.mmd_n_samples`` as ``n_samples``."""
+    import experiments.selection_study.pipeline as pipeline_module
+
+    config = _make_dagma_config_with(mmd_n_samples=23)
+    manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
+    captured: list[int] = []
+    original = pipeline_module.compute_per_intervention_records
+
+    def spy(*args, **kwargs):
+        captured.append(int(kwargs.get("n_samples")))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "compute_per_intervention_records",
+        spy,
+    )
+    run_single_fit(manifest, 0, run_root=tmp_path / "runs")
+    assert captured == [23], (
+        f"compute_per_intervention_records received n_samples={captured!r}"
+    )
+
+
+def test_pipeline_constructs_dagma_config_from_configuration(
+    tmp_path, monkeypatch,
+) -> None:
+    """DAGMAConfig is built from the resolved DAGMA-only fields."""
+    import experiments.selection_study.pipeline as pipeline_module
+
+    config = _make_dagma_config_with(
+        dagma_warm_iter=25000,
+        dagma_max_iter=65000,
+        dagma_lr=4e-4,
+        dagma_beta_1=0.95,
+        dagma_beta_2=0.995,
+    )
+    manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
+    captured: list[dict] = []
+    real_resolver = pipeline_module._resolve_dagma_config_class
+
+    def spy_resolver():
+        cls = real_resolver()
+
+        class _SpyDAGMAConfig(cls):
+            def __init__(self, *args, **kwargs):
+                captured.append(dict(kwargs))
+                super().__init__(*args, **kwargs)
+
+        return _SpyDAGMAConfig
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "_resolve_dagma_config_class",
+        spy_resolver,
+    )
+    run_single_fit(manifest, 0, run_root=tmp_path / "runs")
+    assert len(captured) == 1, (
+        f"DAGMAConfig was instantiated {len(captured)} times"
+    )
+    kwargs = captured[0]
+    assert kwargs["warm_iter"] == 25000
+    assert kwargs["max_iter"] == 65000
+    assert kwargs["lr"] == 4e-4
+    assert kwargs["beta_1"] == 0.95
+    assert kwargs["beta_2"] == 0.995
+
+
+def test_pipeline_passes_dcdi_fields_to_fit_and_config(
+    tmp_path, monkeypatch,
+) -> None:
+    """DCDIWrapper.fit and DCDIConfig receive every DCDI-only field."""
+    import experiments.selection_study.pipeline as pipeline_module
+
+    config = _make_dcdi_config_with()
+    manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
+
+    dcdi_config_kwargs: list[dict] = []
+    fit_kwargs: list[dict] = []
+    real_resolver = pipeline_module._resolve_dcdi_config_class
+    real_resolve_wrapper = pipeline_module.resolve_wrapper
+
+    def spy_dcdi_config_resolver():
+        cls = real_resolver()
+
+        class _SpyDCDIConfig(cls):
+            def __init__(self, *args, **kwargs):
+                dcdi_config_kwargs.append(dict(kwargs))
+                super().__init__(*args, **kwargs)
+
+        return _SpyDCDIConfig
+
+    def spy_resolve_wrapper(reference):
+        wrapper_cls = real_resolve_wrapper(reference)
+        original_fit = wrapper_cls.fit
+
+        def fit(self, X_train, **kwargs):
+            fit_kwargs.append(dict(kwargs))
+            return original_fit(self, X_train, **kwargs)
+
+        return type(
+            "_SpyDCDIWrapper",
+            (wrapper_cls,),
+            {"fit": fit},
+        )
+
+    monkeypatch.setattr(
+        pipeline_module,
+        "_resolve_dcdi_config_class",
+        spy_dcdi_config_resolver,
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "resolve_wrapper",
+        spy_resolve_wrapper,
+    )
+    try:
+        run_single_fit(manifest, 0, run_root=tmp_path / "runs")
+    except InvalidGraphForSchemaGateError:
+        pass
+
+    assert len(dcdi_config_kwargs) == 1
+    dcdi_kwargs = dcdi_config_kwargs[0]
+    assert dcdi_kwargs["h_threshold"] == config.dcdi_h_threshold
+    assert dcdi_kwargs["lr"] == config.dcdi_lr
+    assert dcdi_kwargs["train_batch_size"] == config.dcdi_train_batch_size
+    assert dcdi_kwargs["train_patience"] == config.dcdi_train_patience
+    assert dcdi_kwargs["stop_crit_win"] == config.dcdi_stop_crit_win
+    assert dcdi_kwargs["num_layers"] == config.dcdi_hidden_layers
+    assert dcdi_kwargs["hid_dim"] == config.dcdi_hidden_units
+
+    assert len(fit_kwargs) == 1
+    fk = fit_kwargs[0]
+    assert fk["n_iter"] == config.dcdi_num_train_iter
+
+
+def test_dcdi_validation_is_split_from_n_train_observational_batch(
+    tmp_path, monkeypatch,
+) -> None:
+    """DCDI draws exactly one ``n_train`` SCM batch and splits it."""
+    import experiments.selection_study.pipeline as pipeline_module
+
+    config = _make_dcdi_config_with(n_train=80, n_val_dcdi=20)
+    manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
+    captured: list[int] = []
+    original_sample = pipeline_module.sample_observational
+
+    def spy_sample(*args, **kwargs):
+        captured.append(int(kwargs.get("n_samples")))
+        return original_sample(*args, **kwargs)
+
+    monkeypatch.setattr(
+        pipeline_module, "sample_observational", spy_sample
+    )
+    try:
+        run_single_fit(manifest, 0, run_root=tmp_path / "runs")
+    except InvalidGraphForSchemaGateError:
+        pass
+    assert captured == [80], (
+        "DCDI pipeline drew more than one observational batch: "
+        f"calls={captured!r}"
+    )
+
+
+def test_dcdi_split_helper_partitions_rows_deterministically() -> None:
+    """``_split_train_validation`` splits a batch by deterministic perm."""
+    import experiments.selection_study.pipeline as pipeline_module
+
+    x_raw = np.arange(20, dtype=np.float64).reshape(10, 2)
+    fit_a, val_a = pipeline_module._split_train_validation(
+        x_raw, permutation_seed=7, n_val=3
+    )
+    fit_b, val_b = pipeline_module._split_train_validation(
+        x_raw, permutation_seed=7, n_val=3
+    )
+    assert fit_a.shape == (7, 2)
+    assert val_a.shape == (3, 2)
+    assert np.array_equal(fit_a, fit_b)
+    assert np.array_equal(val_a, val_b)
+    fit_c, val_c = pipeline_module._split_train_validation(
+        x_raw, permutation_seed=8, n_val=3
+    )
+    assert not (
+        np.array_equal(fit_a, fit_c) and np.array_equal(val_a, val_c)
+    )
+    union = np.concatenate([fit_a, val_a], axis=0)
+    assert union.shape == x_raw.shape
+    sorted_union = union[np.argsort(union[:, 0])]
+    assert np.array_equal(sorted_union, x_raw)
+
+
+def test_pipeline_run_json_config_resolved_matches_configuration(
+    tmp_path,
+) -> None:
+    """``config_resolved`` in run.json equals the Configuration values."""
+    config = _make_dagma_config_with(
+        n_train=33,
+        mmd_n_samples=27,
+        dagma_warm_iter=15000,
+        dagma_max_iter=55000,
+    )
+    manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
+    json_path = run_single_fit(
+        manifest, 0, run_root=tmp_path / "runs"
+    )
+    record = load_run(json_path).data
+    resolved = record["config_resolved"]
+    assert resolved["n_train"] == 33
+    assert resolved["mmd_n_samples"] == 27
+    assert resolved["dagma_warm_iter"] == 15000
+    assert resolved["dagma_max_iter"] == 55000
+    assert resolved["dagma_lr"] == config.dagma_lr
+    assert resolved["dagma_beta_1"] == config.dagma_beta_1
+    assert resolved["dagma_beta_2"] == config.dagma_beta_2

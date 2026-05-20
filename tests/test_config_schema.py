@@ -40,12 +40,13 @@ from experiments.selection_study.config import (
 # --------------------------------------------------------------------------- #
 
 
-# Schema-gate-honest values: DAGMA fixtures use the current DAGMA
-# wrapper defaults; DCDI fixtures use the schema-gate constants
-# already consumed by the toy pipeline.
+# Schema-gate-honest values. DAGMA fixtures use the docs/02 v1.6
+# paper optimisation values that the pipeline now passes through;
+# DCDI fixtures use the toy values the schema-gate pipeline
+# consumes.
 _DAGMA_SCHEMA_GATE_FIELDS = dict(
-    dagma_warm_iter=30000,
-    dagma_max_iter=60000,
+    dagma_warm_iter=20000,
+    dagma_max_iter=70000,
     dagma_lr=3e-4,
     dagma_beta_1=0.99,
     dagma_beta_2=0.999,
@@ -788,8 +789,8 @@ def test_load_config_rejects_seed_populations_with_bool_seed(
         "dcdi_h_threshold": None,
         "dcdi_hidden_units": None,
         "dcdi_hidden_layers": None,
-        "dagma_warm_iter": 30000,
-        "dagma_max_iter": 60000,
+        "dagma_warm_iter": 20000,
+        "dagma_max_iter": 70000,
         "dagma_lr": 3e-4,
         "dagma_beta_1": 0.99,
         "dagma_beta_2": 0.999,

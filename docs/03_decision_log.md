@@ -1863,3 +1863,104 @@ consumer behaviour.
   bool-as-int rejection, zero/negative rejection,
   `n_val_dcdi < n_train`, model-conditional presence, and a
   round-trip preservation check for both DAGMA and DCDI.
+
+---
+
+## 20/05/2026 -- Pipeline consumes Configuration real-run fields
+
+### Decision
+
+`experiments/selection_study/pipeline.py:run_single_fit` is
+migrated to read real-run constants from the resolved
+Configuration instead of from module-level schema-gate constants.
+Specifically:
+
+- `config.n_train` is used for the observational sample count.
+- `config.mmd_n_samples` is passed through to
+  `compute_per_intervention_records` as the per-intervention
+  MMD sample count.
+- DAGMA fits build `DAGMAConfig` from
+  `config.dagma_warm_iter`, `config.dagma_max_iter`,
+  `config.dagma_lr`, `config.dagma_beta_1`, and
+  `config.dagma_beta_2`. The remaining `DAGMAConfig` fields
+  (`T`, `lambda1`, `s`, `mu_init`, `mu_factor`,
+  `w_threshold_internal`, `project_threshold`,
+  `h_diagnostic_threshold`) are not top-level Configuration
+  fields and continue to use their `DAGMAConfig` defaults.
+- DCDI fits build `DCDIConfig` from
+  `config.dcdi_h_threshold`, `config.dcdi_lr`,
+  `config.dcdi_train_batch_size`, `config.dcdi_train_patience`,
+  `config.dcdi_stop_crit_win`, `config.dcdi_hidden_layers`
+  (`DCDIConfig.num_layers`), and `config.dcdi_hidden_units`
+  (`DCDIConfig.hid_dim`). The DCDI fit also receives
+  `n_iter = config.dcdi_num_train_iter` and
+  `X_val` constructed via the new split policy.
+
+DCDI validation data is drawn from the same `config.n_train`
+observational batch via a deterministic permutation seeded by
+`validation_data_seed`. The pipeline no longer issues a separate
+`sample_observational` call to draw an independent DCDI
+validation set. DAGMA continues to use the full batch for
+fitting and does not consume `validation_data_seed`.
+
+The module-level constants `SCHEMA_GATE_N_TRAIN`,
+`SCHEMA_GATE_N_VAL_DCDI`, `SCHEMA_GATE_DCDI_N_ITER`, and
+`SCHEMA_GATE_DCDI_CONFIG_KWARGS` are removed from
+`pipeline.py`. Their toy values now live on the Configuration
+fixtures used by schema-gate tests, so `config_resolved` always
+matches what the pipeline actually consumed.
+
+DAGMA schema-gate fixtures are updated to use the docs/02 v1.6
+paper-aligned optimisation values (`warm_iter = 20000`,
+`max_iter = 70000`, `lr = 3e-4`, `beta_1 = 0.99`,
+`beta_2 = 0.999`). The DAGMA toy run still produces a
+schema-conforming run.json under those values; no silent
+revert to the library defaults occurred.
+
+### Reason
+
+`docs/02` v1.6 froze the real-run constants and the Configuration
+extension committed earlier today exposed them as top-level
+fields. This commit closes the loop so the pipeline reads the
+authoritative values from the Configuration rather than from
+hidden module constants. The DCDI validation-split policy
+aligns with `docs/02` v1.6 Section 3.3 ("DCDI validation split:
+from the `n_train = 1000` observational sample, DCDI uses an
+80/20 split into 800 fit samples and 200 validation samples;
+no additional validation data is drawn").
+
+### What does NOT change
+
+- No source change outside `experiments/selection_study/pipeline.py`,
+  the four test files that construct Configuration fixtures, and
+  `docs/03_decision_log.md`. No wrapper, metric, notebook,
+  configuration file, results-directory, or dependency-manifest
+  edit.
+- No selection criterion, evaluation rule, wrapper algorithm,
+  or metric primitive changed.
+- `docs/02` is not edited by this commit.
+- Phase A reproduction-pass orchestration is NOT implemented in
+  this commit; the schema-gate toy fits remain the only
+  pipeline-driven runs at this point. Phase A precondition
+  enforcement and the Phase A runner remain separate follow-ups.
+- The C-P11 real-budget reapplication remains required before
+  held-out interpretation of DCDI per `docs/02` v1.6
+  Section 7; this commit does not address it.
+
+### Consequence
+
+- The schema-gate pipeline keeps working under toy
+  Configuration values; existing pipeline tests still pass.
+- Real Phase A/B Configuration JSON files will need to specify
+  the docs/02 v1.6 values for every new field; the pipeline
+  will then consume them directly from `resolved_config`.
+- New tests pin the consumer behaviour: `n_train` flows into
+  observational sampling, `mmd_n_samples` flows into the MMD
+  call, DAGMA-only fields flow into `DAGMAConfig`, DCDI-only
+  fields flow into `DCDIConfig` and `DCDIWrapper.fit`, the
+  DCDI validation split is a single-batch split, and
+  `config_resolved` in `run.json` matches the Configuration
+  values used.
+- Full pytest suite remains green: 727 passed, 2 pre-existing
+  RuntimeWarnings unrelated to this work (count up from 720,
+  +7 new pipeline tests).
