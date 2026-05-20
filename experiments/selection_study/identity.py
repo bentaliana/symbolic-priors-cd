@@ -10,12 +10,10 @@ The run_id format is
 
     "<model>__<condition>__<seed_population>__seed<seed_replicate_index>__cfg<configuration_hash>"
 
-per ``docs/08a_experiment_tracking_and_results_schema.md`` Section 4.
 The directory layout is
 
     <base_dir>/<model>/<condition>/<seed_population>/seed<seed_replicate_index>/<configuration_hash_prefix>/
 
-per ``docs/08a_experiment_tracking_and_results_schema.md`` Section 3,
 where ``configuration_hash_prefix`` is the first 12 characters of the
 full 64-character ``configuration_hash`` digest. The full digest is
 the canonical identifier; the 12-character prefix is only the

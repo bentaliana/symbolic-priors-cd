@@ -53,8 +53,12 @@ def _valid_identity_kwargs(**overrides: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def test_run_id_format_matches_docs_08a_section_4() -> None:
-    """``derive_run_id`` produces the exact format from docs/08a Section 4."""
+def test_run_id_format_matches_canonical_layout() -> None:
+    """``derive_run_id`` joins identity components with ``__`` separators.
+
+    The canonical layout is
+    ``<model>__<condition>__<seed_population>__seed<idx>__cfg<hash>``.
+    """
     run_id = derive_run_id(**_valid_identity_kwargs())
     expected = (
         f"dagma__centred_only__calibration__seed0__cfg{_VALID_HASH}"

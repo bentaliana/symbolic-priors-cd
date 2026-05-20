@@ -146,7 +146,7 @@ class Manifest:
         Full 64-character SHA-256 digest of the resolved configuration.
     schema_version : int
         Version integer for the manifest schema. The initial value is
-        ``1`` per docs/08a Section 5.
+        ``1``.
     seed_derivation_rule : str
         The stable derivation-rule name carried from the configuration.
     configuration_hash_algorithm : str

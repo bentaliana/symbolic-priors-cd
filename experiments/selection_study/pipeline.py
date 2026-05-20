@@ -45,12 +45,12 @@ from symbolic_priors_cd.data import (
 from symbolic_priors_cd.metrics import shd, sid_score
 
 
-# Schema-gate sampling and training-budget values previously hard-
-# coded here are now read from the resolved Configuration. The
-# pipeline consumes ``n_train``, ``mmd_n_samples``, the DAGMA
-# optimisation fields, and the DCDI training fields directly from
-# ``resolved_config`` so the run record's ``config_resolved``
-# always matches the values the pipeline used.
+# Sampling and training-budget values are read from the resolved
+# Configuration. The pipeline consumes ``n_train``,
+# ``mmd_n_samples``, the DAGMA optimisation fields, and the DCDI
+# training fields directly from ``resolved_config`` so the run
+# record's ``config_resolved`` always matches the values the
+# pipeline used.
 
 _SCHEMA_VERSION = 1
 _SHD_REVERSAL_COST = 2

@@ -1,9 +1,9 @@
 """Tests for the DCDI structural-mask context manager.
 
 Covers in-context mask enforcement, restoration after normal exit and
-after an induced exception, the C-P9 structural-masking invariant
-(excluded parents do not influence a target's density parameters while
-included parents do), and preservation of detached continuous-edge
+after an induced exception, the structural-masking invariant that
+excluded parents do not influence a target's density parameters while
+included parents do, and preservation of detached continuous-edge
 snapshots across an in-context exception.
 """
 
@@ -39,7 +39,7 @@ def _build_model_and_mask():
 
     The chosen mask has edges 0->1 and 0->2, no other edges. For target 2,
     parent 0 is included (mask[0, 2] = True) and parent 1 is excluded
-    (mask[1, 2] = False). This matches the structure used by the C-P9 probe.
+    (mask[1, 2] = False).
     """
     torch.manual_seed(0)
     model = make_dcdi_model(num_vars=3, num_layers=2, hid_dim=8)
@@ -135,12 +135,12 @@ def test_restoration_after_induced_exception():
 
 
 # ---------------------------------------------------------------------------
-# C-P9 invariant: structural masking through adjacency + log_alpha
+# Structural-masking invariant: adjacency + log_alpha
 # ---------------------------------------------------------------------------
 
 
-def test_cp9_structural_masking():
-    """Reproduce the C-P9 invariant inside the structural-mask context.
+def test_structural_masking_excluded_parents_do_not_influence_target():
+    """Excluded parents do not influence a target's density parameters.
 
     With parent 1 excluded for target 2, varying column 1 of the input
     batch by a large amount leaves the target's density parameters

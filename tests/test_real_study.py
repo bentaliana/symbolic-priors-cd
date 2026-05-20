@@ -45,7 +45,7 @@ _INTERVENTION_B = InterventionSpec(
 # The guard-construction tests use a placeholder reproduction
 # seed because ``assert_real_study_constants`` only requires a
 # non-empty reproduction population. The on-disk Phase A
-# config-file tests below pin the docs/02 v1.7 reproduction seeds
+# config-file tests below pin the frozen reproduction seeds
 # (101, 102, 103).
 _REPRODUCTION_SEEDS: tuple[int, ...] = (1,)
 
@@ -138,13 +138,13 @@ def _phase_a_dcdi_kwargs() -> dict[str, Any]:
 
 
 def test_valid_dagma_phase_a_config_passes_guard() -> None:
-    """A DAGMA Configuration with docs/02 v1.6 values passes."""
+    """A DAGMA Configuration carrying the Phase A real-study values passes."""
     config = Configuration(**_phase_a_dagma_kwargs())
     assert_real_study_constants(config, stage="phase_a")
 
 
 def test_valid_dcdi_phase_a_config_passes_guard() -> None:
-    """A DCDI Configuration with docs/02 v1.6 values passes."""
+    """A DCDI Configuration carrying the Phase A real-study values passes."""
     config = Configuration(**_phase_a_dcdi_kwargs())
     assert_real_study_constants(config, stage="phase_a")
 
@@ -181,7 +181,7 @@ def test_shared_field_toy_value_is_rejected_for_phase_a(
 
 
 def test_weight_magnitude_range_off_anchor_is_rejected() -> None:
-    """A non-docs/02 weight magnitude range is rejected for Phase A."""
+    """A weight magnitude range off the Phase A anchor is rejected."""
     kwargs = {
         **_phase_a_dagma_kwargs(),
         "weight_magnitude_range": (0.5, 1.5),
@@ -427,7 +427,7 @@ def test_phase_a_dcdi_config_passes_real_study_guard() -> None:
 
 
 def test_phase_a_dagma_config_carries_reproduction_seeds() -> None:
-    """The DAGMA Phase A config seeds match the docs/02 v1.7 freeze."""
+    """The DAGMA Phase A config carries the frozen reproduction seeds."""
     config = load_config(_DAGMA_PATH)
     pops = dict(config.seed_populations)
     assert "reproduction" in pops
@@ -437,7 +437,7 @@ def test_phase_a_dagma_config_carries_reproduction_seeds() -> None:
 
 
 def test_phase_a_dcdi_config_carries_reproduction_seeds() -> None:
-    """The DCDI Phase A config seeds match the docs/02 v1.7 freeze."""
+    """The DCDI Phase A config carries the frozen reproduction seeds."""
     config = load_config(_DCDI_PATH)
     pops = dict(config.seed_populations)
     assert "reproduction" in pops
@@ -642,10 +642,10 @@ def test_phase_a_dcdi_config_has_empty_phase_b_configurations() -> None:
 def test_phase_a_dagma_config_seed_fields_are_all_none() -> None:
     """DAGMA Phase A has null seed_torch / seed_numpy / seed_dagma.
 
-    DAGMA is verified deterministic-by-construction per the docs/02
-    v1.5 seed-discipline decision, so the corresponding global RNG
-    setters are never called and the seed fields in the
-    Configuration are null.
+    DAGMA does not call torch.manual_seed, np.random.seed, or
+    dagma.utils.set_random_seed, so null seed fields are the
+    correct representation of the fit's deterministic-by-
+    construction behaviour.
     """
     config = load_config(_DAGMA_PATH)
     assert config.seed_torch is None
@@ -656,9 +656,9 @@ def test_phase_a_dagma_config_seed_fields_are_all_none() -> None:
 def test_phase_a_dcdi_config_uses_fixed_fit_seed_42() -> None:
     """DCDI Phase A carries seed_torch = seed_numpy = 42, seed_dagma = None.
 
-    DCDI requires matched non-null seed_torch / seed_numpy per the
-    docs/02 v1.5 seed-discipline decision; the scalar 42 is an
-    explicit Phase A config value that enters configuration_hash.
+    DCDI requires matched non-null seed_torch / seed_numpy at fit
+    time; the scalar 42 is an explicit Phase A config value that
+    enters configuration_hash.
     """
     config = load_config(_DCDI_PATH)
     assert config.seed_torch == 42

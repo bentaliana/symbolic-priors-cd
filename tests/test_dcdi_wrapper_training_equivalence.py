@@ -502,7 +502,8 @@ def test_lagrangian_schedule_equivalence():
     assert result_w.mu_update_iters == [400], (
         f"Observed mu_update_iters = {result_w.mu_update_iters} "
         "differs from the calibration record [400]; "
-        "re-run the C-P10 probe and update the calibration document."
+        "re-run the equivalence calibration probe and update the "
+        "calibration document."
     )
 
 

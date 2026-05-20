@@ -40,10 +40,9 @@ from experiments.selection_study.config import (
 # --------------------------------------------------------------------------- #
 
 
-# Schema-gate-honest values. DAGMA fixtures use the docs/02 v1.6
-# paper optimisation values that the pipeline now passes through;
-# DCDI fixtures use the toy values the schema-gate pipeline
-# consumes.
+# Schema-gate-honest values. DAGMA fixtures use the paper-aligned
+# optimisation values the pipeline passes through; DCDI fixtures
+# use the toy values the schema-gate pipeline consumes.
 _DAGMA_SCHEMA_GATE_FIELDS = dict(
     dagma_warm_iter=20000,
     dagma_max_iter=70000,

@@ -495,10 +495,11 @@ def test_sampler_status_is_available_for_any_valid_dag_post_fit() -> None:
     weights, asserts that ``sampler_status`` becomes ``"available"``,
     and confirms the sampler is mechanically callable.
 
-    Regression intent: protect against the C-P11 scenario, in which
-    a structure-quality failure (the learned graph missed strong
-    true edges under a valid thresholded DAG with a callable
-    sampling API) would otherwise be hidden behind a status flag.
+    Regression intent: protect against the case where a learned
+    graph missed strong true edges under a valid thresholded DAG
+    with a callable sampling API; that structure-quality failure
+    must remain visible in SHD / SID / MMD and must not be hidden
+    behind a sampler_status flag.
     """
     wrapper = _fit_tiny_wrapper(seed=0, n_iter=20)
     _force_valid_dag_state(wrapper)
