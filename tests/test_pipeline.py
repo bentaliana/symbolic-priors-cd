@@ -130,6 +130,26 @@ _PHASE_B = PhaseBConfiguration(
 )
 
 
+_DAGMA_SCHEMA_GATE_FIELDS = dict(
+    dagma_warm_iter=30000,
+    dagma_max_iter=60000,
+    dagma_lr=3e-4,
+    dagma_beta_1=0.99,
+    dagma_beta_2=0.999,
+)
+_DCDI_SCHEMA_GATE_FIELDS = dict(
+    n_val_dcdi=32,
+    dcdi_num_train_iter=30,
+    dcdi_stop_crit_win=10,
+    dcdi_train_patience=5,
+    dcdi_train_batch_size=8,
+    dcdi_lr=1e-3,
+    dcdi_h_threshold=1e-8,
+    dcdi_hidden_units=16,
+    dcdi_hidden_layers=2,
+)
+
+
 def _make_dagma_config(
     *,
     wrapper_reference: str = "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper",
@@ -150,6 +170,7 @@ def _make_dagma_config(
         wrapper_api_reference=wrapper_reference,
         seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
         configuration_hash_algorithm=CONFIGURATION_HASH_ALGORITHM_NAME,
+        **_DAGMA_SCHEMA_GATE_FIELDS,
     )
 
 
@@ -175,6 +196,7 @@ def _make_dcdi_config(
         wrapper_api_reference=wrapper_reference,
         seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
         configuration_hash_algorithm=CONFIGURATION_HASH_ALGORITHM_NAME,
+        **_DCDI_SCHEMA_GATE_FIELDS,
     )
 
 

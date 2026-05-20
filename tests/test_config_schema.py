@@ -40,6 +40,29 @@ from experiments.selection_study.config import (
 # --------------------------------------------------------------------------- #
 
 
+# Schema-gate-honest values: DAGMA fixtures use the current DAGMA
+# wrapper defaults; DCDI fixtures use the schema-gate constants
+# already consumed by the toy pipeline.
+_DAGMA_SCHEMA_GATE_FIELDS = dict(
+    dagma_warm_iter=30000,
+    dagma_max_iter=60000,
+    dagma_lr=3e-4,
+    dagma_beta_1=0.99,
+    dagma_beta_2=0.999,
+)
+_DCDI_SCHEMA_GATE_FIELDS = dict(
+    n_val_dcdi=32,
+    dcdi_num_train_iter=30,
+    dcdi_stop_crit_win=10,
+    dcdi_train_patience=5,
+    dcdi_train_batch_size=8,
+    dcdi_lr=1e-3,
+    dcdi_h_threshold=1e-8,
+    dcdi_hidden_units=16,
+    dcdi_hidden_layers=2,
+)
+
+
 def _make_dagma_configuration() -> Configuration:
     """Return a representative DAGMA Configuration."""
     return Configuration(
@@ -79,6 +102,7 @@ def _make_dagma_configuration() -> Configuration:
         wrapper_api_reference=(
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
         ),
+        **_DAGMA_SCHEMA_GATE_FIELDS,
     )
 
 
@@ -112,6 +136,7 @@ def _make_dcdi_configuration() -> Configuration:
         wrapper_api_reference=(
             "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper"
         ),
+        **_DCDI_SCHEMA_GATE_FIELDS,
     )
 
 
@@ -191,6 +216,7 @@ def test_configuration_hash_changes_when_resolved_config_changes() -> None:
         phase_b_configurations=base.phase_b_configurations,
         threshold_robustness_triple=base.threshold_robustness_triple,
         wrapper_api_reference=base.wrapper_api_reference,
+        **_DAGMA_SCHEMA_GATE_FIELDS,
     )
     assert configuration_hash(base) != configuration_hash(
         same_model_different_condition
@@ -751,6 +777,22 @@ def test_load_config_rejects_seed_populations_with_bool_seed(
         "expected_edges": 3,
         "noise_scale": 1.0,
         "weight_magnitude_range": [0.5, 2.0],
+        "n_train": 64,
+        "mmd_n_samples": 64,
+        "n_val_dcdi": None,
+        "dcdi_num_train_iter": None,
+        "dcdi_stop_crit_win": None,
+        "dcdi_train_patience": None,
+        "dcdi_train_batch_size": None,
+        "dcdi_lr": None,
+        "dcdi_h_threshold": None,
+        "dcdi_hidden_units": None,
+        "dcdi_hidden_layers": None,
+        "dagma_warm_iter": 30000,
+        "dagma_max_iter": 60000,
+        "dagma_lr": 3e-4,
+        "dagma_beta_1": 0.99,
+        "dagma_beta_2": 0.999,
     }
     file_path = tmp_path / "bool_seed.json"
     file_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -815,6 +857,26 @@ def _make_dagma_kwargs() -> dict[str, Any]:
         "wrapper_api_reference": (
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
         ),
+        **_DAGMA_SCHEMA_GATE_FIELDS,
+    }
+
+
+def _make_dcdi_kwargs() -> dict[str, Any]:
+    """Return a minimal-valid kwargs dict for a DCDI Configuration."""
+    return {
+        "model": "dcdi",
+        "condition": "centred_only",
+        "seed_torch": 7,
+        "seed_numpy": 8,
+        "seed_dagma": None,
+        "seed_populations": (("calibration", (1,)),),
+        "intervention_set": (),
+        "phase_b_configurations": (),
+        "threshold_robustness_triple": (0.4, 0.5, 0.6),
+        "wrapper_api_reference": (
+            "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper"
+        ),
+        **_DCDI_SCHEMA_GATE_FIELDS,
     }
 
 
@@ -1097,3 +1159,374 @@ def test_load_config_rejects_missing_n_nodes(tmp_path: Path) -> None:
             f"missing-field error did not name {field_name!r}: "
             f"{message!r}"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Real-run constants (n_train, mmd_n_samples, DCDI-only, DAGMA-only)
+# --------------------------------------------------------------------------- #
+
+
+_NEW_REAL_RUN_FIELDS = (
+    "n_train",
+    "mmd_n_samples",
+    "n_val_dcdi",
+    "dcdi_num_train_iter",
+    "dcdi_stop_crit_win",
+    "dcdi_train_patience",
+    "dcdi_train_batch_size",
+    "dcdi_lr",
+    "dcdi_h_threshold",
+    "dcdi_hidden_units",
+    "dcdi_hidden_layers",
+    "dagma_warm_iter",
+    "dagma_max_iter",
+    "dagma_lr",
+    "dagma_beta_1",
+    "dagma_beta_2",
+)
+
+
+def test_canonical_dict_includes_all_new_real_run_fields() -> None:
+    """``to_canonical_dict`` carries every new real-run field."""
+    dagma_payload = _make_dagma_configuration().to_canonical_dict()
+    dcdi_payload = _make_dcdi_configuration().to_canonical_dict()
+    for name in _NEW_REAL_RUN_FIELDS:
+        assert name in dagma_payload, f"DAGMA payload missing {name!r}"
+        assert name in dcdi_payload, f"DCDI payload missing {name!r}"
+
+
+def test_lambda1_and_reg_coeff_are_not_top_level_configuration_fields() -> None:
+    """Phase B sparsity knobs do not appear at the top of Configuration."""
+    config = _make_dagma_configuration()
+    payload = config.to_canonical_dict()
+    assert "lambda1" not in payload
+    assert "reg_coeff" not in payload
+    # The Configuration dataclass also does not expose these as
+    # attributes; Phase B sparsity lives inside PhaseBConfiguration.
+    assert not hasattr(config, "lambda1")
+    assert not hasattr(config, "reg_coeff")
+
+
+@pytest.mark.parametrize("field_name", ["n_train", "mmd_n_samples"])
+def test_shared_field_change_changes_hash(field_name: str) -> None:
+    """Each shared real-run field participates in configuration_hash."""
+    base = _make_dagma_configuration()
+    base_hash = configuration_hash(base)
+    bumped_value = int(getattr(base, field_name)) + 1
+    other = Configuration(
+        **{
+            **_make_dagma_kwargs(),
+            field_name: bumped_value,
+        }
+    )
+    assert configuration_hash(other) != base_hash
+
+
+@pytest.mark.parametrize(
+    "field_name,new_value",
+    [
+        ("n_val_dcdi", 33),
+        ("dcdi_num_train_iter", 31),
+        ("dcdi_stop_crit_win", 11),
+        ("dcdi_train_patience", 6),
+        ("dcdi_train_batch_size", 9),
+        ("dcdi_lr", 2e-3),
+        ("dcdi_h_threshold", 2e-8),
+        ("dcdi_hidden_units", 17),
+        ("dcdi_hidden_layers", 3),
+    ],
+)
+def test_dcdi_only_field_change_changes_hash(
+    field_name: str, new_value: Any
+) -> None:
+    """Each DCDI-only field participates in configuration_hash."""
+    base_kwargs = _make_dcdi_kwargs()
+    base_hash = configuration_hash(Configuration(**base_kwargs))
+    other = Configuration(**{**base_kwargs, field_name: new_value})
+    assert configuration_hash(other) != base_hash
+
+
+@pytest.mark.parametrize(
+    "field_name,new_value",
+    [
+        ("dagma_warm_iter", 30001),
+        ("dagma_max_iter", 60001),
+        ("dagma_lr", 4e-4),
+        ("dagma_beta_1", 0.991),
+        ("dagma_beta_2", 0.9991),
+    ],
+)
+def test_dagma_only_field_change_changes_hash(
+    field_name: str, new_value: Any
+) -> None:
+    """Each DAGMA-only field participates in configuration_hash."""
+    base_kwargs = _make_dagma_kwargs()
+    base_hash = configuration_hash(Configuration(**base_kwargs))
+    other = Configuration(**{**base_kwargs, field_name: new_value})
+    assert configuration_hash(other) != base_hash
+
+
+def test_load_config_rejects_missing_new_real_run_fields(
+    tmp_path: Path,
+) -> None:
+    """A JSON config without the new real-run fields is rejected."""
+    payload = {
+        "model": "dagma",
+        "condition": "centred_only",
+        "seed_torch": None,
+        "seed_numpy": None,
+        "seed_dagma": None,
+        "seed_populations": {"calibration": [1]},
+        "intervention_set": [],
+        "phase_b_configurations": [],
+        "threshold_robustness_triple": [0.2, 0.3, 0.4],
+        "wrapper_api_reference": (
+            "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
+        ),
+        "n_nodes": 3,
+        "expected_edges": 3,
+        "noise_scale": 1.0,
+        "weight_magnitude_range": [0.5, 2.0],
+    }
+    file_path = tmp_path / "no_real_run_fields.json"
+    file_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError) as excinfo:
+        load_config(file_path)
+    message = str(excinfo.value)
+    assert "missing required field" in message
+    for field_name in _NEW_REAL_RUN_FIELDS:
+        assert field_name in message, (
+            f"missing-field error did not name {field_name!r}: "
+            f"{message!r}"
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "n_train",
+        "mmd_n_samples",
+    ],
+)
+def test_shared_field_rejects_bool(field_name: str) -> None:
+    """Bool values are rejected for each shared real-run int field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), field_name: True})
+    assert field_name in str(excinfo.value)
+    assert "bool" in str(excinfo.value).lower()
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "n_train",
+        "mmd_n_samples",
+    ],
+)
+def test_shared_field_rejects_zero(field_name: str) -> None:
+    """Zero is rejected for each shared real-run int field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), field_name: 0})
+    assert field_name in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "n_train",
+        "mmd_n_samples",
+    ],
+)
+def test_shared_field_rejects_negative(field_name: str) -> None:
+    """Negative integers are rejected for each shared real-run int field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), field_name: -1})
+    assert field_name in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "n_val_dcdi",
+        "dcdi_num_train_iter",
+        "dcdi_stop_crit_win",
+        "dcdi_train_patience",
+        "dcdi_train_batch_size",
+        "dcdi_hidden_units",
+        "dcdi_hidden_layers",
+    ],
+)
+def test_dcdi_only_int_field_rejects_bool(field_name: str) -> None:
+    """Bool values are rejected for each DCDI-only int field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dcdi_kwargs(), field_name: True})
+    assert field_name in str(excinfo.value)
+    assert "bool" in str(excinfo.value).lower()
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "n_val_dcdi",
+        "dcdi_num_train_iter",
+        "dcdi_stop_crit_win",
+        "dcdi_train_patience",
+        "dcdi_train_batch_size",
+        "dcdi_hidden_units",
+        "dcdi_hidden_layers",
+    ],
+)
+def test_dcdi_only_int_field_rejects_zero(field_name: str) -> None:
+    """Zero is rejected for each DCDI-only int field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dcdi_kwargs(), field_name: 0})
+    assert field_name in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "dcdi_lr",
+        "dcdi_h_threshold",
+    ],
+)
+def test_dcdi_only_float_field_rejects_bool(field_name: str) -> None:
+    """Bool values are rejected for each DCDI-only float field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dcdi_kwargs(), field_name: True})
+    assert field_name in str(excinfo.value)
+    assert "bool" in str(excinfo.value).lower()
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "dcdi_lr",
+        "dcdi_h_threshold",
+    ],
+)
+def test_dcdi_only_float_field_rejects_zero(field_name: str) -> None:
+    """Zero is rejected for each DCDI-only float field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dcdi_kwargs(), field_name: 0.0})
+    assert field_name in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "dagma_warm_iter",
+        "dagma_max_iter",
+    ],
+)
+def test_dagma_only_int_field_rejects_bool(field_name: str) -> None:
+    """Bool values are rejected for each DAGMA-only int field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), field_name: True})
+    assert field_name in str(excinfo.value)
+    assert "bool" in str(excinfo.value).lower()
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "dagma_lr",
+        "dagma_beta_1",
+        "dagma_beta_2",
+    ],
+)
+def test_dagma_only_float_field_rejects_zero(field_name: str) -> None:
+    """Zero is rejected for each DAGMA-only float field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(**{**_make_dagma_kwargs(), field_name: 0.0})
+    assert field_name in str(excinfo.value)
+
+
+def test_n_val_dcdi_must_be_smaller_than_n_train() -> None:
+    """``n_val_dcdi`` must be strictly smaller than ``n_train``."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dcdi_kwargs(),
+                "n_train": 100,
+                "n_val_dcdi": 100,
+            }
+        )
+    message = str(excinfo.value)
+    assert "n_val_dcdi" in message
+    assert "n_train" in message
+
+
+def test_dcdi_requires_dcdi_only_fields_non_none() -> None:
+    """A DCDI Configuration must set every DCDI-only field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dcdi_kwargs(),
+                "dcdi_num_train_iter": None,
+            }
+        )
+    assert "dcdi_num_train_iter" in str(excinfo.value)
+    assert "dcdi" in str(excinfo.value).lower()
+
+
+def test_dcdi_rejects_non_none_dagma_only_fields() -> None:
+    """A DCDI Configuration must leave every DAGMA-only field None."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dcdi_kwargs(),
+                "dagma_warm_iter": 30000,
+            }
+        )
+    assert "dagma_warm_iter" in str(excinfo.value)
+    assert "dcdi" in str(excinfo.value).lower()
+
+
+def test_dagma_requires_dagma_only_fields_non_none() -> None:
+    """A DAGMA Configuration must set every DAGMA-only field."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dagma_kwargs(),
+                "dagma_warm_iter": None,
+            }
+        )
+    assert "dagma_warm_iter" in str(excinfo.value)
+    assert "dagma" in str(excinfo.value).lower()
+
+
+def test_dagma_rejects_non_none_dcdi_only_fields() -> None:
+    """A DAGMA Configuration must leave every DCDI-only field None."""
+    with pytest.raises(ValueError) as excinfo:
+        Configuration(
+            **{
+                **_make_dagma_kwargs(),
+                "dcdi_num_train_iter": 30,
+            }
+        )
+    assert "dcdi_num_train_iter" in str(excinfo.value)
+    assert "dagma" in str(excinfo.value).lower()
+
+
+def test_load_config_round_trip_preserves_new_real_run_fields(
+    tmp_path: Path,
+) -> None:
+    """A round trip through ``load_config`` preserves every new field."""
+    original_dcdi = _make_dcdi_configuration()
+    dcdi_path = tmp_path / "dcdi.json"
+    _dump_config_to_json(original_dcdi, dcdi_path)
+    loaded_dcdi = load_config(dcdi_path)
+    for name in _NEW_REAL_RUN_FIELDS:
+        assert getattr(loaded_dcdi, name) == getattr(
+            original_dcdi, name
+        ), f"DCDI {name!r} did not round-trip"
+
+    original_dagma = _make_dagma_configuration()
+    dagma_path = tmp_path / "dagma.json"
+    _dump_config_to_json(original_dagma, dagma_path)
+    loaded_dagma = load_config(dagma_path)
+    for name in _NEW_REAL_RUN_FIELDS:
+        assert getattr(loaded_dagma, name) == getattr(
+            original_dagma, name
+        ), f"DAGMA {name!r} did not round-trip"

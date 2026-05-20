@@ -1777,3 +1777,89 @@ the Configuration implementation: any field added to
   available or `docs/03` records an explicit scoping decision.
 - `docs/02_base_model_selection.md` is now at v1.6. Subsequent
   amendments use the same change-log discipline.
+
+---
+
+## 20/05/2026 -- Configuration extended with docs/02 v1.6 real-run constants
+
+### Decision
+
+`experiments/selection_study/config.py` is extended so the
+`Configuration` dataclass carries the real-run constants frozen
+in `docs/02` v1.6 (excluding Phase B sparsity grids). The new
+fields are:
+
+- shared: `n_train: int`, `mmd_n_samples: int`;
+- DCDI-only (`None` for DAGMA configurations): `n_val_dcdi`,
+  `dcdi_num_train_iter`, `dcdi_stop_crit_win`,
+  `dcdi_train_patience`, `dcdi_train_batch_size`, `dcdi_lr`,
+  `dcdi_h_threshold`, `dcdi_hidden_units`, `dcdi_hidden_layers`;
+- DAGMA-only (`None` for DCDI configurations): `dagma_warm_iter`,
+  `dagma_max_iter`, `dagma_lr`, `dagma_beta_1`, `dagma_beta_2`.
+
+Each new field appears in `to_canonical_dict`, is required by
+`load_config`, and participates in `configuration_hash`. The
+dataclass validation enforces: positive numeric values, no
+bool-as-int, `n_val_dcdi < n_train` for DCDI, and model-conditional
+presence (DCDI configurations require every DCDI-only field
+non-None and every DAGMA-only field None; DAGMA configurations
+require the symmetric condition).
+
+DAGMA `lambda1` and DCDI `reg_coeff` are intentionally NOT
+top-level `Configuration` fields. They are Phase B sparsity
+sweep values and remain inside `PhaseBConfiguration.hyperparameters`
+per `docs/02` v1.6 Section 3.3.
+
+### Reason
+
+`docs/02` v1.6 froze the real-run protocol values that Commit 8
+Phase A will need. Adding them to `Configuration` first lets the
+selection-study runner persist a complete `config_resolved`
+record under `configuration_hash`, with the schema-conformance
+machinery and threshold-robustness reconstruction already in
+place. The Configuration extension is a prerequisite for Commit 8;
+this commit does not yet wire the new fields into pipeline
+consumer behaviour.
+
+### What does NOT change
+
+- No source code outside `experiments/selection_study/config.py`
+  and the tests that construct `Configuration` fixtures changed.
+  No `src/`, `experiments/selection_study/pipeline.py`, or wrapper
+  edit was needed.
+- No selection criterion, evaluation rule, wrapper algorithm,
+  or metric primitive changed.
+- No notebook, configuration file, results directory, or
+  dependency manifest changed.
+- `docs/02` is not edited by this commit.
+- The schema-gate-honest defaults are: `n_train = 64`,
+  `mmd_n_samples = 64` for shared fields (matching the
+  schema-gate constants the toy pipeline actually consumes);
+  the DCDI-only / DAGMA-only fields default to `None` so they
+  cannot silently leak across models. Existing toy-fit fixtures
+  are updated to set the model-appropriate fields with values
+  that match what the current schema-gate pipeline actually
+  uses, so `config_resolved` remains honest for toy runs.
+- Schema-gate toy defaults are NOT authoritative for Phase A/B.
+  Phase A/B configurations MUST explicitly set every new field
+  to the `docs/02` v1.6 value rather than rely on schema-gate
+  defaults.
+
+### Consequence
+
+- `Configuration` is now ready for Commit 8 to consume; the
+  pipeline will read `n_train`, `mmd_n_samples`, and the
+  model-conditional fields from `resolved_config` in place of
+  the schema-gate constants.
+- Phase B sparsity sweep values continue to live inside
+  `PhaseBConfiguration.hyperparameters`; the Phase B grid
+  freezing in `docs/02` v1.6 Section 3.3 must be encoded in the
+  Phase A/B configuration JSON files that the runner will later
+  consume.
+- The full pytest suite remains green (720 passed, 2 pre-existing
+  RuntimeWarnings unrelated to this change). The new
+  Configuration tests cover canonical-dict membership,
+  hash-participation, missing-field rejection by `load_config`,
+  bool-as-int rejection, zero/negative rejection,
+  `n_val_dcdi < n_train`, model-conditional presence, and a
+  round-trip preservation check for both DAGMA and DCDI.

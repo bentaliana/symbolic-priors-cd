@@ -65,6 +65,38 @@ PURPOSE_MODEL_SAMPLING_SEED_BASE = "model_sampling_seed_base"
 _SEED_BOUND = 2 ** 31
 
 
+def _validate_positive_int(value: Any, name: str) -> None:
+    """Validate that ``value`` is a plain positive int (not bool)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(
+            f"{name} must be a plain int (not bool); "
+            f"got {value!r} of type {type(value).__name__}"
+        )
+    if value <= 0:
+        raise ValueError(
+            f"{name} must be > 0; got {value}"
+        )
+
+
+def _validate_positive_float(value: Any, name: str) -> None:
+    """Validate that ``value`` is a finite positive number (not bool)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            f"{name} must be a finite positive number (not bool); "
+            f"got {value!r} of type {type(value).__name__}"
+        )
+    value_float = float(value)
+    if not (
+        value_float == value_float
+        and value_float not in (float("inf"), float("-inf"))
+        and value_float > 0.0
+    ):
+        raise ValueError(
+            f"{name} must be a finite positive number; "
+            f"got {value!r}"
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Dataclasses
 # --------------------------------------------------------------------------- #
@@ -232,6 +264,31 @@ class Configuration:
     expected_edges: int = 3
     noise_scale: float = 1.0
     weight_magnitude_range: tuple[float, float] = (0.5, 2.0)
+    # Shared real-run constants. Defaults match the schema-gate
+    # values used by the current pipeline so config_resolved stays
+    # honest until Phase A/B configurations explicitly override them.
+    n_train: int = 64
+    mmd_n_samples: int = 64
+    # DCDI-only real-run constants. Default to None and are required
+    # to be non-None when model == "dcdi"; for DAGMA configurations
+    # all DCDI-only fields must remain None.
+    n_val_dcdi: int | None = None
+    dcdi_num_train_iter: int | None = None
+    dcdi_stop_crit_win: int | None = None
+    dcdi_train_patience: int | None = None
+    dcdi_train_batch_size: int | None = None
+    dcdi_lr: float | None = None
+    dcdi_h_threshold: float | None = None
+    dcdi_hidden_units: int | None = None
+    dcdi_hidden_layers: int | None = None
+    # DAGMA-only real-run constants. Default to None and are required
+    # to be non-None when model == "dagma"; for DCDI configurations
+    # all DAGMA-only fields must remain None.
+    dagma_warm_iter: int | None = None
+    dagma_max_iter: int | None = None
+    dagma_lr: float | None = None
+    dagma_beta_1: float | None = None
+    dagma_beta_2: float | None = None
     seed_derivation_rule: str = field(default=SEED_DERIVATION_RULE_NAME)
     configuration_hash_algorithm: str = field(
         default=CONFIGURATION_HASH_ALGORITHM_NAME
@@ -472,6 +529,114 @@ class Configuration:
             (float(low_raw), float(high_raw)),
         )
 
+        # Shared real-run constant validation.
+        _validate_positive_int(self.n_train, "n_train")
+        _validate_positive_int(self.mmd_n_samples, "mmd_n_samples")
+
+        # Model-conditional real-run constant validation.
+        _DCDI_ONLY_INT_FIELDS = (
+            ("n_val_dcdi", self.n_val_dcdi),
+            ("dcdi_num_train_iter", self.dcdi_num_train_iter),
+            ("dcdi_stop_crit_win", self.dcdi_stop_crit_win),
+            ("dcdi_train_patience", self.dcdi_train_patience),
+            ("dcdi_train_batch_size", self.dcdi_train_batch_size),
+            ("dcdi_hidden_units", self.dcdi_hidden_units),
+            ("dcdi_hidden_layers", self.dcdi_hidden_layers),
+        )
+        _DCDI_ONLY_FLOAT_FIELDS = (
+            ("dcdi_lr", self.dcdi_lr),
+            ("dcdi_h_threshold", self.dcdi_h_threshold),
+        )
+        _DAGMA_ONLY_INT_FIELDS = (
+            ("dagma_warm_iter", self.dagma_warm_iter),
+            ("dagma_max_iter", self.dagma_max_iter),
+        )
+        _DAGMA_ONLY_FLOAT_FIELDS = (
+            ("dagma_lr", self.dagma_lr),
+            ("dagma_beta_1", self.dagma_beta_1),
+            ("dagma_beta_2", self.dagma_beta_2),
+        )
+
+        if self.model == "dcdi":
+            dagma_offenders = [
+                name
+                for name, value in (
+                    *_DAGMA_ONLY_INT_FIELDS,
+                    *_DAGMA_ONLY_FLOAT_FIELDS,
+                )
+                if value is not None
+            ]
+            if dagma_offenders:
+                raise ValueError(
+                    "model='dcdi' requires DAGMA-only field(s) "
+                    f"{', '.join(dagma_offenders)} to be None"
+                )
+            for name, value in _DCDI_ONLY_INT_FIELDS:
+                if value is None:
+                    raise ValueError(
+                        "model='dcdi' requires "
+                        f"{name} to be a positive int; got None"
+                    )
+                _validate_positive_int(value, name)
+            for name, value in _DCDI_ONLY_FLOAT_FIELDS:
+                if value is None:
+                    raise ValueError(
+                        "model='dcdi' requires "
+                        f"{name} to be a positive float; got None"
+                    )
+                _validate_positive_float(value, name)
+            # n_val_dcdi must be strictly smaller than n_train so
+            # the 80/20-style split has room for both halves.
+            if int(self.n_val_dcdi) >= int(self.n_train):
+                raise ValueError(
+                    "n_val_dcdi must be strictly smaller than "
+                    f"n_train; got n_val_dcdi={self.n_val_dcdi}, "
+                    f"n_train={self.n_train}"
+                )
+        else:
+            # model == "dagma"
+            dcdi_offenders = [
+                name
+                for name, value in (
+                    *_DCDI_ONLY_INT_FIELDS,
+                    *_DCDI_ONLY_FLOAT_FIELDS,
+                )
+                if value is not None
+            ]
+            if dcdi_offenders:
+                raise ValueError(
+                    "model='dagma' requires DCDI-only field(s) "
+                    f"{', '.join(dcdi_offenders)} to be None"
+                )
+            for name, value in _DAGMA_ONLY_INT_FIELDS:
+                if value is None:
+                    raise ValueError(
+                        "model='dagma' requires "
+                        f"{name} to be a positive int; got None"
+                    )
+                _validate_positive_int(value, name)
+            for name, value in _DAGMA_ONLY_FLOAT_FIELDS:
+                if value is None:
+                    raise ValueError(
+                        "model='dagma' requires "
+                        f"{name} to be a positive float; got None"
+                    )
+                _validate_positive_float(value, name)
+
+        # Float-field canonicalisation: a value passed as int is
+        # stored as float so config_resolved is stable across
+        # equivalent literal forms.
+        for name in (
+            "dcdi_lr",
+            "dcdi_h_threshold",
+            "dagma_lr",
+            "dagma_beta_1",
+            "dagma_beta_2",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(self, name, float(value))
+
     def to_canonical_dict(self) -> dict[str, Any]:
         """Return the Configuration as a primitive-typed dict.
 
@@ -510,6 +675,72 @@ class Configuration:
                 float(self.weight_magnitude_range[0]),
                 float(self.weight_magnitude_range[1]),
             ],
+            "n_train": int(self.n_train),
+            "mmd_n_samples": int(self.mmd_n_samples),
+            "n_val_dcdi": (
+                None if self.n_val_dcdi is None else int(self.n_val_dcdi)
+            ),
+            "dcdi_num_train_iter": (
+                None
+                if self.dcdi_num_train_iter is None
+                else int(self.dcdi_num_train_iter)
+            ),
+            "dcdi_stop_crit_win": (
+                None
+                if self.dcdi_stop_crit_win is None
+                else int(self.dcdi_stop_crit_win)
+            ),
+            "dcdi_train_patience": (
+                None
+                if self.dcdi_train_patience is None
+                else int(self.dcdi_train_patience)
+            ),
+            "dcdi_train_batch_size": (
+                None
+                if self.dcdi_train_batch_size is None
+                else int(self.dcdi_train_batch_size)
+            ),
+            "dcdi_lr": (
+                None if self.dcdi_lr is None else float(self.dcdi_lr)
+            ),
+            "dcdi_h_threshold": (
+                None
+                if self.dcdi_h_threshold is None
+                else float(self.dcdi_h_threshold)
+            ),
+            "dcdi_hidden_units": (
+                None
+                if self.dcdi_hidden_units is None
+                else int(self.dcdi_hidden_units)
+            ),
+            "dcdi_hidden_layers": (
+                None
+                if self.dcdi_hidden_layers is None
+                else int(self.dcdi_hidden_layers)
+            ),
+            "dagma_warm_iter": (
+                None
+                if self.dagma_warm_iter is None
+                else int(self.dagma_warm_iter)
+            ),
+            "dagma_max_iter": (
+                None
+                if self.dagma_max_iter is None
+                else int(self.dagma_max_iter)
+            ),
+            "dagma_lr": (
+                None if self.dagma_lr is None else float(self.dagma_lr)
+            ),
+            "dagma_beta_1": (
+                None
+                if self.dagma_beta_1 is None
+                else float(self.dagma_beta_1)
+            ),
+            "dagma_beta_2": (
+                None
+                if self.dagma_beta_2 is None
+                else float(self.dagma_beta_2)
+            ),
             "seed_derivation_rule": self.seed_derivation_rule,
             "configuration_hash_algorithm": (
                 self.configuration_hash_algorithm
@@ -781,7 +1012,60 @@ _REQUIRED_FIELDS: tuple[str, ...] = (
     "expected_edges",
     "noise_scale",
     "weight_magnitude_range",
+    "n_train",
+    "mmd_n_samples",
+    "n_val_dcdi",
+    "dcdi_num_train_iter",
+    "dcdi_stop_crit_win",
+    "dcdi_train_patience",
+    "dcdi_train_batch_size",
+    "dcdi_lr",
+    "dcdi_h_threshold",
+    "dcdi_hidden_units",
+    "dcdi_hidden_layers",
+    "dagma_warm_iter",
+    "dagma_max_iter",
+    "dagma_lr",
+    "dagma_beta_1",
+    "dagma_beta_2",
 )
+
+
+def _load_optional_int(data: dict, name: str) -> int | None:
+    """Read an optional integer field from a parsed-JSON config dict."""
+    raw = data[name]
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(
+            f"configuration JSON field {name!r} must be an int or "
+            f"null (not bool); got {raw!r}"
+        )
+    return int(raw)
+
+
+def _load_optional_float(data: dict, name: str) -> float | None:
+    """Read an optional float field from a parsed-JSON config dict."""
+    raw = data[name]
+    if raw is None:
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError(
+            f"configuration JSON field {name!r} must be a number or "
+            f"null (not bool); got {raw!r}"
+        )
+    return float(raw)
+
+
+def _load_required_int(data: dict, name: str) -> int:
+    """Read a required integer field from a parsed-JSON config dict."""
+    raw = data[name]
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(
+            f"configuration JSON field {name!r} must be an int "
+            f"(not bool); got {raw!r}"
+        )
+    return int(raw)
 
 
 def load_config(path: str | Path) -> Configuration:
@@ -964,6 +1248,34 @@ def _configuration_from_dict(data: Any) -> Configuration:
             float(weight_magnitude_range_raw[0]),
             float(weight_magnitude_range_raw[1]),
         ),
+        n_train=_load_required_int(data, "n_train"),
+        mmd_n_samples=_load_required_int(data, "mmd_n_samples"),
+        n_val_dcdi=_load_optional_int(data, "n_val_dcdi"),
+        dcdi_num_train_iter=_load_optional_int(
+            data, "dcdi_num_train_iter"
+        ),
+        dcdi_stop_crit_win=_load_optional_int(
+            data, "dcdi_stop_crit_win"
+        ),
+        dcdi_train_patience=_load_optional_int(
+            data, "dcdi_train_patience"
+        ),
+        dcdi_train_batch_size=_load_optional_int(
+            data, "dcdi_train_batch_size"
+        ),
+        dcdi_lr=_load_optional_float(data, "dcdi_lr"),
+        dcdi_h_threshold=_load_optional_float(data, "dcdi_h_threshold"),
+        dcdi_hidden_units=_load_optional_int(
+            data, "dcdi_hidden_units"
+        ),
+        dcdi_hidden_layers=_load_optional_int(
+            data, "dcdi_hidden_layers"
+        ),
+        dagma_warm_iter=_load_optional_int(data, "dagma_warm_iter"),
+        dagma_max_iter=_load_optional_int(data, "dagma_max_iter"),
+        dagma_lr=_load_optional_float(data, "dagma_lr"),
+        dagma_beta_1=_load_optional_float(data, "dagma_beta_1"),
+        dagma_beta_2=_load_optional_float(data, "dagma_beta_2"),
         seed_derivation_rule=str(
             data.get(
                 "seed_derivation_rule", SEED_DERIVATION_RULE_NAME

@@ -53,6 +53,15 @@ _PHASE_B = PhaseBConfiguration(
 )
 
 
+_DAGMA_SCHEMA_GATE_FIELDS = dict(
+    dagma_warm_iter=30000,
+    dagma_max_iter=60000,
+    dagma_lr=3e-4,
+    dagma_beta_1=0.99,
+    dagma_beta_2=0.999,
+)
+
+
 def _make_dagma_config() -> Configuration:
     """Return a minimal-valid DAGMA Configuration for these tests."""
     return Configuration(
@@ -70,6 +79,7 @@ def _make_dagma_config() -> Configuration:
         ),
         seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
         configuration_hash_algorithm=CONFIGURATION_HASH_ALGORITHM_NAME,
+        **_DAGMA_SCHEMA_GATE_FIELDS,
     )
 
 
@@ -750,6 +760,7 @@ def test_invalid_graph_stop_leaves_no_run_json_for_recompute(
         ),
         seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
         configuration_hash_algorithm=CONFIGURATION_HASH_ALGORITHM_NAME,
+        **_DAGMA_SCHEMA_GATE_FIELDS,
     )
     manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
     with pytest.raises(InvalidGraphForSchemaGateError):
