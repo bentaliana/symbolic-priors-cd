@@ -1,0 +1,37 @@
+{
+  "model": "dcdi",
+  "condition": "centred_only",
+  "seed_torch": 42,
+  "seed_numpy": 42,
+  "seed_dagma": null,
+  "seed_populations": {
+    "reproduction": [101, 102, 103]
+  },
+  "intervention_set": [
+    {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
+    {"intervention_id": "do_X0_pos2", "target_node": 0, "value_raw": 2.0}
+  ],
+  "phase_b_configurations": [],
+  "threshold_robustness_triple": [0.4, 0.5, 0.6],
+  "wrapper_api_reference": "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper",
+  "n_nodes": 10,
+  "expected_edges": 20,
+  "noise_scale": 1.0,
+  "weight_magnitude_range": [0.5, 2.0],
+  "n_train": 1000,
+  "mmd_n_samples": 1000,
+  "n_val_dcdi": 200,
+  "dcdi_num_train_iter": 300000,
+  "dcdi_stop_crit_win": 100,
+  "dcdi_train_patience": 5,
+  "dcdi_train_batch_size": 64,
+  "dcdi_lr": 1e-3,
+  "dcdi_h_threshold": 1e-8,
+  "dcdi_hidden_units": 16,
+  "dcdi_hidden_layers": 2,
+  "dagma_warm_iter": null,
+  "dagma_max_iter": null,
+  "dagma_lr": null,
+  "dagma_beta_1": null,
+  "dagma_beta_2": null
+}

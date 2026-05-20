@@ -2155,3 +2155,119 @@ the Phase A run, not the C-P15 pilot CSV.
   carry the frozen pool integers inside `configuration_hash`,
   so a Phase A re-run on the same seeds reproduces the same
   identity tuple.
+
+---
+
+## 20/05/2026 -- Phase A reproduction config files created
+
+### Decision
+
+The two Phase A reproduction configuration files blocked by the
+earlier 8b entry are now written:
+
+- `experiments/selection_study/configs/phase_a/dagma_reproduction.json`
+- `experiments/selection_study/configs/phase_a/dcdi_reproduction.json`
+
+Both files use `seed_populations = {"reproduction": [101, 102, 103]}`
+per the docs/02 v1.7 seed-pool freeze. The Phase A config files
+carry the docs/02 v1.6 / v1.7 real-study constants for the
+10-node ER2 cell:
+
+- shared: `n_nodes = 10`, `expected_edges = 20`,
+  `noise_scale = 1.0`,
+  `weight_magnitude_range = [0.5, 2.0]`,
+  `n_train = 1000`, `mmd_n_samples = 1000`;
+- DAGMA: `condition = "centred_only"`,
+  `threshold_robustness_triple = [0.2, 0.3, 0.4]`,
+  `dagma_warm_iter = 20000`, `dagma_max_iter = 70000`,
+  `dagma_lr = 3e-4`, `dagma_beta_1 = 0.99`,
+  `dagma_beta_2 = 0.999`, every DCDI-only field `null`,
+  all global RNG seeds `null` (DAGMA fit is
+  deterministic by construction per docs/02 v1.5);
+- DCDI: `condition = "centred_only"`,
+  `threshold_robustness_triple = [0.4, 0.5, 0.6]`,
+  `n_val_dcdi = 200`, `dcdi_num_train_iter = 300000`,
+  `dcdi_stop_crit_win = 100`, `dcdi_train_patience = 5`,
+  `dcdi_train_batch_size = 64`, `dcdi_lr = 1e-3`,
+  `dcdi_h_threshold = 1e-8`, `dcdi_hidden_units = 16`,
+  `dcdi_hidden_layers = 2`, every DAGMA-only field `null`,
+  `seed_torch = seed_numpy = 42` (DCDI fit requires
+  matched non-null global RNG seeds per docs/02 v1.5; the
+  scalar `42` matches the project's existing fixture
+  convention and enters `configuration_hash` so any change
+  produces a new run identity).
+
+Both configs use `phase_b_configurations = []`. Configuration
+permits an empty tuple here; Phase A is the reproduction pass,
+not a Phase B sparsity sweep, so the empty list is the
+truthful representation. The Phase A `lambda1` (DAGMA = 0.05)
+and `reg_coeff` (DCDI = 0.1) anchors continue to come from
+`DAGMAConfig` / `DCDIConfig` defaults, pinned by the two
+anchor-default regression tests added in the previous 8b
+entry.
+
+Three Phase A-only choices are recorded explicitly so they do
+not get reinterpreted as broader protocol decisions:
+
+- **`condition = "centred_only"` is a Phase A reproduction-pass
+  default**, not a decision to omit the `"standardised"`
+  condition from Phase B or held-out evaluation. The
+  selection-study Section 4.4 Criterion-3 sweep over both
+  conditions is unchanged and will be reflected in the Phase
+  B / held-out config files when those are written.
+- **The `do(X_0 = +/- 2)` intervention set is Phase A-only
+  reproduction / smoke coverage**, not Criterion-1 held-out
+  intervention evidence. Phase A verifies that the pipeline
+  runs end to end and that one paper-aligned result is
+  approximately reproducible; it does not commit to the full
+  intervention grid. The eligible-node intervention policy for
+  Phase B and held-out evaluation (which target nodes, how many
+  per cell) remains to be frozen before those config files are
+  created.
+- **`seed_torch = seed_numpy = 42` on the DCDI Phase A config
+  is an explicit, hash-participating Phase A value**, not
+  accidental fixture inheritance. Changing it produces a new
+  `configuration_hash` and therefore a new run identity, which
+  is the right discipline for any future amendment.
+
+DAGMA's `seed_torch`, `seed_numpy`, and `seed_dagma` are all
+`null` in the DAGMA Phase A config. This is not an omission:
+per the `docs/02` v1.5 seed-discipline decision, DAGMA is
+verified deterministic-by-construction and does NOT call
+`torch.manual_seed`, `np.random.seed`, or
+`dagma.utils.set_random_seed`, so the null seed fields
+correctly reflect that no global RNG setter was called.
+
+### What does NOT change
+
+- No source code, no test outside `tests/test_real_study.py`,
+  no wrapper, no metric, no notebook, no configuration outside
+  the two new JSON files, no results-directory, and no
+  dependency-manifest edit. `pipeline.py` is unchanged from the
+  prior Commit 8a state.
+- No selection criterion, evaluation rule, wrapper algorithm,
+  metric primitive, or `Configuration` schema change.
+- `docs/02_base_model_selection.md`, `docs/08c`, and `docs/08d`
+  are not edited.
+- The C-P15 DCDI training-budget pilot CSV remains pilot-only
+  diagnostic evidence and does NOT count as Phase A evidence,
+  per the prior `docs/03` entries and `docs/08d`.
+
+### Consequence
+
+- `experiments.selection_study.config.load_config` accepts both
+  files and produces `Configuration` instances that satisfy
+  `assert_real_study_constants(config, stage="phase_a")`.
+- `experiments.selection_study.preflight.enumerate_manifest`
+  followed by `validate_manifest` succeeds on both files
+  without importing any wrapper, `dagma`, `dcdi`, or `wandb`
+  module, and without creating any run directory on disk.
+- Both DAGMA and DCDI manifests enumerate exactly three
+  reproduction entries.
+- The Phase A runner (`experiments/selection_study/phase_a.py`)
+  remains a stub. Its implementation is the next step (8c) and
+  will consume these two config files end-to-end.
+- Full pytest suite remains green: 774 passed, 2 pre-existing
+  RuntimeWarnings unrelated to this work (count up from 758,
+  +16 new Phase A config-file tests in
+  `tests/test_real_study.py`).
