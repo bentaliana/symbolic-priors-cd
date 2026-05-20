@@ -141,6 +141,19 @@ def test_dcdi_config_dynamic_resolution_via_importlib_and_getattr() -> None:
     assert instance.h_threshold == DCDIConfig().h_threshold
 
 
+def test_dcdi_config_default_reg_coeff_matches_phase_a_anchor() -> None:
+    """DCDIConfig().reg_coeff must equal the Phase A anchor value 0.1.
+
+    The selection-study Configuration does not carry ``reg_coeff``
+    as a top-level field; the Phase A anchor for DCDI is therefore
+    delivered through the DCDIConfig default. This regression test
+    pins the default so a future wrapper-default change cannot
+    silently move the Phase A anchor.
+    """
+    cfg = DCDIConfig()
+    assert cfg.reg_coeff == 0.1
+
+
 # ---------------------------------------------------------------------------
 # fit completion
 # ---------------------------------------------------------------------------

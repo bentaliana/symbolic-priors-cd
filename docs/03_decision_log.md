@@ -1964,3 +1964,124 @@ no additional validation data is drawn").
 - Full pytest suite remains green: 727 passed, 2 pre-existing
   RuntimeWarnings unrelated to this work (count up from 720,
   +7 new pipeline tests).
+
+---
+
+## 20/05/2026 -- Phase A real-study protocol guard added; Phase A config files blocked on seed integers
+
+### Decision
+
+A new policy-only helper
+`experiments.selection_study.real_study.assert_real_study_constants`
+is added. The function affirmatively requires Phase A
+configurations to carry the exact docs/02 v1.6 real-study
+constants for both shared fields and the appropriate
+model-specific fields, plus a non-empty `"reproduction"`
+seed population. It is deliberately NOT called from
+`Configuration.__post_init__`; toy and schema-gate
+Configurations remain constructible. The runner must invoke
+the guard explicitly before any Phase A activity.
+
+The Phase A required values enforced by the guard:
+
+- shared: `n_nodes = 10`, `expected_edges = 20`,
+  `noise_scale = 1.0`,
+  `weight_magnitude_range = (0.5, 2.0)`,
+  `n_train = 1000`, `mmd_n_samples = 1000`;
+- DAGMA: `model = "dagma"`,
+  `threshold_robustness_triple = (0.2, 0.3, 0.4)`,
+  `dagma_warm_iter = 20000`, `dagma_max_iter = 70000`,
+  `dagma_lr = 3e-4`, `dagma_beta_1 = 0.99`,
+  `dagma_beta_2 = 0.999`, every DCDI-only field `None`;
+- DCDI: `model = "dcdi"`,
+  `threshold_robustness_triple = (0.4, 0.5, 0.6)`,
+  `n_val_dcdi = 200`, `dcdi_num_train_iter = 300000`,
+  `dcdi_stop_crit_win = 100`, `dcdi_train_patience = 5`,
+  `dcdi_train_batch_size = 64`, `dcdi_lr = 1e-3`,
+  `dcdi_h_threshold = 1e-8`, `dcdi_hidden_units = 16`,
+  `dcdi_hidden_layers = 2`, every DAGMA-only field `None`.
+
+Two anchor-default regression tests pin the wrapper-side Phase A
+sparsity anchors so a future wrapper-default change cannot
+silently move them:
+
+- `tests/test_dagma_wrapper_interface.py::test_dagma_config_default_lambda1_matches_phase_a_anchor`
+  asserts `DAGMAConfig().lambda1 == 0.05`.
+- `tests/test_dcdi_wrapper_assembly.py::test_dcdi_config_default_reg_coeff_matches_phase_a_anchor`
+  asserts `DCDIConfig().reg_coeff == 0.1`.
+
+These tests protect the current design where Phase A `lambda1`
+and `reg_coeff` come from wrapper config defaults rather than
+top-level `Configuration` fields.
+
+### Phase A config files NOT created in this commit
+
+The prompt requested two Phase A configuration JSON files at
+`experiments/selection_study/configs/phase_a/dagma_reproduction.json`
+and
+`experiments/selection_study/configs/phase_a/dcdi_reproduction.json`.
+Those files are NOT created here. The blocking issue is the
+Phase A reproduction-pool seed integers, which are not pinned
+by any of `docs/02`, `docs/03`, `docs/08`, or `docs/08d`:
+
+- `docs/02` Section 3.3 names the `"reproduction"` seed
+  population for the Phase A reproduction pass but does not
+  pin the integer set or the count.
+- `docs/08` Commit 8 acceptance criteria record runs under
+  `seed_population = "reproduction"` but do not pin integer
+  values.
+- `docs/08d` C-P15 used seeds `(101, 102, 103)` from the
+  reproduction pool but explicitly scopes those as
+  pilot-only, not Phase A reproduction-pass evidence.
+
+Seed integers participate in `configuration_hash` (they are
+serialised inside `canonical_json`'s `seed_populations` field),
+so the choice of integers is part of the Phase A
+configuration's identity and must be deliberate. The prompt
+forbids inventing them.
+
+The Phase A config files will be added in a separate commit
+after the user adjudicates the Phase A reproduction-pool seed
+integers and the reproduction-pass seed count.
+
+### What does NOT change
+
+- No `experiments/selection_study/pipeline.py` edit. The
+  pipeline already consumes Configuration values per the
+  20/05/2026 "Pipeline consumes Configuration real-run fields"
+  entry; this commit only adds a policy gate.
+- No wrapper, metric, notebook, configuration-file, results-
+  directory, or dependency-manifest edit.
+- `docs/02`, `docs/08c`, `docs/08d` are not edited.
+- `Configuration.__post_init__` is unchanged. Toy and
+  schema-gate Configurations continue to construct without
+  invoking the guard.
+- No Phase A runner, no Phase B implementation.
+- No selection criterion, evaluation rule, wrapper algorithm,
+  or metric primitive changed.
+
+### Consequence
+
+- The runner (Commit 8c and later) can call
+  `assert_real_study_constants(config, stage="phase_a")` to
+  reject toy values before any Phase A fit is invoked. The
+  guard's error messages name the offending field and the
+  expected value.
+- The Phase A anchor `lambda1 = 0.05` (DAGMA) and
+  `reg_coeff = 0.1` (DCDI) are now regression-pinned.
+- The 8a.1 implicit-default inspection
+  (the 20/05/2026 inspection report) found no Phase A runtime
+  default mismatch outside the already-overridden DAGMA
+  `warm_iter` / `max_iter` defaults; no additional Phase A
+  remediation is required by this commit.
+- Full pytest suite remains green: 758 passed, 2 pre-existing
+  RuntimeWarnings unrelated to this work (count up from 727,
+  +29 guard tests, +1 DAGMA anchor test, +1 DCDI anchor test).
+
+### Open follow-up
+
+Phase A reproduction-pool seed integers must be pinned by user
+adjudication before
+`experiments/selection_study/configs/phase_a/*.json` can be
+written. Once pinned, the config files plus their loading and
+preflight tests can be added under the same authorisation.
