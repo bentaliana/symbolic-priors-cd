@@ -140,11 +140,17 @@ before re-running.
 | `first_stop_iteration` | int or `not_exposed` | first iteration where the acyclicity-and-patience gate fired |
 | `second_stop_iteration` | int or `not_exposed` | iteration where permanent thresholding fires (see Field exposure) |
 | `final_h` | float or `not_exposed` | acyclicity surrogate at exit |
+| `final_gamma` | float or `not_exposed` | augmented-Lagrangian multiplier at exit |
+| `final_mu` | float or `not_exposed` | augmented-Lagrangian penalty coefficient at exit |
+| `gamma_update_count` | int | number of in-loop gamma updates recorded by the training loop |
+| `mu_update_count` | int | number of in-loop mu updates recorded by the training loop |
+| `last_gamma_update_iteration` | int or `not_exposed` | iteration index of the final gamma update, or `not_exposed` when none occurred |
+| `last_mu_update_iteration` | int or `not_exposed` | iteration index of the final mu update, or `not_exposed` when none occurred |
 | `graph_status` | one of the wrapper-API taxonomy values | structural status of the thresholded adjacency |
 | `sampler_status` | one of the wrapper-API taxonomy values | mechanical sampler availability |
 | `training_status` | one of the wrapper-API taxonomy values | training-loop status (`converged`, `max_iter`, `diverged`, `wrapper_error`) |
 | `runtime_seconds` | float | wall-clock fit runtime |
-| `validation_nll_trajectory_summary` | string or `not_exposed` | per-iteration validation-NLL trajectory summary (see Field exposure) |
+| `validation_nll_trajectory_summary` | compact summary string or `not_exposed` | semicolon-delimited per-stop-check validation-NLL trajectory summary (see "Validation-NLL summary format" below) |
 
 The probe enforces this header at append time: if the CSV exists
 and its first line does not match `CSV_COLUMNS` exactly, the
@@ -154,32 +160,137 @@ change.
 
 ### Field exposure
 
-Two fields are recorded as `not_exposed` because the current
-project wrapper / training-loop infrastructure does not expose
-them, and the probe is forbidden from modifying `src/` to expose
-them:
-
-- `second_stop_iteration`. The project's
-  `_dcdi_training.run_dcdi_training_loop` implements the first
-  patience gate (acyclicity is reached, validation-NLL is
-  evaluated, and patience counts down) but does NOT implement
-  the DCDI upstream second stage (permanent thresholding and
-  `train_patience_post`). Permanent thresholding therefore
-  never fires inside the project wrapper, and there is no
-  observable "second stop" iteration to record. The probe
-  does not pass `train_patience_post` to `DCDIConfig`; the knob
-  is documented in this readout for paper/source context only.
-- `validation_nll_trajectory_summary`. The training loop
-  computes validation NLLs internally but the public
-  `TrainingResult` does not return the trajectory. The probe
-  records `not_exposed` rather than reimplement the trajectory
-  collection outside `src/`.
+- `second_stop_iteration` is recorded as `not_exposed` because
+  the project's `_dcdi_training.run_dcdi_training_loop`
+  implements the first patience gate (acyclicity is reached,
+  validation-NLL is evaluated, and patience counts down) but
+  does NOT implement the DCDI upstream second stage (permanent
+  thresholding and `train_patience_post`). Permanent
+  thresholding therefore never fires inside the project
+  wrapper, and there is no observable "second stop" iteration
+  to record. The probe does not pass `train_patience_post`
+  to `DCDIConfig`; the knob is documented in this readout for
+  paper/source context only.
+- `validation_nll_trajectory_summary` is populated from the
+  validation-NLL list collected at the existing stop-check
+  cadence; the trajectory now lives on
+  `TrainingResult.validation_nll_history` and is surfaced via
+  `DCDIWrapper.get_diagnostics()["convergence_info"][
+  "validation_nll_history"]`. See the "Validation-NLL summary
+  format" subsection for the exact string layout. The summary
+  falls back to `not_exposed` only when a future wrapper
+  version omits the field.
+- `final_gamma`, `final_mu`, `gamma_update_count`,
+  `mu_update_count`, `last_gamma_update_iteration`, and
+  `last_mu_update_iteration` are populated from
+  `diagnostics["model_specific_diagnostics"]`. When the
+  training loop made no update of a given kind, the count is
+  `0` and the corresponding `last_*_update_iteration` is
+  `not_exposed`.
 
 `first_stop_iteration` IS exposed (the wrapper diagnostics
 record reports `model_specific_diagnostics.first_stop`); it is
 populated whenever the acyclicity-and-patience gate fires before
 the cap is hit. If the cap is hit before the gate fires, the
 field is `not_exposed` (the wrapper returns `None`).
+
+### Validation-NLL summary format
+
+The training loop already evaluates the validation NLL once
+before training and then once at every `stop_crit_win` iterations
+after a step. The values are returned via
+`get_diagnostics()["convergence_info"]["validation_nll_history"]`
+together with the cadence
+`get_diagnostics()["convergence_info"]["validation_nll_stop_crit_win"]`.
+The probe reads both fields and emits a compact semicolon-delimited
+string of the form:
+
+```
+count=<N>;nonfinite_count=<NF>;first=<F>;last=<L>;min=<M>;argmin=<I>;tail=[v1,v2,...];stop_crit_win=<W>
+```
+
+where:
+
+- `count = N` is the number of validation evaluations recorded
+  (one pre-training baseline plus one per stop-check window). For
+  a full-mode run with `num_train_iter_cap = 300000` and
+  `stop_crit_win = 100`, `N` is at most `3001`.
+- `nonfinite_count = NF` is the number of entries in the
+  trajectory that are NaN or `+/-inf`. Finite-only summary
+  statistics (`min`, `argmin`) are computed over the remaining
+  `N - NF` finite values.
+- `first` is the pre-training baseline; `last` is the final
+  recorded value; `min` is the minimum over the finite values.
+- `argmin` is the integer index into the history list at which
+  the finite minimum occurred. Multiply by `stop_crit_win` to
+  get the approximate training iteration; index `0` is the
+  pre-training baseline. When no finite values exist `min` and
+  `argmin` are both `not_exposed`.
+- `tail = [...]` is the final up to five values (finite or
+  not), useful for visually inspecting the recent plateau /
+  drift pattern without dumping the full trajectory into the
+  CSV.
+- `stop_crit_win` records the cadence so consumers can reconstruct
+  approximate iteration counts from indices.
+
+The string is plain ASCII and never embeds commas inside numeric
+fields. The probe records `not_exposed` if the diagnostics
+dictionary lacks the expected fields.
+
+### Interpretation patterns for the validation-NLL trajectory
+
+- A decreasing trajectory across many stop checks indicates the
+  augmented-Lagrangian objective is still improving the validation
+  fit; the budget is plausibly insufficient.
+- A flat or oscillating trajectory after an initial drop indicates
+  a plateau; the patience gate may be approaching firing.
+  Comparing `argmin` against `count - 1` reveals whether the
+  minimum is recent or in the distant past.
+- A worsening trajectory (`last > min` by a large margin)
+  indicates the optimisation is now degrading the validation fit,
+  often because `gamma` and `mu` have been pushed hard. This is
+  evidence that the patience gate will eventually fire, but the
+  current state may have already overshot the best validation
+  point.
+
+### Joint interpretation of validation NLL and the gamma/mu state
+
+The validation-NLL trajectory is a signal about score quality;
+the gamma/mu state is a signal about acyclicity pressure. Read
+them together when deciding whether a run is budget-limited,
+schedule-limited, or infeasible. In this wrapper, gamma and mu
+updates can occur both before and after `first_stop`:
+`gamma`/`mu` are updated at stop-check windows whenever the
+acyclicity threshold has not yet been met and the validation-NLL
+plateau test fires, so update counts are NOT a proxy for
+"post-first-stop activity".
+
+- If validation NLL plateaus but `final_h` remains far above
+  `h_threshold`, inspect `gamma_update_count` and
+  `mu_update_count` before concluding the issue is budget. A
+  high update count plus a stalled `final_h` suggests
+  optimisation difficulty or near-infeasibility under the
+  current architecture, not a budget shortfall; a low update
+  count plus a stalled `final_h` suggests the coefficient
+  schedule has not yet pushed enough acyclicity pressure and a
+  longer budget could help.
+- If neither gamma nor mu has updated (counts equal `0`), the
+  run is still in the early score-fitting regime under weak
+  acyclicity pressure; an empty `last_*_update_iteration`
+  consistent with the count is expected.
+- If gamma/mu have updated repeatedly but `final_h` is still
+  high, the run is likely compute-envelope-limited or facing
+  hard optimisation difficulty. A longer budget may help but is
+  not guaranteed to.
+
+The 10k smoke-of-scale row should not be over-interpreted: the
+patience gate has not yet fired and the augmented-Lagrangian
+schedule may not have stabilised. The 300k full run is the
+budget-evidence pilot.
+
+The pilot remains diagnostic-only. The validation-NLL summary is
+evidence the user reads when choosing `num_train_iter`; it does
+not freeze the ceiling.
 
 ## Interpretation rules
 
@@ -211,13 +322,13 @@ following interpretation rules apply:
 
 ## Caveats
 
-- The validation-NLL trajectory is computed inside the wrapper
-  but not returned; the project does not currently surface it.
-  If the user needs the trajectory to make the ceiling choice,
-  a small follow-up to `src/symbolic_priors_cd/wrappers/_dcdi_training.py`
-  exposing `val_history` on `TrainingResult` would be the
-  minimal additional surface; that follow-up is out of scope
-  for this probe.
+- The validation-NLL trajectory is now surfaced on
+  `TrainingResult.validation_nll_history` and read by the probe
+  through `DCDIWrapper.get_diagnostics()`. The summary string
+  in `validation_nll_trajectory_summary` is the compact view;
+  the full trajectory is recoverable through the wrapper
+  diagnostics if a notebook or follow-up probe needs every
+  per-stop-check value.
 - The second-stage patience-post mechanism (permanent
   thresholding plus `train_patience_post`) is not exercised by
   the project wrapper. Consumers of the pilot output should
@@ -227,6 +338,10 @@ following interpretation rules apply:
   `final_iteration` equals `num_train_iter_cap` and
   `first_stop_iteration` is `not_exposed`, the cap was hit
   without convergence and the budget should likely be raised.
+- The 10k full-mode row is a runtime/scaling diagnostic rather
+  than budget evidence. Comparing it against the eventual 300k
+  row is the intended use; it is not safe to extrapolate a
+  ceiling from the 10k row alone.
 - C-P11 was run at `n_iter = 30_000` on a 3-node fixture
   [PROJECT DOC: `docs/04f`]. The pilot's results on the 10-node
   ER2 cell do not retroactively validate or invalidate C-P11.
@@ -235,8 +350,13 @@ following interpretation rules apply:
 
 ## What this readout does NOT change
 
-- No file under `src/` is modified.
-- No file under `tests/` is modified.
+- `docs/02_base_model_selection.md` and `docs/08c` are not
+  modified by this readout.
+- No experiments/selection_study/ file is modified.
+- No notebook, configuration file, results directory, or
+  dependency manifest is modified.
+- The pilot remains diagnostic-only and does not freeze
+  `num_train_iter`.
 - No file under `experiments/selection_study/` is modified.
 - No notebook is modified.
 - No configuration file is modified.

@@ -1516,3 +1516,73 @@ inside the runner, or silently emitting `shd=None`.
 - No `run.json` migration is required. The new fields live only
   in the sibling `threshold_robustness.json` artefact and the
   in-memory record returned by `recompute_at_thresholds`.
+
+---
+
+## 20/05/2026 -- Validation NLL trajectory exposed on DCDI TrainingResult
+
+### Decision
+
+The DCDI augmented-Lagrangian training loop already computes a
+per-stop-check validation-NLL trajectory while training. The
+trajectory was previously discarded at function exit. It is now
+returned on `TrainingResult` as
+`validation_nll_history: list[float]` and surfaced through
+`DCDIWrapper.get_diagnostics()` under
+`convergence_info["validation_nll_history"]`, with the cadence
+recorded alongside as
+`convergence_info["validation_nll_stop_crit_win"]`.
+
+### Reason
+
+The DCDI training-budget pilot needs the validation-NLL
+trajectory as one of the signals the user reads when choosing
+`num_train_iter`. The trajectory was already collected internally
+at the existing stop-check cadence (one pre-training baseline plus
+one value every `stop_crit_win` iterations), so surfacing it
+requires no recomputation and no change to optimisation
+behaviour. This is diagnostic instrumentation for the DCDI
+budget decision, not a behavioural change.
+
+### What does NOT change
+
+- Training behaviour is unchanged: losses, optimiser, seeds,
+  stopping logic, thresholds, patience logic, graph thresholding,
+  sampler behaviour, and model outputs are all preserved
+  bit-for-bit. The change is a pure pass-through of an
+  already-computed list to `TrainingResult` and onward to the
+  wrapper diagnostics dict.
+- No `run.json` schema bump. The trajectory lives inside the
+  wrapper diagnostics dict, not as a top-level run-record field;
+  it is consumed by the C-P15 pilot probe and any later notebook
+  analysis but is not promoted to a mandatory `run.json` field.
+- No selection criterion, evaluation rule, or metric primitive
+  changes.
+- DCDI Commit 11 (loss-hook injection) remains paused. This
+  entry does not reopen Commit 11; it is purely a diagnostic
+  surface.
+
+### Consequence
+
+- The C-P15 DCDI training-budget pilot probe writes a compact
+  semicolon-delimited `validation_nll_trajectory_summary` field
+  in its CSV output, computed from the new diagnostic. The
+  summary covers count, finite/non-finite split, first / last /
+  finite-min / finite-argmin, a short numeric tail, and the
+  cadence.
+- The DCDI augmented-Lagrangian state (`final_gamma`,
+  `final_mu`, `gamma_update_iters`, `mu_update_iters`) was
+  already exposed on `model_specific_diagnostics`; the pilot
+  probe now records six additional columns derived from those
+  fields (`final_gamma`, `final_mu`, `gamma_update_count`,
+  `mu_update_count`, `last_gamma_update_iteration`,
+  `last_mu_update_iteration`).
+- Regression tests: the full pytest suite remains green
+  (666 passed, 2 pre-existing warnings unrelated to this
+  change). The DCDI training-equivalence regression test does
+  not consult the new field and is unaffected; a new
+  type-stability test asserts the field exists and is a list of
+  floats.
+- The pilot remains diagnostic-only. The user chooses
+  `num_train_iter` after reading the pilot output; this decision
+  log entry does not freeze a value.
