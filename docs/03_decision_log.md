@@ -1586,3 +1586,83 @@ budget decision, not a behavioural change.
 - The pilot remains diagnostic-only. The user chooses
   `num_train_iter` after reading the pilot output; this decision
   log entry does not freeze a value.
+
+---
+
+## 20/05/2026 -- DCDI training-budget ceiling frozen from C-P15 pilot
+
+### Decision
+
+`dcdi_num_train_iter = 300000` is adopted as the hard maximum
+iteration ceiling for DCDI in the selection study, with the
+existing patience-based early stopping enabled
+(`stop_crit_win = 100`, `train_patience = 5`,
+`h_threshold = 1e-8`). The ceiling is a training budget rather
+than a tunable hyperparameter; it MUST NOT be varied by held-out
+evaluation records and MUST NOT appear as one of the five Phase B
+configurations.
+
+### Evidence
+
+C-P15 full-pilot rows for reproduction-pool seeds 101, 102, 103
+in
+`inspection/probes/output/c_p15_dcdi_training_budget_pilot.csv`:
+
+- All three seeds reached the first patience gate well below
+  the `num_train_iter_cap = 300000` ceiling.
+- `final_iteration` values: 118900 (seed 101), 75300 (seed 102),
+  86700 (seed 103). Worst observed: 118900 on seed 101.
+- All three seeds finished with `graph_status = valid_dag`,
+  `sampler_status = available`, `training_status = converged`,
+  `final_h <= 1e-8` (8.83e-09, 9.19e-09, 7.89e-09 respectively).
+- `final_mu` shows substantial seed-to-seed variance
+  (approximately 2.25e+07 on seeds 102 and 103, approximately
+  3.69e+11 on seed 101), reflecting heterogeneity in how much
+  acyclicity pressure different ER2 graph realisations require
+  before `h` falls below the threshold.
+
+C-P11
+(`docs/04f_dcdi_sampler_quality_diagnostic.md`) was run at
+`n_iter = 30000` on a 3-node fixture and is scoped as
+under-budget diagnostic evidence. It is NOT binding evidence
+against real-budget DCDI behaviour at the 10-node ER2 cell.
+
+The pilot does NOT count as Phase A reproduction evidence. Phase
+A reproduction uses paper-aligned reproduction seeds and a
+separate acceptance protocol per `docs/02` Section 3.3.
+
+### What does NOT change
+
+- No selection criterion, no evaluation rule, no metric
+  primitive.
+- No `src/` change. The wrapper already exposes the diagnostic
+  fields used by the pilot (see the 20/05/2026 "Validation NLL
+  trajectory exposed on DCDI TrainingResult" entry).
+- No `run.json` schema bump.
+- DCDI Commit 11 (loss-hook injection) remains paused.
+- `docs/02_base_model_selection.md` is unchanged. The frame in
+  which this ceiling lives in the selection-study protocol is
+  the responsibility of the separate user-adjudicated `docs/02`
+  v1.6 amendment.
+
+### Consequence
+
+The DCDI training-budget question raised by `docs/08c` Section 2
+is resolved by adoption of the ceiling above. The following
+related items remain for the separate `docs/02` v1.6 amendment
+and any associated `docs/03` entries:
+
+- DAGMA paper-vs-library budget choice (`warm_iter`,
+  `max_iter`).
+- Phase B sparsity policy and grid endpoints.
+- C-P11 reapplication policy before held-out evaluation (rerun
+  at the new budget, or explicit scope-statement).
+- `mmd_n_samples = 1000` elevation to a top-level
+  `Configuration` field.
+- `n_train` and DCDI validation-split `n_val_dcdi`
+  `Configuration` fields.
+- Visual / reporting artefact requirements for notebook
+  inspection of the diagnostic trajectories.
+
+The full readout of the pilot evidence and the per-seed table
+is in `docs/08d_dcdi_training_budget_pilot.md`.
