@@ -420,6 +420,32 @@ def test_get_diagnostics_status_values_are_in_taxonomy() -> None:
     assert diag["sampler_status"] in typing.get_args(SamplerStatus)
 
 
+def test_get_diagnostics_exposes_validation_nll_history() -> None:
+    """convergence_info carries a validation-NLL trajectory.
+
+    The trajectory is the per-evaluation list collected by the
+    augmented-Lagrangian loop at the same cadence the loop already
+    uses (one pre-training baseline plus one value every
+    stop_crit_win iterations). The diagnostic field is type-stable:
+    a list of finite floats whose length is at least one (the
+    pre-training baseline).
+    """
+    wrapper = _fit_tiny_wrapper(seed=0, n_iter=20)
+    diag = wrapper.get_diagnostics()
+    convergence_info = diag["convergence_info"]
+    assert "validation_nll_history" in convergence_info
+    assert "validation_nll_stop_crit_win" in convergence_info
+    trajectory = convergence_info["validation_nll_history"]
+    assert isinstance(trajectory, list)
+    assert len(trajectory) >= 1
+    for value in trajectory:
+        assert isinstance(value, float)
+        assert not isinstance(value, bool)
+    cadence = convergence_info["validation_nll_stop_crit_win"]
+    assert isinstance(cadence, int) and not isinstance(cadence, bool)
+    assert cadence > 0
+
+
 def test_get_diagnostics_seed_and_n_iterations_are_int() -> None:
     """seed and n_iterations are plain Python ints, not numpy scalars."""
     wrapper = _fit_tiny_wrapper(seed=0, n_iter=20)

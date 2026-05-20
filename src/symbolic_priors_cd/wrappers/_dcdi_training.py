@@ -75,6 +75,12 @@ class TrainingResult:
     gamma_update_iters: list[int]
     mu_update_iters: list[int]
     log_alpha_snapshots: dict[int, torch.Tensor]
+    # Per-evaluation validation NLL trajectory captured at the same
+    # cadence the training loop already evaluates it: one pre-training
+    # baseline followed by one value every stop_crit_win iterations.
+    # The list is read-only diagnostic output; the loop does not
+    # consume it after collection.
+    validation_nll_history: list[float]
 
 
 def _is_acyclic_bool(adj: np.ndarray) -> bool:
@@ -365,4 +371,5 @@ def run_dcdi_training_loop(
         gamma_update_iters=gamma_update_iters,
         mu_update_iters=mu_update_iters,
         log_alpha_snapshots=log_alpha_snapshots,
+        validation_nll_history=[float(v) for v in val_history],
     )

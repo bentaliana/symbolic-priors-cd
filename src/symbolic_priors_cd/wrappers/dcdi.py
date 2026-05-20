@@ -530,6 +530,10 @@ class DCDIWrapper:
             "mu_update_iters": list(result.mu_update_iters),
             "n_iterations_completed": int(result.n_iterations),
             "n_iter_configured": int(self._n_iter_configured),
+            "validation_nll_history": [
+                float(v) for v in result.validation_nll_history
+            ],
+            "validation_nll_stop_crit_win": int(cfg.stop_crit_win),
         }
 
         numerical_tolerances: dict[str, float] = {

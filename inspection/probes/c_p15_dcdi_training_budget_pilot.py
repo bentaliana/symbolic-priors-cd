@@ -106,6 +106,12 @@ CSV_COLUMNS = (
     "first_stop_iteration",
     "second_stop_iteration",
     "final_h",
+    "final_gamma",
+    "final_mu",
+    "gamma_update_count",
+    "mu_update_count",
+    "last_gamma_update_iteration",
+    "last_mu_update_iteration",
     "graph_status",
     "sampler_status",
     "training_status",
@@ -167,6 +173,67 @@ def _build_dcdi_config():
 _TRAIN_DATA_SEED_OFFSET = 7919
 _VALIDATION_DATA_SEED_OFFSET = 4111
 
+# Number of trailing validation-NLL values included in the row
+# summary. Kept small so the CSV cell remains human-readable.
+_VAL_NLL_TAIL_LENGTH = 5
+
+
+def _summarise_validation_nll(convergence_info) -> str:
+    """Return a compact semicolon-delimited summary of validation NLLs.
+
+    Reads ``validation_nll_history`` and ``validation_nll_stop_crit_win``
+    from the wrapper's convergence-info diagnostics. Non-finite
+    values (NaN or +/-inf) are counted separately as
+    ``nonfinite_count``; the ``min`` and ``argmin`` fields are
+    computed over finite values only and report ``not_exposed``
+    when no finite value exists. The summary returns
+    ``not_exposed`` when the history is absent or empty so the
+    schema stays stable across wrapper versions.
+    """
+    import math
+
+    if not isinstance(convergence_info, dict):
+        return "not_exposed"
+    history = convergence_info.get("validation_nll_history")
+    cadence = convergence_info.get("validation_nll_stop_crit_win")
+    if not isinstance(history, list) or not history:
+        return "not_exposed"
+    numeric_history = [
+        float(v) for v in history if isinstance(v, (int, float))
+        and not isinstance(v, bool)
+    ]
+    if len(numeric_history) != len(history):
+        return "not_exposed"
+    count = len(numeric_history)
+    finite_indices = [
+        i for i, v in enumerate(numeric_history) if math.isfinite(v)
+    ]
+    nonfinite_count = count - len(finite_indices)
+    first = numeric_history[0]
+    last = numeric_history[-1]
+    if finite_indices:
+        argmin_index = min(finite_indices, key=lambda i: numeric_history[i])
+        minimum = numeric_history[argmin_index]
+        min_str = f"{minimum:.6g}"
+        argmin_str = str(argmin_index)
+    else:
+        min_str = "not_exposed"
+        argmin_str = "not_exposed"
+    tail = numeric_history[-_VAL_NLL_TAIL_LENGTH:]
+    tail_str = "[" + ",".join(f"{v:.6g}" for v in tail) + "]"
+    parts = [
+        f"count={count}",
+        f"nonfinite_count={nonfinite_count}",
+        f"first={first:.6g}",
+        f"last={last:.6g}",
+        f"min={min_str}",
+        f"argmin={argmin_str}",
+        f"tail={tail_str}",
+    ]
+    if isinstance(cadence, int) and cadence > 0:
+        parts.append(f"stop_crit_win={int(cadence)}")
+    return ";".join(parts)
+
 
 def _fit_one(
     *,
@@ -209,6 +276,7 @@ def _fit_one(
 
     diagnostics = wrapper.get_diagnostics()
     model_specific = diagnostics["model_specific_diagnostics"]
+    convergence_info = diagnostics.get("convergence_info")
     training_status = str(diagnostics["training_status"])
     graph_status = str(diagnostics["graph_status"])
     sampler_status = str(diagnostics["sampler_status"])
@@ -223,6 +291,39 @@ def _fit_one(
         if isinstance(model_specific, dict)
         else None
     )
+    final_gamma = (
+        model_specific.get("final_gamma")
+        if isinstance(model_specific, dict)
+        else None
+    )
+    final_mu = (
+        model_specific.get("final_mu")
+        if isinstance(model_specific, dict)
+        else None
+    )
+    gamma_update_iters = (
+        model_specific.get("gamma_update_iters")
+        if isinstance(model_specific, dict)
+        else None
+    )
+    mu_update_iters = (
+        model_specific.get("mu_update_iters")
+        if isinstance(model_specific, dict)
+        else None
+    )
+    if not isinstance(gamma_update_iters, list):
+        gamma_update_iters = []
+    if not isinstance(mu_update_iters, list):
+        mu_update_iters = []
+    gamma_update_count = len(gamma_update_iters)
+    mu_update_count = len(mu_update_iters)
+    last_gamma_update_iteration = (
+        int(gamma_update_iters[-1]) if gamma_update_iters else "not_exposed"
+    )
+    last_mu_update_iteration = (
+        int(mu_update_iters[-1]) if mu_update_iters else "not_exposed"
+    )
+    validation_nll_summary = _summarise_validation_nll(convergence_info)
 
     return {
         "seed": int(fit_seed),
@@ -243,11 +344,21 @@ def _fit_one(
         "final_h": (
             "not_exposed" if final_h is None else float(final_h)
         ),
+        "final_gamma": (
+            "not_exposed" if final_gamma is None else float(final_gamma)
+        ),
+        "final_mu": (
+            "not_exposed" if final_mu is None else float(final_mu)
+        ),
+        "gamma_update_count": int(gamma_update_count),
+        "mu_update_count": int(mu_update_count),
+        "last_gamma_update_iteration": last_gamma_update_iteration,
+        "last_mu_update_iteration": last_mu_update_iteration,
         "graph_status": graph_status,
         "sampler_status": sampler_status,
         "training_status": training_status,
         "runtime_seconds": float(runtime_seconds),
-        "validation_nll_trajectory_summary": "not_exposed",
+        "validation_nll_trajectory_summary": validation_nll_summary,
     }
 
 
