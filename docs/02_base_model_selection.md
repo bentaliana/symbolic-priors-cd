@@ -3,7 +3,7 @@
 ## Status
 
 Frozen protocol for base-model selection.  
-Version 1.6.  
+Version 1.7.  
 This document defines how the thesis chooses between DAGMA-linear and DCDI-G as the base differentiable causal discovery model for the main study.
 
 ---
@@ -16,6 +16,7 @@ This document defines how the thesis chooses between DAGMA-linear and DCDI-G as 
 - **v1.4**: editorial amendment removing stale deferred-SID phrasing now that SID is implemented and verified (see `docs/phase_2d_sid_readout.md` and the 15/05/2026 SID closure entry in `docs/03_decision_log.md`). Edits: Section 3.4 SID logging bullet rewritten as a plain mandatory integer field with no deferred branch; Section 7 item 5 threshold-robustness wording updated to drop "SID once integrated"; Section 7 item 6 replaced with a closing statement that SID is implemented and verified and that selection-study conclusions are no longer deferred on the SID side. No frozen tactical constant changed; no change to the lexicographic decision rule, the disqualification conditions, the tie-breaker logic, the timeline and budget, or the seed-discipline statement.
 - **v1.5**: editorial amendment relaxing the Section 3.5 uniform seed-setter requirement to apply only to candidates whose fit path depends on global RNG state. For candidates verified-deterministic by construction (DAGMA, per `docs/04b_source_inspection.md` D-6 and `docs/04c_runtime_probe_results.md` D-P2), the wrapper MUST NOT call the corresponding global RNG setters, and the corresponding seed fields in the run record MUST be null; null in these fields means the corresponding setter was not called because the fit is deterministic by construction. DCDI seed discipline is preserved; DCDI continues to call `torch.manual_seed` and `np.random.seed` per the implemented wrapper. This amendment resolves the `docs/08a_experiment_tracking_and_results_schema.md` Section 16.1 conflict by adopting Option A and is recorded as Commit 2 of `docs/08_base_model_selection_plan.md`. No frozen tactical constant in Section 9 changed; no change to the lexicographic decision rule, the disqualification conditions, the tie-breaker logic, or the timeline and budget. The DAGMA wrapper at `src/symbolic_priors_cd/wrappers/dagma.py` is unchanged.
 - **v1.6**: real-run constants and Phase B sparsity-fairness amendment, prior to the runner's Configuration extension and Commit 8 Phase A work. Six classes of change: (a) DCDI training-budget ceiling frozen at `dcdi_num_train_iter = 300000` from the C-P15 pilot recorded in `docs/08d_dcdi_training_budget_pilot.md` and the corresponding 20/05/2026 `docs/03` entry; the ceiling is a budget, not a hyperparameter, and must not be varied by Phase B or held-out evaluation. (b) DAGMA paper-aligned optimisation values added (`warm_iter = 20000`, `max_iter = 70000`, Adam `lr = 3e-4`, `(beta_1, beta_2) = (0.99, 0.999)`) per DAGMA paper Section C.1.1; these override library defaults at the call site. The DAGMA paper specifies a relative-loss convergence rule, but the current wrapper does not implement or expose a separate observed early-stopping iteration count, so DAGMA `n_iterations` remains `None` at the run-record top level and the configured optimisation upper bound is recorded under `model_specific_diagnostics`. No new DAGMA early-stopping mechanism is introduced. (c) Phase B sparsity calibration symmetrised upward: DAGMA receives a 5-value `lambda1` grid `{0.01, 0.025, 0.05, 0.1, 0.25}` centred on the paper anchor `0.05`; DCDI's previous wide sparsity sweep is replaced with a 5-value `reg_coeff` grid `{0.01, 0.03, 0.1, 0.3, 1.0}` centred on the upstream anchor `0.1`. Each grid is model-native, not numerically matched across models, and frozen before execution; no post-hoc grid expansion is permitted. (d) Section 4.2 MMD sample-size wording tightened to read `mmd_n_samples = 1000` as a top-level Configuration field that enters `configuration_hash`. (e) C-P11-style sampler-quality diagnostic must be rerun at the real DCDI budget before held-out interpretation; the original C-P11 at 30 000 iterations on a 3-node fixture is scoped as under-budget evidence and is not binding against real-budget DCDI. (f) Section 9 tactical-constants block extended with the corresponding bullets. No change to the lexicographic decision rule, disqualification conditions, tie-breaker logic, intervention values, threshold values, threshold robustness triples, calibration/evaluation seed split, timeline, or budget. No source code or wrapper change is introduced by this document.
+- **v1.7**: seed-pool integers frozen for the selection study. The three seed populations and their integer members are now `reproduction = (101, 102, 103)`, `calibration = (201, 202)`, and `held_out_evaluation = (301, 302, 303, 304, 305)`. The three pools are disjoint by construction. The Phase A reproduction pass uses the three reproduction-pool seeds; Phase B calibration uses the two calibration-pool seeds per configuration; held-out evaluation uses the five held-out-evaluation seeds. Seed integers participate in `configuration_hash`, so they had to be pre-specified before Phase A, Phase B, or held-out config files can be created. The C-P15 DCDI training-budget pilot used the same integers `(101, 102, 103)` as the reproduction pool, but the C-P15 CSV remains pilot-only diagnostic evidence and does NOT count as Phase A reproduction-pass evidence per the 20/05/2026 "DCDI training-budget ceiling frozen from C-P15 pilot" `docs/03` entry and `docs/08d`. Phase A reruns these seed identifiers through the full selection-study pipeline and produces separate local artefacts (`run.json`, `config_resolved`, SHD, SID, MMD, threshold-robustness records); convergence properties on the same seeds are expected to reproduce because the fit path is deterministic, but the formal evidence source is the Phase A run, not the C-P15 pilot CSV. No selection rule, no metric, no model budget, no Phase B sparsity grid, no threshold value, no evaluation rule, and no visual-artefact policy is changed by this amendment.
 
 ---
 
@@ -120,6 +121,16 @@ Run DCDI-G in the observational setting by using the formulation where the obser
 
 The held-out evaluation phase uses **5 independent evaluation seeds** per model per condition. Phase B additionally uses **2 calibration seeds per configuration**, as described below.
 
+#### Seed-pool convention
+
+The selection study uses three disjoint seed populations whose integer members are frozen as a single block so they can enter `configuration_hash` consistently across Phase A, Phase B, and held-out evaluation:
+
+- `reproduction = (101, 102, 103)`
+- `calibration = (201, 202)`
+- `held_out_evaluation = (301, 302, 303, 304, 305)`
+
+The three pools are disjoint by construction. The pool name on a given run is recorded as `seed_population` in the run record. The C-P15 DCDI training-budget pilot reused the integers `(101, 102, 103)` from the reproduction pool, but the C-P15 CSV remains pilot-only diagnostic evidence per `docs/08d` and the 20/05/2026 `docs/03` entry; Phase A reruns these seed identifiers through the full selection-study pipeline and is the formal evidence source.
+
 #### Justification
 
 The selection study is a selection procedure designed to detect large practical differences, not to estimate final effect sizes precisely. Five seeds provide enough information for a defensible selection while keeping compute manageable.
@@ -142,9 +153,11 @@ For DCDI-G, the reproduction pass uses the closest reported DCD-no-interv linear
 
 Any mismatch between the paper-reported cell and the project reproduction cell must be recorded before the reproduction result is interpreted.
 
+Phase A uses the three reproduction-pool seeds `(101, 102, 103)` per the seed-pool convention above.
+
 #### Phase B: equal-budget local calibration
 
-After the reproduction pass, each model is given a small equal-budget local calibration opportunity on the selection study cell. The budget is **exactly 5 configurations per model and 2 calibration seeds per configuration**. The 5 DAGMA configurations are the 5 values of the `lambda1` grid frozen in the DAGMA starting point; the 5 DCDI configurations are the 5 values of the `reg_coeff` grid frozen in the DCDI starting point. Each grid is model-native and is frozen before execution. No post-hoc grid expansion is allowed after seeing calibration or held-out results. The selected configuration from Phase B is then evaluated on **5 held-out evaluation seeds** that do not overlap with the 2 calibration seeds. The total seed budget per model is therefore 2 calibration seeds plus 5 held-out evaluation seeds, drawn from independent populations and recorded.
+After the reproduction pass, each model is given a small equal-budget local calibration opportunity on the selection study cell. The budget is **exactly 5 configurations per model and 2 calibration seeds per configuration**. The 5 DAGMA configurations are the 5 values of the `lambda1` grid frozen in the DAGMA starting point; the 5 DCDI configurations are the 5 values of the `reg_coeff` grid frozen in the DCDI starting point. Each grid is model-native and is frozen before execution. No post-hoc grid expansion is allowed after seeing calibration or held-out results. The two calibration seeds per configuration are the two calibration-pool seeds `(201, 202)` from the seed-pool convention above. The selected configuration from Phase B is then evaluated on the **5 held-out evaluation seeds** `(301, 302, 303, 304, 305)` from the held-out-evaluation pool, which do not overlap with the 2 calibration seeds. The total seed budget per model is therefore 2 calibration seeds plus 5 held-out evaluation seeds, drawn from independent populations and recorded.
 
 Calibration and evaluation seeds must not overlap. This prevents the leakage path where the configuration is selected on the same seeds it is later evaluated on. If compute pressure forces reuse, the resulting Criterion 1 numbers must be reported as **descriptive** rather than as held-out evaluation, and the selection-study report must state explicitly that the seed pools overlap.
 
@@ -548,6 +561,7 @@ The following constants are frozen for the selection study only and do **not** a
 - DCDI validation split: 800 fit samples and 200 validation samples drawn deterministically from the `n_train = 1000` observational batch; DCDI only
 - MMD model-batch size: `mmd_n_samples = 1000` model-generated samples per intervention condition
 - Phase B seed split: **2 calibration seeds per configuration** plus **5 held-out evaluation seeds**, non-overlapping
+- seed-pool integers: `reproduction = (101, 102, 103)`, `calibration = (201, 202)`, `held_out_evaluation = (301, 302, 303, 304, 305)` (the three pools are disjoint by construction)
 - intervention values: \(\{-2, +2\}\)
 - catastrophic SHD-degradation threshold: >50%
 - SID tie margin inside Criterion 1: 10%

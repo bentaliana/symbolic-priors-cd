@@ -2085,3 +2085,73 @@ adjudication before
 `experiments/selection_study/configs/phase_a/*.json` can be
 written. Once pinned, the config files plus their loading and
 preflight tests can be added under the same authorisation.
+
+---
+
+## 20/05/2026 -- docs/02 v1.7 seed-pool integers frozen
+
+### Decision
+
+`docs/02` is amended to v1.7. The three selection-study seed
+populations and their integer members are frozen as a single
+block:
+
+- `reproduction = (101, 102, 103)`
+- `calibration = (201, 202)`
+- `held_out_evaluation = (301, 302, 303, 304, 305)`
+
+The three pools are disjoint by construction. Phase A uses the
+three reproduction-pool seeds; Phase B uses the two
+calibration-pool seeds per configuration; held-out evaluation
+uses the five held-out-evaluation seeds. The amendment touches
+Section 3.3 (new "Seed-pool convention" subsection plus explicit
+pool references in the Phase A, Phase B, and held-out paragraphs)
+and Section 9 (new tactical-constants bullet listing the three
+pool integer sets).
+
+### Reason
+
+Seed integers participate in `configuration_hash` (they are
+serialised inside `canonical_json`'s `seed_populations` field),
+so they had to be pre-specified before any Phase A, Phase B, or
+held-out config file could be written. The previous 20/05/2026
+"Phase A real-study protocol guard added; Phase A config files
+blocked on seed integers" entry recorded that the config files
+were blocked on exactly this ambiguity; this amendment closes
+the gap.
+
+### C-P15 distinction
+
+The C-P15 DCDI training-budget pilot reused the integers
+`(101, 102, 103)` from the reproduction pool, but the C-P15
+CSV remains pilot-only diagnostic evidence per the 20/05/2026
+"DCDI training-budget ceiling frozen from C-P15 pilot" entry and
+`docs/08d_dcdi_training_budget_pilot.md`. Phase A reruns these
+seed identifiers through the full selection-study pipeline and
+produces separate local artefacts (`run.json`, `config_resolved`,
+SHD, SID, MMD, threshold-robustness records); convergence
+properties on the same seeds are expected to reproduce because
+the fit path is deterministic, but the formal evidence source is
+the Phase A run, not the C-P15 pilot CSV.
+
+### What does NOT change
+
+- No source code, no test, no `experiments/selection_study/`
+  edit by this commit.
+- No selection criterion, evaluation rule, wrapper algorithm,
+  metric primitive, model training budget, Phase B sparsity
+  grid, threshold value, or visual / reporting artefact policy.
+- `docs/08c`, `docs/08d`, and the other planning artefacts are
+  not modified.
+
+### Consequence
+
+- The Phase A `experiments/selection_study/configs/phase_a/*.json`
+  config files unblocked in the prior 8b entry can now be
+  written in a follow-up commit under the same authorisation.
+- Phase B and held-out-evaluation configurations may now be
+  written when their respective Phase B / Phase C commits open.
+- `Configuration` instances constructed from these JSON files
+  carry the frozen pool integers inside `configuration_hash`,
+  so a Phase A re-run on the same seeds reproduces the same
+  identity tuple.
