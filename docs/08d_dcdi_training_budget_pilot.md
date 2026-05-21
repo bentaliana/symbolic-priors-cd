@@ -310,6 +310,19 @@ following interpretation rules apply:
    evidence.** Phase A reproduction uses the paper-aligned cell
    defined in `docs/02` Section 3.3 with its own seed pool. The
    pilot's reproduction-pool seeds are pilot-only artefacts.
+   _Supersession note (docs/02 v1.8 Path B, 21/05/2026): under
+   Path B the current Phase A / reproduction_pass configs are
+   thesis-cell compatibility / runner-sanity configs (10-node
+   ER2), not paper-aligned configs. The "Phase A reproduction
+   uses the paper-aligned cell" wording above describes the
+   protocol intent prior to Path B; for the current execution
+   read "Phase A reproduction uses the thesis-cell compatibility
+   configs". The pilot still does not count as reproduction-pass
+   evidence under Path B; C-P15 remains pilot-only diagnostic
+   evidence per `docs/03` 20/05/2026 and the C-P15 CSV is not a
+   substitute for the runner artefacts produced by an actual
+   reproduction-pass run on the thesis-cell compatibility
+   configs._
 3. **The pilot does not consult calibration or held-out
    evaluation seeds.** Any future `--seeds` override must
    honour this constraint.
@@ -440,6 +453,13 @@ What the 300k pilot does NOT say:
 - The pilot does NOT count as Phase A reproduction evidence.
   Phase A uses paper-aligned reproduction seeds and a separate
   acceptance protocol per `docs/02` Section 3.3.
+  _Supersession note (docs/02 v1.8 Path B, 21/05/2026):_ under
+  Path B the current Phase A / reproduction_pass configs are
+  thesis-cell compatibility / runner-sanity configs on the
+  10-node ER2 selection cell; paper-aligned reproduction is
+  deferred per `docs/02` Section 12.6. The bullet's substantive
+  claim (the pilot does NOT count as Phase A reproduction
+  evidence) is unchanged under Path B.
 - A high `final_mu` does not by itself indicate a problem; in
   DCDI's augmented-Lagrangian schedule it is the price paid for
   driving `h` below the threshold on a hard graph.

@@ -3,7 +3,7 @@
 ## Status
 
 Frozen protocol for base-model selection.  
-Version 1.7.  
+Version 1.8.  
 This document defines how the thesis chooses between DAGMA-linear and DCDI-G as the base differentiable causal discovery model for the main study.
 
 ---
@@ -17,6 +17,7 @@ This document defines how the thesis chooses between DAGMA-linear and DCDI-G as 
 - **v1.5**: editorial amendment relaxing the Section 3.5 uniform seed-setter requirement to apply only to candidates whose fit path depends on global RNG state. For candidates verified-deterministic by construction (DAGMA, per `docs/04b_source_inspection.md` D-6 and `docs/04c_runtime_probe_results.md` D-P2), the wrapper MUST NOT call the corresponding global RNG setters, and the corresponding seed fields in the run record MUST be null; null in these fields means the corresponding setter was not called because the fit is deterministic by construction. DCDI seed discipline is preserved; DCDI continues to call `torch.manual_seed` and `np.random.seed` per the implemented wrapper. This amendment resolves the `docs/08a_experiment_tracking_and_results_schema.md` Section 16.1 conflict by adopting Option A and is recorded as Commit 2 of `docs/08_base_model_selection_plan.md`. No frozen tactical constant in Section 9 changed; no change to the lexicographic decision rule, the disqualification conditions, the tie-breaker logic, or the timeline and budget. The DAGMA wrapper at `src/symbolic_priors_cd/wrappers/dagma.py` is unchanged.
 - **v1.6**: real-run constants and Phase B sparsity-fairness amendment, prior to the runner's Configuration extension and Commit 8 Phase A work. Six classes of change: (a) DCDI training-budget ceiling frozen at `dcdi_num_train_iter = 300000` from the C-P15 pilot recorded in `docs/08d_dcdi_training_budget_pilot.md` and the corresponding 20/05/2026 `docs/03` entry; the ceiling is a budget, not a hyperparameter, and must not be varied by Phase B or held-out evaluation. (b) DAGMA paper-aligned optimisation values added (`warm_iter = 20000`, `max_iter = 70000`, Adam `lr = 3e-4`, `(beta_1, beta_2) = (0.99, 0.999)`) per DAGMA paper Section C.1.1; these override library defaults at the call site. The DAGMA paper specifies a relative-loss convergence rule, but the current wrapper does not implement or expose a separate observed early-stopping iteration count, so DAGMA `n_iterations` remains `None` at the run-record top level and the configured optimisation upper bound is recorded under `model_specific_diagnostics`. No new DAGMA early-stopping mechanism is introduced. (c) Phase B sparsity calibration symmetrised upward: DAGMA receives a 5-value `lambda1` grid `{0.01, 0.025, 0.05, 0.1, 0.25}` centred on the paper anchor `0.05`; DCDI's previous wide sparsity sweep is replaced with a 5-value `reg_coeff` grid `{0.01, 0.03, 0.1, 0.3, 1.0}` centred on the upstream anchor `0.1`. Each grid is model-native, not numerically matched across models, and frozen before execution; no post-hoc grid expansion is permitted. (d) Section 4.2 MMD sample-size wording tightened to read `mmd_n_samples = 1000` as a top-level Configuration field that enters `configuration_hash`. (e) C-P11-style sampler-quality diagnostic must be rerun at the real DCDI budget before held-out interpretation; the original C-P11 at 30 000 iterations on a 3-node fixture is scoped as under-budget evidence and is not binding against real-budget DCDI. (f) Section 9 tactical-constants block extended with the corresponding bullets. No change to the lexicographic decision rule, disqualification conditions, tie-breaker logic, intervention values, threshold values, threshold robustness triples, calibration/evaluation seed split, timeline, or budget. No source code or wrapper change is introduced by this document.
 - **v1.7**: seed-pool integers frozen for the selection study. The three seed populations and their integer members are now `reproduction = (101, 102, 103)`, `calibration = (201, 202)`, and `held_out_evaluation = (301, 302, 303, 304, 305)`. The three pools are disjoint by construction. The Phase A reproduction pass uses the three reproduction-pool seeds; Phase B calibration uses the two calibration-pool seeds per configuration; held-out evaluation uses the five held-out-evaluation seeds. Seed integers participate in `configuration_hash`, so they had to be pre-specified before Phase A, Phase B, or held-out config files can be created. The C-P15 DCDI training-budget pilot used the same integers `(101, 102, 103)` as the reproduction pool, but the C-P15 CSV remains pilot-only diagnostic evidence and does NOT count as Phase A reproduction-pass evidence per the 20/05/2026 "DCDI training-budget ceiling frozen from C-P15 pilot" `docs/03` entry and `docs/08d`. Phase A reruns these seed identifiers through the full selection-study pipeline and produces separate local artefacts (`run.json`, `config_resolved`, SHD, SID, MMD, threshold-robustness records); convergence properties on the same seeds are expected to reproduce because the fit path is deterministic, but the formal evidence source is the Phase A run, not the C-P15 pilot CSV. No selection rule, no metric, no model budget, no Phase B sparsity grid, no threshold value, no evaluation rule, and no visual-artefact policy is changed by this amendment.
+- **v1.8**: Path B reproduction-pass clarification, documentation-only. Local verification before any reproduction-pass execution found that (a) the DAGMA paper contains no 10-node empirical recovery benchmark of any density (the closest small linear-Gaussian evidence is the d = 20 Table 1 aggregate on page 21 over ER4 / SF4 graphs and Gaussian / Exponential / Gumbel noise; Figures 1 and 2 of the DAGMA paper are numerical-cycle / characterization illustrations, not recovery benchmarks); (b) the DCDI paper Table 7 in Appendix C.4.1 reports DCD-no-interv at 10-node `e = 1` and `e = 4` only, with no `e = 2` row, and the DCDI synthetic data generator (paper Appendix B.1, page 26) differs from the project data generator. Under Path B the project distinguishes (i) the **thesis selection cell** (10-node ER2, `expected_edges = 20`), (ii) the **current reproduction_pass configs** ([experiments/selection_study/configs/reproduction/dagma_reproduction.json](experiments/selection_study/configs/reproduction/dagma_reproduction.json), [experiments/selection_study/configs/reproduction/dcdi_reproduction.json](experiments/selection_study/configs/reproduction/dcdi_reproduction.json)), which carry the thesis selection cell and serve as **thesis-cell compatibility / runner-sanity configs**, and (iii) a possible future **strict paper-DGP reproduction sub-study**, which is deferred but not foreclosed. Section 3.3 Phase A is interpreted accordingly: under the current configs the reproduction pass verifies end-to-end runner correctness, schema/artefact generation, and compatibility with the 10-node ER2 thesis selection cell, but it does NOT strictly reproduce any paper or supplement result. Section 5 Disqualification item 2 is amended (see Section 5 below): the "within 20% paper-reproduction" disqualification applies only when a direct or explicitly frozen closely aligned paper target exists for the candidate before results are observed; where no such target exists, paper-reproduction comparison is reported as "not directly evaluable", not "passed". A new Section 12 records the local verification findings, the Path B decision, the deferred future paper-DGP reproduction sub-study, and the viva-defensibility chain that does not depend on strict paper reproduction. No source code, no test, no config JSON, no real-study guard, no schema, and no seed pool is changed by this amendment. NotebookLM was used as a cross-check; local verification against `papers/DAGMA.pdf`, `papers/DCDI.pdf`, and the repository remains the operational source of truth.
 
 ---
 
@@ -432,7 +433,7 @@ A model is considered catastrophically dependent on scale artefacts if mean SHD 
 A model is disqualified if any of the following occurs:
 
 1. it cannot be installed and run within **5 working days**;
-2. it cannot reproduce one paper/supplement result within **20%** on the selection study cell or a closely aligned cell;
+2. it cannot reproduce one paper/supplement result within **20%** on a direct or explicitly frozen closely aligned cell, **provided such a target exists for the candidate and was frozen before results were observed** (see Section 12 for the Path B clarification: where no direct or explicitly frozen closely aligned paper target exists for the candidate, paper-reproduction comparison is reported as **"not directly evaluable"**, NOT as "passed"; in that case disqualification item 2 does not fire, and the selection-study report must record the absence of a paper-aligned target explicitly);
 3. it produces NaN, divergence, or non-converged training in **more than 50%** of selection study seeds;
 4. it cannot produce usable intervention outputs for Criterion 1 without ad hoc undocumented modifications;
 5. it fails the prior-injection smoke test in a way that shows the penalty does not meaningfully act on the native edge object.
@@ -616,3 +617,92 @@ Once the selection study winner is declared, the next required document is:
 **03_main_study_execution_protocol.md**
 
 Its role is to freeze the main-study tactical constants for the chosen base model without reopening the structural commitments already fixed in Document 01.
+
+---
+
+## 12. Path B clarification of the reproduction pass (v1.8)
+
+This section is added by v1.8. It does not modify the lexicographic selection rule in Section 2, the metrics in Section 4, the tiebreakers in Section 6, the tactical constants in Section 9, the timeline / budget in Section 8, or the seed-pool freeze in Section 3.3. It clarifies what the reproduction pass currently verifies and what it does not, and it amends the scope of Section 5 disqualification item 2 accordingly.
+
+### 12.1 Three distinct cell categories
+
+The selection study distinguishes three categories of synthetic cell:
+
+- **Thesis selection cell.** 10-node Erdos-Renyi DAG, `expected_edges = 2 * n_nodes = 20` (ER2), linear-Gaussian SCM, unit-variance Gaussian noise, observational sample size `n_train = 1000`. This is the cell on which Criterion 1, Criterion 2, and Criterion 3 are evaluated in Phase B calibration and held-out evaluation. It is frozen by Section 3.1 and Section 9 and remains unchanged under v1.8.
+- **Current reproduction_pass configs.** The two JSON files [experiments/selection_study/configs/reproduction/dagma_reproduction.json](experiments/selection_study/configs/reproduction/dagma_reproduction.json) and [experiments/selection_study/configs/reproduction/dcdi_reproduction.json](experiments/selection_study/configs/reproduction/dcdi_reproduction.json) carry the thesis selection cell verbatim. Under Path B these configs serve as **thesis-cell compatibility / runner-sanity configs**. They are not paper-aligned reproduction cells. They are retained because they correctly enforce thesis-cell compatibility and because the real-study guard in [experiments/selection_study/real_study.py](experiments/selection_study/real_study.py) is unchanged under v1.8.
+- **Strict paper-DGP reproduction cells.** A future optional sub-study that would reproduce a paper-reported recovery cell (e.g. DAGMA d = 20 ER4 with Gaussian noise from paper Table 1; DCDI 10-node `e = 1` or `e = 4` DCD-no-interv from paper Table 7, with the DCDI synthetic generator described on paper Appendix B.1 page 26). This sub-study is **deferred** in v1.8, not foreclosed. Section 12.5 records the decision conditions for opening it.
+
+### 12.2 What the current reproduction pass verifies
+
+Under the current configs, the reproduction pass verifies the following sanity properties end-to-end:
+
+- the runner loads a real-study configuration, applies the protocol guard, enumerates and validates the preflight manifest, drives the schema-conformance pipeline for every reproduction-pool entry, and writes a reproduction-pass summary artefact;
+- the run-record schema, the canonical-JSON conventions, and the `configuration_hash` derivation are exercised on real-study constants;
+- the DAGMA and DCDI wrappers produce a thresholded adjacency, a continuous edge object, threshold-robustness sibling records, and the per-intervention MMD records expected by the run schema;
+- the runner is compatible with the 10-node ER2 thesis selection cell, i.e. the same data-generation parameters that Phase B calibration and held-out evaluation will consume;
+- the per-run `graph_status`, `sampler_status`, and `training_status` taxonomy is exercised on a real-study cell;
+- the offline threshold-robustness recomputation produces a sibling artefact for every completed run.
+
+These properties verify implementation correctness on the thesis cell. They do not, by themselves, constitute scientific reproduction of any paper or supplement result.
+
+### 12.3 What the current reproduction pass does not verify
+
+Under the current configs, the reproduction pass does NOT:
+
+- reproduce any DAGMA-paper recovery cell. The DAGMA paper contains no empirical recovery benchmark at d = 10 of any density; the closest small linear-Gaussian evidence is paper Table 1 page 21, which is averaged across ER4 / SF4 graphs and Gaussian / Exponential / Gumbel noise at d in {20, 30, 50, 80, 100}. The paper-text Figure 1 (page 6) is a 2-node toy illustration of the log-det characterization, and the paper-text Figure 2 (page 7) plots the numerical decay of `h_expm` / `h_poly` on a single cycle graph (the "Argument (i)" gradient-vanishing illustration that mentions d in [10, 13]); neither is a recovery benchmark.
+- reproduce any DCDI-paper recovery cell directly. The DCDI paper Table 7 in Appendix C.4.1 page 38 contains rows for DCD-no-interv at 10 nodes with `e = 1` (SHD = 8.9 +/- 2.8, SID = 19.5 +/- 10.9) and `e = 4` (SHD = 26.7 +/- 5.9, SID = 69.0 +/- 11.4). There is no `e = 2` row at 10 nodes; the project's `expected_edges = 20` density is between the two published densities. The DCDI synthetic data generator (paper Appendix B.1, page 26) differs from the project's data generator on weight magnitude range (paper: Uniform([-1, -0.25] union [0.25, 1]); project: Uniform([-2, -0.5] union [0.5, 2])), on the noise multiplier (paper: `0.4 * N_j`; project: no multiplier), on the per-node noise variance distribution (paper: `sigma_j^2 ~ U[1, 2]`; project: fixed unit variance), and on whether the data are standardised before fitting (paper: mean-subtracted and divided by standard deviation; project: `condition = "centred_only"` by default for the reproduction pass).
+- constitute base-model selection evidence. Selection-rule evidence is produced by Phase B calibration and held-out evaluation on the thesis selection cell, not by the reproduction pass.
+
+### 12.4 Section 5 item 2 under Path B
+
+Section 5 item 2 (as amended in v1.8) requires the existence of a direct or explicitly frozen closely aligned paper target before the within-20% paper-reproduction disqualification can fire. Under the current configs neither DAGMA nor DCDI has such a target frozen for the 10-node ER2 thesis cell. The selection-study report must therefore record, for each candidate:
+
+- whether a direct paper-reported recovery cell exists at the thesis selection cell (under the local verification recorded in v1.8 the answer is "no" for DAGMA at d = 10, and "no for `e = 2`" for DCDI at d = 10);
+- whether an explicitly frozen closely aligned paper cell exists for the candidate (under Path B the answer is "no" for both candidates; a future paper-DGP sub-study under Section 12.5 may change this);
+- accordingly, the candidate's paper-reproduction comparison is reported as **"not directly evaluable"** rather than **"passed"**.
+
+Section 5 item 2 therefore does not fire for the current Phase A configs under v1.8. Items 1, 3, 4, and 5 of Section 5 continue to apply unchanged.
+
+### 12.5 Viva-defensibility chain that does not depend on strict paper reproduction
+
+Under Path B the implementation correctness of DAGMA-linear and DCDI-G is established by a chain of evidence that does not require strict paper reproduction:
+
+- wrapper source inspection: `docs/04b_source_inspection.md`, `docs/04c_runtime_probe_plan.md`, `docs/04c_runtime_probe_results.md` (probes D-P*, C-P1, C-P2, D-P4, etc.);
+- DAGMA wrapper closure (docs/06 Commits 1-10) and DCDI wrapper closure (docs/05 Commits 1-9);
+- metric verification: SID closure entry in `docs/03_decision_log.md` (15/05/2026) and `docs/phase_2d_sid_readout.md`; MMD / SHD cross-check in `docs/04j_mmd_shd_reference_crosscheck.md`;
+- DCDI training-budget pilot evidence: `docs/08d_dcdi_training_budget_pilot.md` (C-P15);
+- pending real-budget C-P11 rerun on a 10-node ER2 fixture before held-out interpretation, per Section 7 "C-P11 real-budget reapplication policy";
+- reproduction-pass artefact, schema, and status checks under v1.8 (Section 12.2);
+- Phase B calibration and held-out evaluation evidence on the thesis selection cell;
+- the test suite (currently 800 tests across the runner, the wrappers, and the metrics) covering schema invariants, identity invariants, preflight rules, pipeline behaviour, and threshold-robustness invariants;
+- threshold-robustness recomputation at the per-model triple, producing a sibling artefact per run.
+
+A defence under Path B states that implementation correctness has been verified through this chain, that the selection-study evidence is held-out evaluation on the thesis selection cell, and that strict paper reproduction is reported as "not directly evaluable" rather than claimed.
+
+### 12.6 Deferred future strict paper-DGP reproduction sub-study
+
+A future strict paper-DGP reproduction sub-study remains possible but is not opened by v1.8. Opening it would require:
+
+- a separate `docs/02` amendment (e.g. v1.9 or later) that freezes a per-model paper-aligned reproduction cell (for DAGMA: most defensibly the d = 20 ER4 Gaussian cell from paper Table 1; for DCDI: either 10-node `e = 1` or 10-node `e = 4` from paper Table 7, with the DCDI Appendix B.1 page 26 synthetic generator);
+- a contemporaneous `docs/03` entry recording the new cell and the protocol scope;
+- a new reproduction-pass configuration file per model under `experiments/selection_study/configs/<new-subdir>/`, distinct from the current `configs/reproduction/` configs;
+- a real-study guard amendment that accepts the new cell while preserving strict equality on the model-specific tactical constants (three candidate amendment patterns are recorded under the inspection note dated 21/05/2026 in `docs/03`);
+- possibly an extension of the `Configuration` schema (weight magnitude range, noise multiplier, per-node noise variance distribution, standardisation flag) to capture the paper's data generator faithfully;
+- a separate intervention-set decision for the new cell;
+- a separate report-back protocol so paper-aligned reproduction is interpreted separately from thesis-cell evidence.
+
+None of the above is performed by v1.8.
+
+### 12.7 What v1.8 does not change
+
+- The lexicographic selection rule in Section 2 is unchanged.
+- The metrics in Section 4 are unchanged.
+- The tiebreakers in Section 6 are unchanged.
+- The tactical constants in Section 9 are unchanged. The 10-node ER2 thesis selection cell remains frozen.
+- The seed-pool integers in Section 3.3 are unchanged.
+- The DAGMA paper-aligned optimisation values (`warm_iter`, `max_iter`, `lr`, `(beta_1, beta_2)`) frozen in v1.6 remain unchanged.
+- The DCDI training-budget ceiling `dcdi_num_train_iter = 300000` frozen in v1.6 remains unchanged.
+- The Phase B sparsity grids (`lambda1` for DAGMA, `reg_coeff` for DCDI) frozen in v1.6 remain unchanged.
+- The threshold-robustness triples per model are unchanged.
+- The C-P11 real-budget reapplication policy in Section 7 is unchanged.
+- No source file under `experiments/`, no test under `tests/`, no configuration JSON under `experiments/selection_study/configs/`, no schema, no real-study guard, and no result is modified by v1.8.

@@ -2680,3 +2680,76 @@ Any remaining occurrence falls into one of those categories.
   and (b) protocol / methodological prose in selection-study
   protocol docs. Both categories are explicitly allowed by
   the project's docs policy.
+
+---
+
+21/05/2026 - Path B reproduction-pass clarification (docs-only) before any reproduction-pass execution
+
+### Decision
+
+Path B is adopted as the active reproduction-pass interpretation for the selection study. Path B is recorded in `docs/02` v1.8 (new Section 12). Under Path B:
+
+- the current `configs/reproduction/dagma_reproduction.json` and `configs/reproduction/dcdi_reproduction.json` carry the 10-node ER2 thesis selection cell and serve as thesis-cell compatibility / runner-sanity configs, not as strict paper-reproduction configs;
+- the reproduction pass currently verifies end-to-end runner correctness, schema and artefact generation, compatibility with the 10-node ER2 thesis selection cell, and the project graph / sampler / training / threshold-robustness / metric availability taxonomy;
+- the reproduction pass does NOT strictly reproduce any DAGMA or DCDI paper result, and the selection-study report must not claim that it does;
+- `docs/02` Section 5 disqualification item 2 ("within 20% paper reproduction") applies only when a direct or explicitly frozen closely aligned paper target exists for the candidate before results are observed; where no such target exists, paper-reproduction comparison is reported as **not directly evaluable**, not as **passed**, and disqualification item 2 does not fire;
+- a future strict paper-DGP reproduction sub-study remains possible but is deferred. Opening it would require a separate `docs/02` amendment, a contemporaneous `docs/03` entry, a separate per-model reproduction configuration, a real-study guard amendment, and possibly a Configuration-schema extension, per `docs/02` Section 12.6.
+
+### What this entry records
+
+- **Local verification finding (no source/config edits).** Before any reproduction-pass artefact was generated, the verification report dated 21/05/2026 inspected the DAGMA and DCDI papers, the current real-study guard in `experiments/selection_study/real_study.py`, the runner in `experiments/selection_study/reproduction_pass.py`, the two reproduction config JSON files, and the test surface in `tests/`. The verification found that the configs are 10-node ER2 thesis-cell configs, not strict paper-reproduction configs. No `results/` directory exists on disk; `results/model_selection/` does not exist; no Phase A / reproduction-pass run has occurred. NotebookLM was used as a cross-check; local verification against `papers/DAGMA.pdf`, `papers/DCDI.pdf`, and the repository remains the operational source of truth.
+- **DAGMA paper-target finding.** The DAGMA paper (`papers/DAGMA.pdf`) contains no empirical recovery benchmark at d = 10. The closest small linear-Gaussian recovery evidence is Table 1 on page 21 (within Appendix C.1.1 "Small to Moderate Number of Nodes"), which reports SHD and runtime averaged across ER4 / SF4 graphs and Gaussian / Exponential / Gumbel noise at d in {20, 30, 50, 80, 100}; the DAGMA row at d = 20 is `SHD = 6.78 +/- 1.64` and `Runtime = 6.54 +/- 0.42 seconds`. The DAGMA paper's Figure 1 (page 6) is a 2-node toy illustration of the log-determinant acyclicity characterization and is not a recovery benchmark. The DAGMA paper's Figure 2 (page 7) plots the numerical decay of `h_expm` / `h_poly` on a single cycle graph as a function of `d`, mentioning that at `d = 13` `h_expm` is approximately `10^-9`; this is the "Argument (i)" numerical-cycle-detection illustration of gradient vanishing in alternative acyclicity functions, not a recovery benchmark. No DAGMA appendix table or figure (Tables 1, 2; Figures 3, 4, 5, 6, 8, 9, 10, 11, 12) extends down to `d = 10`.
+- **DCDI paper-target finding.** The DCDI paper (`papers/DCDI.pdf`) Table 7 in Appendix C.4.1 "Perfect interventions" (page 38) reports DCD-no-interv at 10 nodes with `e = 1` (`SHD = 8.9 +/- 2.8`, `SID = 19.5 +/- 10.9`) and `e = 4` (`SHD = 26.7 +/- 5.9`, `SID = 69.0 +/- 11.4`); there is no `e = 2` row at 10 nodes in Table 7 or in any subsequent C.4 / C.5 / C.7 table. Appendix C.7 ("Comprehensive results of the main experiments") redisplays the DCDI-G / DCDI-DSF rows from the main experiments against IGSP / GIES / CAM baselines (Table 22 page 42) and does not reintroduce a separate DCD-no-interv row. The DCDI synthetic data generator (Appendix B.1, page 26) differs from the project data generator on weight magnitude range (paper `Uniform([-1, -0.25] union [0.25, 1])`, project `Uniform([-2, -0.5] union [0.5, 2])`), on the noise multiplier (paper `0.4 * N_j`, project no multiplier), on the per-node noise variance distribution (paper `sigma_j^2 ~ U[1, 2]`, project fixed unit variance), and on standardisation (paper mean-subtracted and divided by std, project `condition = "centred_only"`). The project's thesis cell density `expected_edges = 20` (ER2) does not correspond to either DCDI Table 7 published density at d = 10.
+- **No artefact dependency.** `results/model_selection/` does not exist on disk; no reproduction-pass `run.json`, `reproduction_pass_summary.json`, or `threshold_robustness.json` has been generated. The Path B decision therefore does not invalidate any on-disk evidence, and the deferred future paper-DGP sub-study does not rotate any pre-existing `configuration_hash`.
+
+### What does NOT change under v1.8
+
+- No source file under `experiments/`, no module under `src/`, no test under `tests/`, no configuration JSON under `experiments/selection_study/configs/`, and no result under `results/` is modified by Path B. The 800-test pytest baseline is untouched.
+- The real-study guard in `experiments/selection_study/real_study.py` is unchanged: it continues to require `n_nodes = 10`, `expected_edges = 20`, `noise_scale = 1.0`, `weight_magnitude_range = (0.5, 2.0)`, `n_train = 1000`, `mmd_n_samples = 1000` shared across DAGMA and DCDI reproduction configs, plus the per-model tactical constants.
+- The configuration_hash of the current DAGMA and DCDI reproduction configs is unchanged because no field, no canonical-JSON key, and no canonical-JSON value is modified by Path B.
+- The implementation identifier `reproduction_pass` is unchanged. Protocol-letter labels "Phase A" / "Phase B" continue to be acceptable in protocol prose; implementation prose continues to use the semantic names.
+- The C-P11 real-budget reapplication policy on a 10-node ER2 fixture is unchanged.
+- The C-P15 DCDI training-budget pilot continues to be pilot-only diagnostic evidence and continues NOT to count as reproduction-pass evidence, per `docs/08d` (whose paper-aligned-cell wording is now superseded by `docs/02` v1.8 Path B per the supersession note added to `docs/08d`).
+
+### Retention reason
+
+The current configs are retained, not amended, under Path B because they correctly enforce thesis-cell compatibility for Phase B calibration and held-out evaluation. Replacing them with paper-aligned configs is a separate decision that requires the design-package listed in `docs/02` Section 12.6 (config addition, guard amendment, possibly schema extension); doing it as part of Path B would conflate "verify the runner on the thesis cell" with "perform paper reproduction", which is exactly the conflation Path B exists to remove.
+
+### Follow-up code patch flagged but not applied
+
+The `reproduction_pass.py` summary `note` string (`_NOTE_REPRODUCTION_ONLY` at [experiments/selection_study/reproduction_pass.py:63-69](experiments/selection_study/reproduction_pass.py#L63-L69)) currently reads in part "the runner completed end to end on the paper-aligned reference cell". Under Path B this wording is now technically inaccurate because the runner completes end to end on the thesis-cell compatibility configs, not on a paper-aligned reference cell. The wording is left in place in this docs-only commit. A follow-up code patch is recommended that rewrites the summary note to read along the lines of "the runner completed end to end on the thesis-cell compatibility / runner-sanity configs (see `docs/02` Section 12)". The patch is out of scope for this commit per the docs-only constraint.
+
+---
+
+21/05/2026 - Reproduction-pass summary `note` field removed (Path B follow-up)
+
+### Decision
+
+The `note` prose field on the `ReproductionPassSummary` dataclass and on the on-disk reproduction-pass summary JSON has been removed. The `_NOTE_REPRODUCTION_ONLY` constant in `experiments/selection_study/reproduction_pass.py` is deleted. The runner no longer attaches a prose summary note to the reproduction-pass artefact. The supersedes-the-prior-flagged-follow-up entry immediately above resolves the docs/02 v1.8 Path B follow-up.
+
+### Why
+
+Local inspection found that the `note` field was non-load-bearing:
+
+- the reproduction-pass summary artefact is not part of the published `docs/08a_experiment_tracking_and_results_schema.md` schema (08a defines the per-run `run.json` schema, not the reproduction-pass summary);
+- no loader, no report module, no notebook, and no test outside `tests/test_reproduction_pass_runner.py` reads `summary.note` or the JSON `"note"` key;
+- the only test references are three localised exercises of field-existence (prefix assertion, required-fields-set membership, fake-summary constructor kwarg), not content-binding assertions.
+
+The previous prose ("the runner completed end to end on the paper-aligned reference cell ...") was both stale under Path B and a duplication of the tracked authoritative explanation in `docs/02` Section 12. Removing the field rather than replacing it with another prose note avoids re-introducing tracked-protocol prose into runtime artefacts.
+
+### Scope
+
+- **Source edit:** `experiments/selection_study/reproduction_pass.py` — deleted `_NOTE_REPRODUCTION_ONLY`; dropped the `note: str` dataclass field from `ReproductionPassSummary`; dropped the `"note": summary.note` key from `_summary_to_dict`; dropped the `note=...` kwarg from the `_assemble_summary` construction site; removed the corresponding Attributes-section line from the dataclass docstring; rewrote a single sentence of the module docstring that previously said "paper-aligned reference cell" to remove the stale Path-B-incorrect wording.
+- **Test edits:** `tests/test_reproduction_pass_runner.py` — dropped the `summary.note.startswith(...)` assertion from `test_run_reproduction_pass_dagma_completes_with_passed_status`; dropped `"note"` from the required-fields set in `test_run_reproduction_pass_writes_summary_with_expected_top_level_fields`; dropped the `note="stub"` kwarg from the fake `ReproductionPassSummary` constructed inside `test_cli_reproduction_pass_invokes_runner`.
+- **No changes** to `docs/02`, `docs/08*`, `CLAUDE.md`, `src/`, `experiments/selection_study/configs/`, `results/`, `papers/`, `pyproject.toml`, or `requirements-lock.txt`.
+
+### Behaviour preservation
+
+- No selection-study constant, threshold, seed-pool integer, intervention value, training budget, metric primitive, metric call, wrapper call, real-study guard rule, configuration_hash field, or run-record schema field changed.
+- The reproduction-pass summary artefact retains every load-bearing field: `schema_version`, `config_path`, `model`, `condition`, `configuration_hash`, `seed_population`, `seed_values`, `run_ids`, `completed_run_count`, `failed_run_count`, `graph_status_counts`, `sampler_status_counts`, `training_status_counts`, `shd_values`, `sid_values`, `mmd_primary_values`, `threshold_robustness_available_count`, `records`, `reproduction_pass_status`, `output_root`, `summary_path`. (The dataclass now defines 21 fields; the previous 22-field shape was the same set plus `note`.)
+- Status derivation rule (`reproduction_pass_status ∈ {"passed", "completed_with_warnings", "failed_mechanical_gate"}`) is unchanged.
+- The full test suite (800 tests) is green; targeted run `pytest tests/test_reproduction_pass_runner.py -v` reports 18 passed in 0.60 s.
+
+### Why this aligns with Path B
+
+The runtime artefact no longer carries protocol-level interpretive prose. Path B places the authoritative reading of the reproduction-pass scope inside `docs/02` Section 12 (the tracked source of truth). The summary artefact now records only structural and metric facts; the interpretation that those facts are thesis-cell compatibility evidence rather than strict paper reproduction lives where it belongs, in `docs/02` Section 12 and this `docs/03` log.

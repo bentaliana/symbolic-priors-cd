@@ -735,6 +735,19 @@ Optional regression test: pin
 `(n_nodes, expected_edges) == (10, 20)` for selection-study
 configs in a Phase A artefact.
 
+**Supersession note (docs/02 v1.8 Path B, 21/05/2026):** the
+`(n_nodes, expected_edges) == (10, 20)` recommendation above
+is retained only for thesis-cell compatibility / selection-study
+configs under Path B (Phase B calibration, held-out evaluation,
+and the current `configs/reproduction/*` reproduction-pass
+runner-sanity configs). It is NOT a recommendation that strict
+paper-reproduction configs must also use `(10, 20)`; the DAGMA
+paper has no `d = 10` empirical recovery row at any density and
+the DCDI paper Table 7 has no `e = 2` row at `d = 10`, so a
+future paper-DGP reproduction sub-study would be implemented as
+a separate per-model config under a different cell, per
+`docs/02` Section 12.6.
+
 ### MMD `n_samples` and training sample counts
 
 In `config_resolved`. They enter `configuration_hash` via

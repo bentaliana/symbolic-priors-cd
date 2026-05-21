@@ -577,6 +577,11 @@ Scope legend:
 | Constant | Value | Source | Status | Scope | Run record | Rationale | Evidence | Action |
 |---|---|---|---|---|---|---|---|---|
 | Phase A reproduction seeds | not numerically frozen in docs/02 (reproduction cell is paper-aligned) | docs/02 Section 3.3 Phase A | diagnostic-only | per-model | will be in run record via seed_population="reproduction" | reproduction pass is a sanity check, not a primary measurement | project-document | confirm count when Commit 8 implements Phase A |
+<!--
+Supersession note (docs/02 v1.8 Path B, 21/05/2026): the "reproduction cell is paper-aligned" wording in the row above anticipates per-model paper-aligned reproduction cells for Phase A. Under docs/02 v1.8 Path B the current execution uses thesis-cell compatibility / runner-sanity reproduction configs (10-node ER2) instead of paper-aligned cells. Any statement in this audit that anticipates paper-aligned Phase A reproduction cells must be read as referring to a future deferred sub-study rather than the current Phase A execution. The reproduction-pool seed integers (101, 102, 103) are frozen by docs/02 v1.7 and are unaffected by Path B.
+-->
+
+
 | Phase B calibration seeds | 2 per configuration | docs/02 Section 3.3 Phase B | protocol-critical | per-configuration | yes | leakage-prevention requires disjointness from held-out | project-document | none |
 | Phase B configurations | 5 per model | docs/02 Section 3.3 Phase B | protocol-critical | per-model | yes | equal-budget local calibration; DCDI paper itself uses a 10-value grid (Section B.5) so 5 is a project compute compromise | project-document, external-paper | none |
 | Held-out evaluation seeds | 5 per model per condition | docs/02 Section 3.3 Phase B | protocol-critical | per-model per condition | yes | held-out measurement count | project-document | none |
