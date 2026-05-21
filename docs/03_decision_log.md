@@ -2271,3 +2271,137 @@ correctly reflect that no global RNG setter was called.
   RuntimeWarnings unrelated to this work (count up from 758,
   +16 new Phase A config-file tests in
   `tests/test_real_study.py`).
+
+---
+
+21/05/2026 — Phase A reproduction-pass runner implemented
+
+### What changes
+
+- `experiments/selection_study/phase_a.py` now implements
+  `run_phase_a(config_path, *, output_root=None) -> PhaseASummary`.
+  The runner loads the Phase A configuration via
+  `load_config`, validates it with
+  `assert_real_study_constants(config, stage="phase_a")`,
+  enumerates the preflight manifest with `enumerate_manifest`,
+  validates the manifest with `validate_manifest`, iterates over
+  the `reproduction`-population entries through `run_single_fit`,
+  invokes `recompute_at_thresholds` against each completed run
+  directory, and writes a Phase A summary JSON.
+- `experiments/selection_study/run.py` gains a `--phase` flag
+  (currently only `phase_a` is accepted) and a `--output-root`
+  flag. `--phase phase_a --config PATH` dispatches to
+  `run_phase_a`; `--config` alone without `--phase` continues to
+  raise `NotImplementedError` to preserve the pre-existing CLI
+  surface.
+- `tests/test_phase_a_runner.py` is a new test module. The
+  pipeline and threshold-robustness functions are patched on the
+  `phase_a` module so the runner's orchestration is exercised
+  without invoking DAGMA or DCDI code. Coverage includes happy
+  paths for both DAGMA and DCDI configs, summary-path layout,
+  end-to-end summary-field presence, schema-gate failure handling,
+  non-schema-gate exception propagation, real-study guard
+  rejection, missing-config-file rejection, and CLI dispatch via
+  `experiments.selection_study.run`.
+- `tests/test_selection_runner_scaffolding.py` no longer asserts
+  that `phase_a.run_phase_a` raises `NotImplementedError`; it is
+  now exercised under its own test module and the attribute is
+  only touched for import-stability.
+
+### Why this matters
+
+- Closes the gap left by Commit 8a (Configuration consumption) and
+  Commit 8b (Phase A config files + real-study guard): the runner
+  can now ingest those configs end to end.
+- Phase A is a reproduction-pass. It demonstrates that the
+  schema-conformance pipeline runs cleanly on the paper-aligned
+  reference cell under the protocol guard, with sibling
+  threshold-robustness records produced offline. It does not, by
+  itself, constitute base-model selection evidence; Phase B and
+  held-out evaluation remain unimplemented.
+- The summary JSON is the canonical Phase A artefact. It lives at
+  `<output_root>/phase_a_summary/<configuration_hash>/phase_a_summary.json`
+  and carries schema_version, config_path, model, condition,
+  configuration_hash, seed_population, seed_values, run_ids,
+  completed_run_count, failed_run_count, counts by graph_status /
+  sampler_status / training_status, SHD / SID / MMD aggregates,
+  threshold-robustness availability count, per-entry records, a
+  `phase_a_status` of `passed` / `completed_with_warnings` /
+  `failed_mechanical_gate`, and a `note` field that flags the
+  reproduction-only scope.
+
+### What does NOT change
+
+- No new dependency. No edit to `docs/02`. No edit to any
+  wrapper, metric primitive, evaluator, or sampling layer. No
+  Phase B, no held-out evaluation, no C-P11 rerun, no
+  prior-loss / loss-hook work.
+- `Configuration` and `load_config` are unchanged.
+- `assert_real_study_constants`, `enumerate_manifest`,
+  `validate_manifest`, `run_single_fit`, and
+  `recompute_at_thresholds` are consumed verbatim; their
+  behaviour and contracts are not amended.
+- The on-disk Phase A configuration files are unchanged.
+- DCDI Commit 11 (loss-hook injection) and the DCDI Commit 10
+  pause both remain in force; this commit does not resume them.
+
+### Per-entry failure policy
+
+- The pipeline's declared schema-gate stop conditions
+  (`SchemaGateError` and its subclasses
+  `InvalidGraphForSchemaGateError` and `DcdiSeedMismatchError`)
+  are recorded as failed per-entry records rather than crashing
+  the runner. The summary's `phase_a_status` flips from `passed`
+  to `completed_with_warnings` whenever any reproduction entry
+  fails this way.
+- Any other exception propagates unhandled. No broad exception
+  swallowing is performed; programmer errors and unanticipated
+  runtime errors surface to the caller.
+- A failure of `load_config`, `assert_real_study_constants`, or
+  `validate_manifest` is a pre-iteration mechanical-gate failure.
+  The current runner propagates the original exception and does
+  not write a partial summary, on the reasoning that preserving
+  the original exception is safer than producing a half-built
+  artefact that hides the cause. `failed_mechanical_gate` is
+  therefore declared as a reserved Phase A summary status for
+  future explicit summary-recording of such pre-iteration
+  failures; it is not produced by the current runner.
+
+### `phase_a_status` derivation
+
+The status is computed from per-entry records as follows:
+
+- `"passed"` requires all of:
+  - `failed_run_count == 0`;
+  - every completed record has `graph_status == "valid_dag"`;
+  - every completed record has `sampler_status == "available"`;
+  - every completed record has `threshold_robustness_available is True`.
+- `"completed_with_warnings"` is set when any of:
+  - at least one `SchemaGateError`-derived per-entry failure was
+    recorded;
+  - at least one completed record has
+    `graph_status != "valid_dag"`;
+  - at least one completed record has
+    `sampler_status != "available"`;
+  - at least one completed record has
+    `threshold_robustness_available is False`.
+- `"failed_mechanical_gate"` is reserved (see above) and is not
+  produced by current behaviour.
+
+This makes `"passed"` a strict end-to-end health signal: every
+reproduction entry not only completed schema-conformance but also
+produced a valid DAG, a usable sampler path, and a sibling
+threshold-robustness artefact.
+
+### Consequence
+
+- `python -m experiments.selection_study.run --phase phase_a
+  --config experiments/selection_study/configs/phase_a/dagma_reproduction.json`
+  (and the DCDI counterpart) now drives the reproduction pass
+  end to end. No filesystem path or wrapper module is hardcoded
+  beyond the run-storage default `results/model_selection/`,
+  which can be overridden with `--output-root PATH`.
+- The Phase A runner does not commit generated run outputs; the
+  caller is responsible for keeping those out of version control.
+- Phase B and held-out evaluation remain stubs and are deferred
+  to a later commit; their plans are unchanged.
