@@ -1,11 +1,9 @@
 """Scaffolding tests for the selection-study runner.
 
-These tests verify that the runner package imports cleanly, that the
-``--help`` flag exits with status 0 and prints a usage string, that
-no model fit is reachable from any code path under
-``experiments/selection_study/``, that every stub function raises
-``NotImplementedError`` when called, and that importing the runner
-does not mutate global NumPy or PyTorch RNG state.
+These tests verify import hygiene, help-path behaviour, remaining
+stub surfaces, and global RNG non-mutation. Phase A execution is
+now implemented and is tested separately under
+``tests/test_phase_a_runner.py``.
 """
 
 from __future__ import annotations
@@ -220,7 +218,6 @@ def test_every_stub_module_callable_raises_not_implemented_error() -> None:
     )
 
     stub_callables: list[tuple[object, tuple[object, ...]]] = [
-        (phase_a.run_phase_a, (None,)),
         (phase_b.run_phase_b, (None,)),
         (phase_b.calibration_ranking, (None,)),
         (held_out.run_held_out_evaluation, (None,)),
@@ -232,13 +229,15 @@ def test_every_stub_module_callable_raises_not_implemented_error() -> None:
         with pytest.raises(NotImplementedError):
             stub(*args)  # type: ignore[operator]
     # pipeline.run_single_fit, loader.load_run,
-    # sampling.compute_per_intervention_records, and
-    # threshold_robustness.recompute_at_thresholds are no longer
-    # stubs; each is exercised under its own test module.
+    # sampling.compute_per_intervention_records,
+    # threshold_robustness.recompute_at_thresholds, and
+    # phase_a.run_phase_a are no longer stubs; each is exercised
+    # under its own test module.
     _ = pipeline.run_single_fit
     _ = loader.load_run
     _ = sampling.compute_per_intervention_records
     _ = threshold_robustness.recompute_at_thresholds
+    _ = phase_a.run_phase_a
 
 
 def _numpy_states_equal(
