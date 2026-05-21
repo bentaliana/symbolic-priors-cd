@@ -2741,7 +2741,7 @@ The previous prose ("the runner completed end to end on the paper-aligned refere
 
 - **Source edit:** `experiments/selection_study/reproduction_pass.py` — deleted `_NOTE_REPRODUCTION_ONLY`; dropped the `note: str` dataclass field from `ReproductionPassSummary`; dropped the `"note": summary.note` key from `_summary_to_dict`; dropped the `note=...` kwarg from the `_assemble_summary` construction site; removed the corresponding Attributes-section line from the dataclass docstring; rewrote a single sentence of the module docstring that previously said "paper-aligned reference cell" to remove the stale Path-B-incorrect wording.
 - **Test edits:** `tests/test_reproduction_pass_runner.py` — dropped the `summary.note.startswith(...)` assertion from `test_run_reproduction_pass_dagma_completes_with_passed_status`; dropped `"note"` from the required-fields set in `test_run_reproduction_pass_writes_summary_with_expected_top_level_fields`; dropped the `note="stub"` kwarg from the fake `ReproductionPassSummary` constructed inside `test_cli_reproduction_pass_invokes_runner`.
-- **No changes** to `docs/02`, `docs/08*`, `CLAUDE.md`, `src/`, `experiments/selection_study/configs/`, `results/`, `papers/`, `pyproject.toml`, or `requirements-lock.txt`.
+- **No changes** to `docs/02`, `docs/08*`, `src/`, `experiments/selection_study/configs/`, `results/`, `papers/`, `pyproject.toml`, or `requirements-lock.txt`.
 
 ### Behaviour preservation
 
@@ -2753,3 +2753,42 @@ The previous prose ("the runner completed end to end on the paper-aligned refere
 ### Why this aligns with Path B
 
 The runtime artefact no longer carries protocol-level interpretive prose. Path B places the authoritative reading of the reproduction-pass scope inside `docs/02` Section 12 (the tracked source of truth). The summary artefact now records only structural and metric facts; the interpretation that those facts are thesis-cell compatibility evidence rather than strict paper reproduction lives where it belongs, in `docs/02` Section 12 and this `docs/03` log.
+
+---
+
+21/05/2026 - Reproduction-pass summary directory leaf unified with per-run 12-char prefix convention
+
+### Decision
+
+The reproduction-pass summary directory leaf now uses the first 12 characters of the `configuration_hash` rather than the full 64-character digest. The change is implemented in `experiments/selection_study/reproduction_pass.py` by importing `_HASH_PREFIX_LENGTH` from `experiments/selection_study/identity.py` and slicing `manifest.configuration_hash[:_HASH_PREFIX_LENGTH]` when constructing `summary_dir`. The summary directory leaf is therefore symmetric with the per-run directory leaf already documented in `docs/08a` Section 3 and produced by `identity.derive_run_directory`.
+
+### Previous state
+
+- Per-run directories used `<configuration_hash_prefix>` (the first 12 characters), via `identity.derive_run_directory`. Frozen in `docs/08a` Section 3 and Section 4.
+- The manifest sidecar JSON file under `<manifest_dir>/manifest_<prefix>.json` used the first 12 characters, via `preflight.save_manifest`.
+- The reproduction-pass summary directory leaf used the **full** 64-character `configuration_hash`, via `reproduction_pass._assemble_summary`. The full-hash choice was documented only in a source comment inside `reproduction_pass.py`; it was never frozen in `docs/08a` or in `docs/03`. The asymmetry was identified during the read-only path-convention inspection earlier on 21/05/2026.
+
+### New state
+
+- The reproduction-pass summary directory leaf uses the first 12 characters of `configuration_hash`, matching the per-run directory leaf and the manifest sidecar file name. The leaf-length constant `_HASH_PREFIX_LENGTH = 12` defined in `experiments/selection_study/identity.py` is the single source of truth; `reproduction_pass.py` imports it rather than hard-coding `12` again.
+- The `configuration_hash` field value inside `reproduction_pass_summary.json`, inside every per-run `run.json`, and inside every sibling `threshold_robustness.json` remains the **full** 64-character lowercase hex SHA-256 digest. The directory-leaf shortening does not propagate into any content field; the digest itself stays full-length everywhere it is recorded as a value.
+- The directory name `reproduction_pass_summary/` and the filename `reproduction_pass_summary.json` are unchanged.
+
+### What does NOT change
+
+- No selection criterion, evaluation rule, metric primitive, wrapper, runner control flow, real-study guard, schema field, seed pool integer, threshold triple, training budget, intervention value, or `configuration_hash` derivation algorithm changed.
+- `experiments/selection_study/identity.py`, `pipeline.py`, `preflight.py`, `config.py`, `run.py`, `threshold_robustness.py`, the reproduction config JSONs, the wrappers under `src/`, the metric primitives, `papers/`, `pyproject.toml`, `requirements-lock.txt`, `docs/02`, `docs/08*` were not modified.
+- The per-run directory leaf, the `run_id` string format, the manifest sidecar file name, and the `configuration_hash_prefix` helper are unchanged. They already used 12 characters and continue to.
+
+### Migration
+
+No artefacts exist under the old convention. `results/model_selection/` does not exist on disk; no reproduction-pass `reproduction_pass_summary.json`, no per-run `run.json`, and no sibling `threshold_robustness.json` has been generated. The directory-leaf change is therefore a forward-only convention update with no migration step.
+
+### Why `docs/08a` was not amended
+
+`docs/08a` Section 3 specifies the 12-character prefix convention for per-run directories. The reproduction-pass summary directory was not previously frozen in `docs/08a`. This entry treats the present change as bringing the summary directory into line with the existing Section 3 convention rather than as introducing a new convention. If a future commit adds a Section 3.x subsection describing the summary directory layout explicitly, that would be a separate documentation amendment; it is out of scope here.
+
+### Test coverage
+
+- `tests/test_reproduction_pass_runner.py::test_run_reproduction_pass_writes_summary_at_canonical_path` updated to expect the 12-character prefix on the summary directory leaf. The literal `12` is used in the test directly (rather than importing `_HASH_PREFIX_LENGTH`) so the test is independent of the source-side constant; the constant itself is pinned by separate regressions in `tests/test_run_identity.py` and `tests/test_config_schema.py`.
+- New regression `tests/test_reproduction_pass_runner.py::test_run_reproduction_pass_summary_field_carries_full_hash` pins that `summary.configuration_hash` and the JSON `configuration_hash` key both retain the full 64-character lowercase hex digest, so the directory-leaf shortening cannot silently propagate into the content field in a future refactor.

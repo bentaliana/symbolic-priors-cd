@@ -304,14 +304,21 @@ def test_run_reproduction_pass_dcdi_completes_with_passed_status(
 def test_run_reproduction_pass_writes_summary_at_canonical_path(
     tmp_path, monkeypatch
 ) -> None:
-    """Summary lives at <output_root>/reproduction_pass_summary/<hash>/file.json."""
+    """Summary lives at <output_root>/reproduction_pass_summary/<prefix>/file.json.
+
+    The directory leaf is the first 12 characters of the
+    ``configuration_hash``, matching the per-run directory leaf
+    convention.
+    """
     fake_fit, fake_recompute = _make_fake_pipeline()
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
     summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     expected_dir = (
-        tmp_path / "reproduction_pass_summary" / summary.configuration_hash
+        tmp_path
+        / "reproduction_pass_summary"
+        / summary.configuration_hash[:12]
     )
     expected_file = expected_dir / "reproduction_pass_summary.json"
     assert Path(summary.summary_path) == expected_file
@@ -321,6 +328,33 @@ def test_run_reproduction_pass_writes_summary_at_canonical_path(
     assert payload["model"] == "dagma"
     assert payload["reproduction_pass_status"] == "passed"
     assert payload["completed_run_count"] == 3
+
+
+def test_run_reproduction_pass_summary_field_carries_full_hash(
+    tmp_path, monkeypatch
+) -> None:
+    """The summary's configuration_hash field is the full 64-char digest.
+
+    The directory leaf uses the 12-character prefix, but every
+    on-disk record of the configuration identity keeps the full
+    SHA-256 hex digest. This regression pins both the in-memory
+    field and the on-disk JSON value to the full 64-character
+    lowercase hex form.
+    """
+    fake_fit, fake_recompute = _make_fake_pipeline()
+    _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
+
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
+
+    assert len(summary.configuration_hash) == 64
+    assert all(
+        ch in "0123456789abcdef" for ch in summary.configuration_hash
+    )
+    payload = json.loads(
+        Path(summary.summary_path).read_text(encoding="utf-8")
+    )
+    assert payload["configuration_hash"] == summary.configuration_hash
+    assert len(payload["configuration_hash"]) == 64
 
 
 def test_run_reproduction_pass_summary_records_carry_run_metrics(

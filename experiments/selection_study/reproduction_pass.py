@@ -32,6 +32,7 @@ from experiments.selection_study.config import (
     Configuration,
     load_config,
 )
+from experiments.selection_study.identity import _HASH_PREFIX_LENGTH
 from experiments.selection_study.loader import load_run
 from experiments.selection_study.pipeline import (
     SchemaGateError,
@@ -413,13 +414,15 @@ def _assemble_summary(
     else:
         status = "completed_with_warnings"
 
-    # Run directories follow the existing derive_run_directory
-    # convention (hash prefix folder). The reproduction-pass summary
-    # uses the full configuration_hash for its directory component
-    # so the run-set-level artefact remains unambiguous if two
-    # configurations ever share the same 12-character prefix.
+    # The reproduction-pass summary directory leaf uses the 12-
+    # character configuration_hash prefix to match the per-run
+    # directory leaf convention. The full configuration_hash is
+    # still recorded inside the summary JSON as a top-level field
+    # so the run-set-level artefact remains unambiguous.
     summary_dir = (
-        output_root / _SUMMARY_SUBDIR / manifest.configuration_hash
+        output_root
+        / _SUMMARY_SUBDIR
+        / manifest.configuration_hash[:_HASH_PREFIX_LENGTH]
     )
     summary_path = summary_dir / _SUMMARY_FILENAME
 
@@ -491,8 +494,10 @@ def run_reproduction_pass(
     ReproductionPassSummary
         Summary of the reproduction pass. The summary is also
         written to disk at
-        ``<output_root>/reproduction_pass_summary/<configuration_hash>/
-        reproduction_pass_summary.json``.
+        ``<output_root>/reproduction_pass_summary/<configuration_hash_prefix>/
+        reproduction_pass_summary.json``, where
+        ``<configuration_hash_prefix>`` is the first 12 characters
+        of the full ``configuration_hash``.
 
     Raises
     ------

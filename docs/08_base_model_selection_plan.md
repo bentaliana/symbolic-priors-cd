@@ -159,7 +159,7 @@ under the `docs/08a` directory layout. The runner additionally
 emits a structured local log (file under the run directory or a
 dedicated `logs/` sibling, decided by Commit 1) for human
 inspection. Library code under `src/symbolic_priors_cd/` does not
-contain `print` statements, per `CLAUDE.md`. The CLI may write to
+contain `print` statements. The CLI may write to
 stdout for progress reporting only; stdout is not a record of
 results.
 
@@ -1091,7 +1091,7 @@ does not auto-cut scope; the cut is a human decision recorded in
 
 ## 9. Test discipline
 
-Per `CLAUDE.md`, tests verify scientific invariants and
+Tests verify scientific invariants and
 correctness, not merely that code executes. Each commit's
 acceptance criteria are exercised by at least one test whose
 failure indicates a violation of a named invariant. The
@@ -1138,7 +1138,7 @@ The following items are out of scope for this plan and are
 deferred:
 
 - prior-loss / soft-prior implementation on either wrapper,
-  deferred per `CLAUDE.md` and the main-study contract in
+  deferred and the main-study contract in
   `docs/01_research_question_and_commitments.md`;
 - DCDI Commit 11 resumption, paused per
   `docs/03_decision_log.md` 13/05/2026;
