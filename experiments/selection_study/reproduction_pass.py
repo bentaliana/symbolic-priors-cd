@@ -1,12 +1,11 @@
 """Reproduction-pass runner.
 
-Drives each model under paper-grounded defaults on its
-paper-aligned reference cell. Loads a reproduction-pass
-configuration file, validates it against the real-study protocol
-guard, enumerates and validates the preflight manifest, runs every
-``reproduction`` entry through :func:`run_single_fit`, invokes
-offline threshold-robustness recomputation against each completed
-run directory, and writes a reproduction-pass summary JSON.
+Loads a reproduction-pass configuration file, validates it
+against the real-study protocol guard, enumerates and validates
+the preflight manifest, runs every ``reproduction`` entry through
+:func:`run_single_fit`, invokes offline threshold-robustness
+recomputation against each completed run directory, and writes a
+reproduction-pass summary JSON.
 
 The reproduction pass is reproduction-pass evidence only. It does
 not implement calibration, held-out evaluation, prior-loss work, or
@@ -60,13 +59,6 @@ _SUMMARY_SUBDIR = "reproduction_pass_summary"
 _SUMMARY_FILENAME = "reproduction_pass_summary.json"
 _REPRODUCTION_PASS_SUMMARY_SCHEMA_VERSION = 1
 _TARGET_SEED_POPULATION = "reproduction"
-_NOTE_REPRODUCTION_ONLY = (
-    "The reproduction pass is reproduction-pass evidence only. "
-    "The summary documents that the runner completed end to end on "
-    "the paper-aligned reference cell; it does not constitute base-"
-    "model selection evidence and does not include calibration, "
-    "held-out evaluation, or prior-loss work."
-)
 _REAL_STUDY_STAGE_LABEL = "reproduction_pass"
 
 
@@ -180,9 +172,6 @@ class ReproductionPassSummary:
     reproduction_pass_status : str
         One of ``"passed"``, ``"completed_with_warnings"``, or
         ``"failed_mechanical_gate"``.
-    note : str
-        Caveat noting that the reproduction pass is reproduction-
-        pass evidence only.
     output_root : str
         POSIX path to the run-storage base directory used by the
         runner.
@@ -211,7 +200,6 @@ class ReproductionPassSummary:
         default_factory=tuple
     )
     reproduction_pass_status: str = "passed"
-    note: str = _NOTE_REPRODUCTION_ONLY
     output_root: str = ""
     summary_path: str = ""
 
@@ -264,7 +252,6 @@ def _summary_to_dict(summary: ReproductionPassSummary) -> dict[str, Any]:
         ),
         "records": [_record_to_dict(r) for r in summary.records],
         "reproduction_pass_status": summary.reproduction_pass_status,
-        "note": summary.note,
         "output_root": summary.output_root,
         "summary_path": summary.summary_path,
     }
@@ -456,7 +443,6 @@ def _assemble_summary(
         threshold_robustness_available_count=threshold_robust_count,
         records=records,
         reproduction_pass_status=status,
-        note=_NOTE_REPRODUCTION_ONLY,
         output_root=output_root.as_posix(),
         summary_path=summary_path.as_posix(),
     )

@@ -282,9 +282,6 @@ def test_run_reproduction_pass_dagma_completes_with_passed_status(
     assert summary.failed_run_count == 0
     assert summary.reproduction_pass_status == "passed"
     assert summary.threshold_robustness_available_count == 3
-    assert summary.note.startswith(
-        "The reproduction pass is reproduction-pass evidence"
-    )
     assert len(summary.records) == 3
     assert all(r.status == "completed" for r in summary.records)
 
@@ -508,7 +505,6 @@ def test_run_reproduction_pass_writes_summary_with_expected_top_level_fields(
         "threshold_robustness_available_count",
         "records",
         "reproduction_pass_status",
-        "note",
         "output_root",
         "summary_path",
     }
@@ -556,7 +552,6 @@ def test_cli_reproduction_pass_invokes_runner(tmp_path, monkeypatch) -> None:
             threshold_robustness_available_count=1,
             records=(),
             reproduction_pass_status="passed",
-            note="stub",
             output_root=str(tmp_path),
             summary_path=str(tmp_path / "summary.json"),
         )
