@@ -1,4 +1,4 @@
-  {
+{
   "model": "dcdi",
   "condition": "centred_only",
   "seed_torch": 42,
