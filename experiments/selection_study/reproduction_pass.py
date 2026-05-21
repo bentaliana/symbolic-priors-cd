@@ -1,17 +1,17 @@
-"""Phase A reproduction-pass runner.
+"""Reproduction-pass runner.
 
 Drives each model under paper-grounded defaults on its
-paper-aligned reference cell. Loads a Phase A reproduction
+paper-aligned reference cell. Loads a reproduction-pass
 configuration file, validates it against the real-study protocol
 guard, enumerates and validates the preflight manifest, runs every
 ``reproduction`` entry through :func:`run_single_fit`, invokes
 offline threshold-robustness recomputation against each completed
-run directory, and writes a Phase A summary JSON.
+run directory, and writes a reproduction-pass summary JSON.
 
-Phase A is reproduction-pass evidence only. It does not implement
-Phase B, held-out evaluation, prior-loss work, or model selection;
-those phases live in their own modules and are out of scope for
-this runner.
+The reproduction pass is reproduction-pass evidence only. It does
+not implement calibration, held-out evaluation, prior-loss work, or
+model selection; those phases live in their own modules and are
+out of scope for this runner.
 
 Per-entry failures are recorded only for the project's declared
 schema-gate stop conditions
@@ -56,22 +56,23 @@ _LOGGER = logging.getLogger(__name__)
 
 
 _DEFAULT_OUTPUT_ROOT = Path("results/model_selection")
-_SUMMARY_SUBDIR = "phase_a_summary"
-_SUMMARY_FILENAME = "phase_a_summary.json"
-_PHASE_A_SUMMARY_SCHEMA_VERSION = 1
+_SUMMARY_SUBDIR = "reproduction_pass_summary"
+_SUMMARY_FILENAME = "reproduction_pass_summary.json"
+_REPRODUCTION_PASS_SUMMARY_SCHEMA_VERSION = 1
 _TARGET_SEED_POPULATION = "reproduction"
 _NOTE_REPRODUCTION_ONLY = (
-    "Phase A is reproduction-pass evidence only. The summary "
-    "documents that the runner completed end to end on the "
-    "paper-aligned reference cell; it does not constitute base-"
-    "model selection evidence and does not include Phase B "
-    "calibration, held-out evaluation, or prior-loss work."
+    "The reproduction pass is reproduction-pass evidence only. "
+    "The summary documents that the runner completed end to end on "
+    "the paper-aligned reference cell; it does not constitute base-"
+    "model selection evidence and does not include calibration, "
+    "held-out evaluation, or prior-loss work."
 )
+_REAL_STUDY_STAGE_LABEL = "reproduction_pass"
 
 
 @dataclass(frozen=True)
-class PhaseARunRecord:
-    """One Phase A per-entry record.
+class ReproductionPassRunRecord:
+    """One reproduction-pass per-entry record.
 
     Attributes
     ----------
@@ -132,15 +133,16 @@ class PhaseARunRecord:
 
 
 @dataclass(frozen=True)
-class PhaseASummary:
-    """Phase A reproduction-pass summary.
+class ReproductionPassSummary:
+    """Reproduction-pass summary.
 
     Attributes
     ----------
     schema_version : int
         Version integer for the summary schema (initial value 1).
     config_path : str
-        POSIX path to the Phase A configuration file consumed.
+        POSIX path to the reproduction-pass configuration file
+        consumed.
     model : str
         ``"dagma"`` or ``"dcdi"``.
     condition : str
@@ -148,7 +150,7 @@ class PhaseASummary:
     configuration_hash : str
         Full 64-character SHA-256 digest of the resolved config.
     seed_population : str
-        Always ``"reproduction"`` for Phase A.
+        Always ``"reproduction"`` for the reproduction pass.
     seed_values : tuple of int
         The reproduction seed values consumed (purely informational).
     run_ids : tuple of str
@@ -173,14 +175,14 @@ class PhaseASummary:
     threshold_robustness_available_count : int
         Number of completed runs with a sibling
         ``threshold_robustness.json``.
-    records : tuple of PhaseARunRecord
+    records : tuple of ReproductionPassRunRecord
         Per-entry records, in manifest order.
-    phase_a_status : str
+    reproduction_pass_status : str
         One of ``"passed"``, ``"completed_with_warnings"``, or
         ``"failed_mechanical_gate"``.
     note : str
-        Caveat noting that Phase A is reproduction-pass evidence
-        only.
+        Caveat noting that the reproduction pass is reproduction-
+        pass evidence only.
     output_root : str
         POSIX path to the run-storage base directory used by the
         runner.
@@ -205,14 +207,16 @@ class PhaseASummary:
     sid_values: tuple[int, ...]
     mmd_primary_values: tuple[float, ...]
     threshold_robustness_available_count: int
-    records: tuple[PhaseARunRecord, ...] = field(default_factory=tuple)
-    phase_a_status: str = "passed"
+    records: tuple[ReproductionPassRunRecord, ...] = field(
+        default_factory=tuple
+    )
+    reproduction_pass_status: str = "passed"
     note: str = _NOTE_REPRODUCTION_ONLY
     output_root: str = ""
     summary_path: str = ""
 
 
-def _record_to_dict(record: PhaseARunRecord) -> dict[str, Any]:
+def _record_to_dict(record: ReproductionPassRunRecord) -> dict[str, Any]:
     """Serialise a per-entry record to a JSON-ready dict."""
     return {
         "run_id": record.run_id,
@@ -234,8 +238,8 @@ def _record_to_dict(record: PhaseARunRecord) -> dict[str, Any]:
     }
 
 
-def _summary_to_dict(summary: PhaseASummary) -> dict[str, Any]:
-    """Serialise a PhaseASummary to a JSON-ready dict."""
+def _summary_to_dict(summary: ReproductionPassSummary) -> dict[str, Any]:
+    """Serialise a ReproductionPassSummary to a JSON-ready dict."""
     return {
         "schema_version": int(summary.schema_version),
         "config_path": summary.config_path,
@@ -259,7 +263,7 @@ def _summary_to_dict(summary: PhaseASummary) -> dict[str, Any]:
             summary.threshold_robustness_available_count
         ),
         "records": [_record_to_dict(r) for r in summary.records],
-        "phase_a_status": summary.phase_a_status,
+        "reproduction_pass_status": summary.reproduction_pass_status,
         "note": summary.note,
         "output_root": summary.output_root,
         "summary_path": summary.summary_path,
@@ -309,7 +313,7 @@ def _execute_entry(
     manifest: Manifest,
     entry_index: int,
     run_root: Path,
-) -> PhaseARunRecord:
+) -> ReproductionPassRunRecord:
     """Drive one manifest entry through the pipeline.
 
     The pipeline's declared schema-gate stop conditions are caught
@@ -322,12 +326,12 @@ def _execute_entry(
         )
     except SchemaGateError as exc:
         _LOGGER.error(
-            "Phase A entry %s failed with %s: %s",
+            "reproduction-pass entry %s failed with %s: %s",
             entry.expected_run_id,
             type(exc).__name__,
             exc,
         )
-        return PhaseARunRecord(
+        return ReproductionPassRunRecord(
             run_id=entry.expected_run_id,
             seed_replicate_index=int(entry.seed_replicate_index),
             graph_seed=int(entry.graph_seed),
@@ -350,7 +354,7 @@ def _execute_entry(
         run_json_path.parent / "threshold_robustness.json"
     )
 
-    return PhaseARunRecord(
+    return ReproductionPassRunRecord(
         run_id=entry.expected_run_id,
         seed_replicate_index=int(entry.seed_replicate_index),
         graph_seed=int(entry.graph_seed),
@@ -373,10 +377,10 @@ def _assemble_summary(
     config: Configuration,
     config_path: Path,
     manifest: Manifest,
-    records: tuple[PhaseARunRecord, ...],
+    records: tuple[ReproductionPassRunRecord, ...],
     output_root: Path,
-) -> PhaseASummary:
-    """Build the PhaseASummary from per-entry records."""
+) -> ReproductionPassSummary:
+    """Build the ReproductionPassSummary from per-entry records."""
     completed = tuple(r for r in records if r.status == "completed")
     failed = tuple(r for r in records if r.status == "failed")
 
@@ -423,17 +427,17 @@ def _assemble_summary(
         status = "completed_with_warnings"
 
     # Run directories follow the existing derive_run_directory
-    # convention (hash prefix folder). The Phase A summary uses the
-    # full configuration_hash for its directory component so the
-    # run-set-level artefact remains unambiguous if two configurations
-    # ever share the same 12-character prefix.
+    # convention (hash prefix folder). The reproduction-pass summary
+    # uses the full configuration_hash for its directory component
+    # so the run-set-level artefact remains unambiguous if two
+    # configurations ever share the same 12-character prefix.
     summary_dir = (
         output_root / _SUMMARY_SUBDIR / manifest.configuration_hash
     )
     summary_path = summary_dir / _SUMMARY_FILENAME
 
-    return PhaseASummary(
-        schema_version=_PHASE_A_SUMMARY_SCHEMA_VERSION,
+    return ReproductionPassSummary(
+        schema_version=_REPRODUCTION_PASS_SUMMARY_SCHEMA_VERSION,
         config_path=Path(config_path).as_posix(),
         model=config.model,
         condition=config.condition,
@@ -451,15 +455,15 @@ def _assemble_summary(
         mmd_primary_values=tuple(mmd_primary_values),
         threshold_robustness_available_count=threshold_robust_count,
         records=records,
-        phase_a_status=status,
+        reproduction_pass_status=status,
         note=_NOTE_REPRODUCTION_ONLY,
         output_root=output_root.as_posix(),
         summary_path=summary_path.as_posix(),
     )
 
 
-def _write_summary(summary: PhaseASummary) -> Path:
-    """Write the Phase A summary JSON to its canonical path."""
+def _write_summary(summary: ReproductionPassSummary) -> Path:
+    """Write the reproduction-pass summary JSON to its canonical path."""
     summary_path = Path(summary.summary_path)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
@@ -472,25 +476,24 @@ def _write_summary(summary: PhaseASummary) -> Path:
     return summary_path
 
 
-def run_phase_a(
+def run_reproduction_pass(
     config_path: Path | str,
     *,
     output_root: Path | None = None,
-) -> PhaseASummary:
-    """Run the Phase A reproduction pass.
+) -> ReproductionPassSummary:
+    """Run the reproduction pass.
 
     Loads ``config_path``, validates the resolved configuration
-    against the real-study protocol guard for ``stage="phase_a"``,
-    enumerates and validates the preflight manifest, runs every
-    ``reproduction``-population entry through the schema-conformance
-    pipeline, invokes offline threshold-robustness recomputation
-    against each completed run directory, and writes a Phase A
-    summary JSON.
+    against the real-study protocol guard, enumerates and validates
+    the preflight manifest, runs every ``reproduction``-population
+    entry through the schema-conformance pipeline, invokes offline
+    threshold-robustness recomputation against each completed run
+    directory, and writes a reproduction-pass summary JSON.
 
     Parameters
     ----------
     config_path : pathlib.Path or str
-        Path to the Phase A reproduction configuration JSON file.
+        Path to the reproduction-pass configuration JSON file.
     output_root : pathlib.Path or None, optional
         Run-storage base directory. When ``None`` the default
         ``Path("results/model_selection")`` is used. Tests pass a
@@ -499,11 +502,11 @@ def run_phase_a(
 
     Returns
     -------
-    PhaseASummary
-        Summary of the Phase A reproduction pass. The summary is
-        also written to disk at
-        ``<output_root>/phase_a_summary/<configuration_hash>/
-        phase_a_summary.json``.
+    ReproductionPassSummary
+        Summary of the reproduction pass. The summary is also
+        written to disk at
+        ``<output_root>/reproduction_pass_summary/<configuration_hash>/
+        reproduction_pass_summary.json``.
 
     Raises
     ------
@@ -516,7 +519,7 @@ def run_phase_a(
     """
     config_path_obj = Path(config_path)
     config = load_config(config_path_obj)
-    assert_real_study_constants(config, stage="phase_a")
+    assert_real_study_constants(config, stage=_REAL_STUDY_STAGE_LABEL)
 
     base_dir = (
         Path(output_root) if output_root is not None else _DEFAULT_OUTPUT_ROOT
@@ -528,8 +531,8 @@ def run_phase_a(
     reproduction_entries = _filter_reproduction_entries(manifest)
     if not reproduction_entries:
         raise ValueError(
-            "Phase A manifest contains no reproduction entries; "
-            "the configuration must carry a non-empty "
+            "reproduction-pass manifest contains no reproduction "
+            "entries; the configuration must carry a non-empty "
             "'reproduction' seed population"
         )
 
@@ -538,7 +541,7 @@ def run_phase_a(
         for idx, entry in enumerate(manifest.entries)
     }
 
-    records: list[PhaseARunRecord] = []
+    records: list[ReproductionPassRunRecord] = []
     for entry in reproduction_entries:
         entry_index = entry_indices[entry.expected_run_id]
         record = _execute_entry(entry, manifest, entry_index, base_dir)
@@ -556,7 +559,7 @@ def run_phase_a(
 
 
 __all__ = [
-    "PhaseARunRecord",
-    "PhaseASummary",
-    "run_phase_a",
+    "ReproductionPassRunRecord",
+    "ReproductionPassSummary",
+    "run_reproduction_pass",
 ]

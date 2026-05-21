@@ -11,7 +11,7 @@
     {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
     {"intervention_id": "do_X0_pos2", "target_node": 0, "value_raw": 2.0}
   ],
-  "phase_b_configurations": [],
+  "calibration_configurations": [],
   "threshold_robustness_triple": [0.2, 0.3, 0.4],
   "wrapper_api_reference": "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper",
   "n_nodes": 10,

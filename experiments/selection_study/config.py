@@ -18,7 +18,8 @@ Public surface
 --------------
 - ``Configuration``: frozen dataclass.
 - ``InterventionSpec``: frozen dataclass for one intervention.
-- ``PhaseBConfiguration``: frozen dataclass for one Phase B point.
+- ``CalibrationConfiguration``: frozen dataclass for one calibration
+  grid point.
 - ``PerRunSeeds``: frozen dataclass returned by the seed-derivation
   function.
 - ``canonical_json``: deterministic JSON serialisation.
@@ -133,11 +134,11 @@ class InterventionSpec:
 
 
 @dataclass(frozen=True)
-class PhaseBConfiguration:
-    """A single Phase B calibration configuration.
+class CalibrationConfiguration:
+    """A single calibration configuration.
 
-    Captures one point in the Phase B hyperparameter grid for the
-    selection-study runner.
+    Captures one point in the calibration hyperparameter grid for
+    the selection-study runner.
 
     Parameters
     ----------
@@ -222,8 +223,9 @@ class Configuration:
         ``VALID_SEED_POPULATIONS``.
     intervention_set : tuple of InterventionSpec
         Interventions evaluated for MMD on every run.
-    phase_b_configurations : tuple of PhaseBConfiguration
-        Calibration grid points evaluated during Phase B.
+    calibration_configurations : tuple of CalibrationConfiguration
+        Calibration grid points evaluated during the calibration
+        stage.
     threshold_robustness_triple : tuple of three float
         Threshold values used for offline threshold-robustness
         re-computation.
@@ -257,7 +259,7 @@ class Configuration:
     seed_dagma: int | None
     seed_populations: tuple[tuple[str, tuple[int, ...]], ...]
     intervention_set: tuple[InterventionSpec, ...]
-    phase_b_configurations: tuple[PhaseBConfiguration, ...]
+    calibration_configurations: tuple[CalibrationConfiguration, ...]
     threshold_robustness_triple: tuple[float, float, float]
     wrapper_api_reference: str
     n_nodes: int = 3
@@ -266,7 +268,8 @@ class Configuration:
     weight_magnitude_range: tuple[float, float] = (0.5, 2.0)
     # Shared real-run constants. Defaults match the schema-gate
     # values used by the current pipeline so config_resolved stays
-    # honest until Phase A/B configurations explicitly override them.
+    # honest until reproduction-pass / calibration configurations
+    # explicitly override them.
     n_train: int = 64
     mmd_n_samples: int = 64
     # DCDI-only real-run constants. Default to None and are required
@@ -421,8 +424,9 @@ class Configuration:
         # SCM-generation field validation. These fields participate
         # in the configuration_hash and drive run-time SCM
         # construction; defaults preserve the schema-gate cell so
-        # existing fixtures keep working until Phase A/B configs
-        # override with the real selection-study values.
+        # existing fixtures keep working until reproduction-pass /
+        # calibration configs override with the real selection-study
+        # values.
         if isinstance(self.n_nodes, bool) or not isinstance(
             self.n_nodes, int
         ):
@@ -659,9 +663,9 @@ class Configuration:
                 intervention.to_canonical_dict()
                 for intervention in self.intervention_set
             ],
-            "phase_b_configurations": [
-                phase_b.to_canonical_dict()
-                for phase_b in self.phase_b_configurations
+            "calibration_configurations": [
+                calibration.to_canonical_dict()
+                for calibration in self.calibration_configurations
             ],
             "threshold_robustness_triple": [
                 float(value)
@@ -1005,7 +1009,7 @@ _REQUIRED_FIELDS: tuple[str, ...] = (
     "seed_dagma",
     "seed_populations",
     "intervention_set",
-    "phase_b_configurations",
+    "calibration_configurations",
     "threshold_robustness_triple",
     "wrapper_api_reference",
     "n_nodes",
@@ -1152,14 +1156,14 @@ def _configuration_from_dict(data: Any) -> Configuration:
         for item in intervention_set_raw
     )
 
-    phase_b_raw = data["phase_b_configurations"]
-    if not isinstance(phase_b_raw, list):
+    calibration_raw = data["calibration_configurations"]
+    if not isinstance(calibration_raw, list):
         raise ValueError(
-            "phase_b_configurations must be a JSON array; "
-            f"got {type(phase_b_raw).__name__}"
+            "calibration_configurations must be a JSON array; "
+            f"got {type(calibration_raw).__name__}"
         )
-    phase_b_configurations = tuple(
-        PhaseBConfiguration(
+    calibration_configurations = tuple(
+        CalibrationConfiguration(
             name=str(item["name"]),
             hyperparameters=tuple(
                 sorted(
@@ -1168,7 +1172,7 @@ def _configuration_from_dict(data: Any) -> Configuration:
                 )
             ),
         )
-        for item in phase_b_raw
+        for item in calibration_raw
     )
 
     threshold_triple_raw = data["threshold_robustness_triple"]
@@ -1238,7 +1242,7 @@ def _configuration_from_dict(data: Any) -> Configuration:
         ),
         seed_populations=seed_populations,
         intervention_set=intervention_set,
-        phase_b_configurations=phase_b_configurations,
+        calibration_configurations=calibration_configurations,
         threshold_robustness_triple=threshold_robustness_triple,
         wrapper_api_reference=str(data["wrapper_api_reference"]),
         n_nodes=int(n_nodes_raw),

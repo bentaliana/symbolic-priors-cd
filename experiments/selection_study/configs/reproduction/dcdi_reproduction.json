@@ -1,4 +1,4 @@
-{
+  {
   "model": "dcdi",
   "condition": "centred_only",
   "seed_torch": 42,
@@ -11,7 +11,7 @@
     {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
     {"intervention_id": "do_X0_pos2", "target_node": 0, "value_raw": 2.0}
   ],
-  "phase_b_configurations": [],
+  "calibration_configurations": [],
   "threshold_robustness_triple": [0.4, 0.5, 0.6],
   "wrapper_api_reference": "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper",
   "n_nodes": 10,

@@ -687,7 +687,7 @@ argument from `docs/03` 19/05/2026 entry.
 | `dagma_lr` | top-level `Configuration` field, DAGMA-only | Paper-explicit; record. |
 | `dagma_beta_1` (Adam) | top-level `Configuration` field, DAGMA-only | Paper-explicit; record. |
 | `dagma_beta_2` (Adam) | top-level `Configuration` field, DAGMA-only | Paper-explicit; record. |
-| `dagma_lambda1` (L1 coefficient) | top-level `Configuration` field, DAGMA-only OR PhaseBConfiguration.hyperparameters | Top-level for Section 5 option (iii); PhaseBConfiguration for option (ii). |
+| `dagma_lambda1` (L1 coefficient) | top-level `Configuration` field, DAGMA-only OR CalibrationConfiguration.hyperparameters | Top-level for Section 5 option (iii); CalibrationConfiguration for option (ii). |
 | `dagma_T` | top-level `Configuration` field, DAGMA-only | Already implicitly in `Configuration` via the wrapper; record explicitly. |
 | `dagma_s` | top-level `Configuration` field, DAGMA-only | Same as above. |
 | `dagma_mu_init` | top-level `Configuration` field, DAGMA-only | Same as above. |

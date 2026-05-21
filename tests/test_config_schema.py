@@ -24,7 +24,7 @@ from experiments.selection_study.config import (
     Configuration,
     InterventionSpec,
     PerRunSeeds,
-    PhaseBConfiguration,
+    CalibrationConfiguration,
     SEED_DERIVATION_RULE_NAME,
     canonical_json,
     configuration_hash,
@@ -88,12 +88,12 @@ def _make_dagma_configuration() -> Configuration:
                 value_raw=2.0,
             ),
         ),
-        phase_b_configurations=(
-            PhaseBConfiguration(
+        calibration_configurations=(
+            CalibrationConfiguration(
                 name="cfg_1",
                 hyperparameters=(("T", 4), ("lambda1", 0.05)),
             ),
-            PhaseBConfiguration(
+            CalibrationConfiguration(
                 name="cfg_2",
                 hyperparameters=(("T", 5), ("lambda1", 0.10)),
             ),
@@ -126,8 +126,8 @@ def _make_dcdi_configuration() -> Configuration:
                 value_raw=2.0,
             ),
         ),
-        phase_b_configurations=(
-            PhaseBConfiguration(
+        calibration_configurations=(
+            CalibrationConfiguration(
                 name="cfg_1",
                 hyperparameters=(("hid_dim", 8), ("num_layers", 2)),
             ),
@@ -213,7 +213,7 @@ def test_configuration_hash_changes_when_resolved_config_changes() -> None:
         seed_dagma=None,
         seed_populations=base.seed_populations,
         intervention_set=base.intervention_set,
-        phase_b_configurations=base.phase_b_configurations,
+        calibration_configurations=base.calibration_configurations,
         threshold_robustness_triple=base.threshold_robustness_triple,
         wrapper_api_reference=base.wrapper_api_reference,
         **_DAGMA_SCHEMA_GATE_FIELDS,
@@ -421,7 +421,7 @@ def test_configuration_rejects_unknown_seed_population_key() -> None:
                 ("calibration", (3, 4)),
             ),
             intervention_set=(),
-            phase_b_configurations=(),
+            calibration_configurations=(),
             threshold_robustness_triple=(0.2, 0.3, 0.4),
             wrapper_api_reference=(
                 "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -444,7 +444,7 @@ def test_configuration_rejects_unknown_seed_population_key() -> None:
                 ("apple", (5,)),
             ),
             intervention_set=(),
-            phase_b_configurations=(),
+            calibration_configurations=(),
             threshold_robustness_triple=(0.2, 0.3, 0.4),
             wrapper_api_reference=(
                 "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -471,7 +471,7 @@ def test_dagma_with_non_null_seed_torch_is_rejected() -> None:
             seed_dagma=None,
             seed_populations=(("calibration", (1,)),),
             intervention_set=(),
-            phase_b_configurations=(),
+            calibration_configurations=(),
             threshold_robustness_triple=(0.2, 0.3, 0.4),
             wrapper_api_reference="symbolic_priors_cd.wrappers.dagma:DAGMAWrapper",
         )
@@ -490,7 +490,7 @@ def test_dcdi_with_null_seed_torch_is_rejected() -> None:
             seed_dagma=None,
             seed_populations=(("calibration", (1,)),),
             intervention_set=(),
-            phase_b_configurations=(),
+            calibration_configurations=(),
             threshold_robustness_triple=(0.4, 0.5, 0.6),
             wrapper_api_reference="symbolic_priors_cd.wrappers.dcdi:DCDIWrapper",
         )
@@ -571,7 +571,7 @@ def test_load_config_rejects_missing_required_fields(
         "condition": "centred_only",
         # Missing: seed_torch, seed_numpy, seed_dagma,
         # seed_populations, intervention_set,
-        # phase_b_configurations, threshold_robustness_triple,
+        # calibration_configurations, threshold_robustness_triple,
         # wrapper_api_reference.
     }
     file_path = tmp_path / "incomplete.json"
@@ -586,7 +586,7 @@ def test_load_config_rejects_missing_required_fields(
         "seed_dagma",
         "seed_populations",
         "intervention_set",
-        "phase_b_configurations",
+        "calibration_configurations",
         "threshold_robustness_triple",
         "wrapper_api_reference",
     ):
@@ -657,7 +657,7 @@ def test_seed_populations_rejects_duplicate_population_labels() -> None:
                 ("calibration", (3, 4)),
             ),
             intervention_set=(),
-            phase_b_configurations=(),
+            calibration_configurations=(),
             threshold_robustness_triple=(0.2, 0.3, 0.4),
             wrapper_api_reference=(
                 "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -680,7 +680,7 @@ def test_seed_populations_rejects_negative_seed_values() -> None:
             seed_dagma=None,
             seed_populations=(("calibration", (1, -2, 3)),),
             intervention_set=(),
-            phase_b_configurations=(),
+            calibration_configurations=(),
             threshold_robustness_triple=(0.2, 0.3, 0.4),
             wrapper_api_reference=(
                 "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -710,7 +710,7 @@ def test_seed_populations_rejects_bool_seed_values() -> None:
             seed_dagma=None,
             seed_populations=(("calibration", (1, True, 3)),),
             intervention_set=(),
-            phase_b_configurations=(),
+            calibration_configurations=(),
             threshold_robustness_triple=(0.2, 0.3, 0.4),
             wrapper_api_reference=(
                 "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -738,7 +738,7 @@ def test_seed_populations_rejects_non_int_seed_values() -> None:
             seed_dagma=None,
             seed_populations=(("calibration", (1, 1.5, 3)),),
             intervention_set=(),
-            phase_b_configurations=(),
+            calibration_configurations=(),
             threshold_robustness_triple=(0.2, 0.3, 0.4),
             wrapper_api_reference=(
                 "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -768,7 +768,7 @@ def test_load_config_rejects_seed_populations_with_bool_seed(
         "seed_dagma": None,
         "seed_populations": {"calibration": [True]},
         "intervention_set": [],
-        "phase_b_configurations": [],
+        "calibration_configurations": [],
         "threshold_robustness_triple": [0.2, 0.3, 0.4],
         "wrapper_api_reference": (
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -852,7 +852,7 @@ def _make_dagma_kwargs() -> dict[str, Any]:
         "seed_dagma": None,
         "seed_populations": (("calibration", (1,)),),
         "intervention_set": (),
-        "phase_b_configurations": (),
+        "calibration_configurations": (),
         "threshold_robustness_triple": (0.2, 0.3, 0.4),
         "wrapper_api_reference": (
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -871,7 +871,7 @@ def _make_dcdi_kwargs() -> dict[str, Any]:
         "seed_dagma": None,
         "seed_populations": (("calibration", (1,)),),
         "intervention_set": (),
-        "phase_b_configurations": (),
+        "calibration_configurations": (),
         "threshold_robustness_triple": (0.4, 0.5, 0.6),
         "wrapper_api_reference": (
             "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper"
@@ -1137,7 +1137,7 @@ def test_load_config_rejects_missing_n_nodes(tmp_path: Path) -> None:
         "seed_dagma": None,
         "seed_populations": {"calibration": [1]},
         "intervention_set": [],
-        "phase_b_configurations": [],
+        "calibration_configurations": [],
         "threshold_robustness_triple": [0.2, 0.3, 0.4],
         "wrapper_api_reference": (
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -1196,13 +1196,14 @@ def test_canonical_dict_includes_all_new_real_run_fields() -> None:
 
 
 def test_lambda1_and_reg_coeff_are_not_top_level_configuration_fields() -> None:
-    """Phase B sparsity knobs do not appear at the top of Configuration."""
+    """Calibration sparsity knobs do not appear at the top of Configuration."""
     config = _make_dagma_configuration()
     payload = config.to_canonical_dict()
     assert "lambda1" not in payload
     assert "reg_coeff" not in payload
     # The Configuration dataclass also does not expose these as
-    # attributes; Phase B sparsity lives inside PhaseBConfiguration.
+    # attributes; calibration sparsity lives inside the
+    # CalibrationConfiguration entries carried by ``calibration_configurations``.
     assert not hasattr(config, "lambda1")
     assert not hasattr(config, "reg_coeff")
 
@@ -1278,7 +1279,7 @@ def test_load_config_rejects_missing_new_real_run_fields(
         "seed_dagma": None,
         "seed_populations": {"calibration": [1]},
         "intervention_set": [],
-        "phase_b_configurations": [],
+        "calibration_configurations": [],
         "threshold_robustness_triple": [0.2, 0.3, 0.4],
         "wrapper_api_reference": (
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"

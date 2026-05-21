@@ -1,12 +1,12 @@
-"""Tests for the Phase A reproduction-pass runner.
+"""Tests for the reproduction-pass runner.
 
 The runner orchestrates ``load_config``, the real-study protocol
 guard, manifest enumeration, manifest validation, the
 schema-conformance pipeline, threshold-robustness recomputation,
-and the Phase A summary writer. These tests mock the pipeline and
-threshold-robustness functions so they do not call wrapper code,
-DAGMA, or DCDI; the runner's orchestration logic is the unit under
-test.
+and the reproduction-pass summary writer. These tests mock the
+pipeline and threshold-robustness functions so they do not call
+wrapper code, DAGMA, or DCDI; the runner's orchestration logic is
+the unit under test.
 """
 
 from __future__ import annotations
@@ -18,13 +18,15 @@ from typing import Any
 
 import pytest
 
-from experiments.selection_study import phase_a as phase_a_module
+from experiments.selection_study import (
+    reproduction_pass as reproduction_pass_module,
+)
 from experiments.selection_study.config import load_config
 from experiments.selection_study.identity import derive_run_directory
-from experiments.selection_study.phase_a import (
-    PhaseARunRecord,
-    PhaseASummary,
-    run_phase_a,
+from experiments.selection_study.reproduction_pass import (
+    ReproductionPassRunRecord,
+    ReproductionPassSummary,
+    run_reproduction_pass,
 )
 from experiments.selection_study.pipeline import (
     InvalidGraphForSchemaGateError,
@@ -34,15 +36,15 @@ from experiments.selection_study.preflight import Manifest
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_PHASE_A_DIR = (
+_REPRODUCTION_CONFIG_DIR = (
     _PROJECT_ROOT
     / "experiments"
     / "selection_study"
     / "configs"
-    / "phase_a"
+    / "reproduction"
 )
-_DAGMA_PATH = _PHASE_A_DIR / "dagma_reproduction.json"
-_DCDI_PATH = _PHASE_A_DIR / "dcdi_reproduction.json"
+_DAGMA_PATH = _REPRODUCTION_CONFIG_DIR / "dagma_reproduction.json"
+_DCDI_PATH = _REPRODUCTION_CONFIG_DIR / "dcdi_reproduction.json"
 
 
 # ---------------------------------------------------------------------------
@@ -253,76 +255,78 @@ def _make_fake_pipeline(
 
 
 def _patch_pipeline(monkeypatch, fake_fit, fake_recompute) -> None:
-    """Install the fake pipeline and threshold-recompute in phase_a."""
+    """Install the fake pipeline and threshold-recompute in reproduction_pass."""
     monkeypatch.setattr(
-        phase_a_module, "run_single_fit", fake_fit
+        reproduction_pass_module, "run_single_fit", fake_fit
     )
     monkeypatch.setattr(
-        phase_a_module, "recompute_at_thresholds", fake_recompute
+        reproduction_pass_module, "recompute_at_thresholds", fake_recompute
     )
 
 
-def test_run_phase_a_dagma_completes_with_passed_status(
+def test_run_reproduction_pass_dagma_completes_with_passed_status(
     tmp_path, monkeypatch
 ) -> None:
     """Three reproduction entries complete; status is 'passed'."""
     fake_fit, fake_recompute = _make_fake_pipeline()
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
-    assert isinstance(summary, PhaseASummary)
+    assert isinstance(summary, ReproductionPassSummary)
     assert summary.model == "dagma"
     assert summary.condition == "centred_only"
     assert summary.seed_population == "reproduction"
     assert summary.seed_values == (101, 102, 103)
     assert summary.completed_run_count == 3
     assert summary.failed_run_count == 0
-    assert summary.phase_a_status == "passed"
+    assert summary.reproduction_pass_status == "passed"
     assert summary.threshold_robustness_available_count == 3
-    assert summary.note.startswith("Phase A is reproduction-pass evidence")
+    assert summary.note.startswith(
+        "The reproduction pass is reproduction-pass evidence"
+    )
     assert len(summary.records) == 3
     assert all(r.status == "completed" for r in summary.records)
 
 
-def test_run_phase_a_dcdi_completes_with_passed_status(
+def test_run_reproduction_pass_dcdi_completes_with_passed_status(
     tmp_path, monkeypatch
 ) -> None:
-    """DCDI Phase A also runs end-to-end through the mocked pipeline."""
+    """DCDI reproduction pass also runs end-to-end through the mocked pipeline."""
     fake_fit, fake_recompute = _make_fake_pipeline()
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DCDI_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DCDI_PATH, output_root=tmp_path)
 
     assert summary.model == "dcdi"
     assert summary.seed_values == (101, 102, 103)
     assert summary.completed_run_count == 3
-    assert summary.phase_a_status == "passed"
+    assert summary.reproduction_pass_status == "passed"
 
 
-def test_run_phase_a_writes_summary_at_canonical_path(
+def test_run_reproduction_pass_writes_summary_at_canonical_path(
     tmp_path, monkeypatch
 ) -> None:
-    """Summary lives at <output_root>/phase_a_summary/<hash>/file.json."""
+    """Summary lives at <output_root>/reproduction_pass_summary/<hash>/file.json."""
     fake_fit, fake_recompute = _make_fake_pipeline()
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     expected_dir = (
-        tmp_path / "phase_a_summary" / summary.configuration_hash
+        tmp_path / "reproduction_pass_summary" / summary.configuration_hash
     )
-    expected_file = expected_dir / "phase_a_summary.json"
+    expected_file = expected_dir / "reproduction_pass_summary.json"
     assert Path(summary.summary_path) == expected_file
     assert expected_file.is_file()
     payload = json.loads(expected_file.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 1
     assert payload["model"] == "dagma"
-    assert payload["phase_a_status"] == "passed"
+    assert payload["reproduction_pass_status"] == "passed"
     assert payload["completed_run_count"] == 3
 
 
-def test_run_phase_a_summary_records_carry_run_metrics(
+def test_run_reproduction_pass_summary_records_carry_run_metrics(
     tmp_path, monkeypatch
 ) -> None:
     """Per-entry records carry graph/sampler/training status and metrics."""
@@ -332,7 +336,7 @@ def test_run_phase_a_summary_records_carry_run_metrics(
     )
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     assert summary.shd_values == (3, 5, 7)
     assert summary.sid_values == (1, 2, 3)
@@ -342,7 +346,7 @@ def test_run_phase_a_summary_records_carry_run_metrics(
     assert summary.sampler_status_counts == {"available": 3}
 
 
-def test_run_phase_a_run_ids_match_reproduction_entries(
+def test_run_reproduction_pass_run_ids_match_reproduction_entries(
     tmp_path, monkeypatch
 ) -> None:
     """The summary's run_ids equal the manifest's reproduction run_ids."""
@@ -350,7 +354,7 @@ def test_run_phase_a_run_ids_match_reproduction_entries(
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
     config = load_config(_DAGMA_PATH)
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     assert all(
         rid.startswith("dagma__centred_only__reproduction")
@@ -371,10 +375,10 @@ def test_run_phase_a_run_ids_match_reproduction_entries(
 # ---------------------------------------------------------------------------
 
 
-def test_run_phase_a_rejects_config_failing_real_study_guard(
+def test_run_reproduction_pass_rejects_config_failing_real_study_guard(
     tmp_path, monkeypatch
 ) -> None:
-    """A configuration off the Phase A anchors fails the guard."""
+    """A configuration off the protocol anchors fails the guard."""
     fake_fit, fake_recompute = _make_fake_pipeline()
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
@@ -392,11 +396,15 @@ def test_run_phase_a_rejects_config_failing_real_study_guard(
     )
 
     with pytest.raises(ValueError) as excinfo:
-        run_phase_a(toy_path, output_root=tmp_path / "runs")
-    assert "Phase A" in str(excinfo.value)
+        run_reproduction_pass(toy_path, output_root=tmp_path / "runs")
+    # The real-study guard prefixes its violation messages with the
+    # canonical "real-study protocol violation" phrase; asserting on
+    # that substring keeps this test independent of the guard's
+    # internal stage label.
+    assert "real-study protocol violation" in str(excinfo.value)
 
 
-def test_run_phase_a_records_schema_gate_failure_as_warning(
+def test_run_reproduction_pass_records_schema_gate_failure_as_warning(
     tmp_path, monkeypatch
 ) -> None:
     """When the first entry hits a schema-gate stop, status flips."""
@@ -408,11 +416,11 @@ def test_run_phase_a_records_schema_gate_failure_as_warning(
     )
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     assert summary.completed_run_count == 2
     assert summary.failed_run_count == 1
-    assert summary.phase_a_status == "completed_with_warnings"
+    assert summary.reproduction_pass_status == "completed_with_warnings"
 
     failed_records = [r for r in summary.records if r.status == "failed"]
     assert len(failed_records) == 1
@@ -422,7 +430,7 @@ def test_run_phase_a_records_schema_gate_failure_as_warning(
     assert "bidirected" in (failed_records[0].failure_message or "")
 
 
-def test_run_phase_a_propagates_non_schema_gate_exceptions(
+def test_run_reproduction_pass_propagates_non_schema_gate_exceptions(
     tmp_path, monkeypatch
 ) -> None:
     """Generic exceptions are not swallowed; they propagate."""
@@ -433,14 +441,14 @@ def test_run_phase_a_propagates_non_schema_gate_exceptions(
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
     with pytest.raises(RuntimeError) as excinfo:
-        run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+        run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
     assert "stub: unexpected error" in str(excinfo.value)
 
 
-def test_run_phase_a_raises_on_missing_config_file(tmp_path) -> None:
+def test_run_reproduction_pass_raises_on_missing_config_file(tmp_path) -> None:
     """A non-existent config path raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError):
-        run_phase_a(
+        run_reproduction_pass(
             tmp_path / "does_not_exist.json", output_root=tmp_path
         )
 
@@ -450,14 +458,14 @@ def test_run_phase_a_raises_on_missing_config_file(tmp_path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_run_phase_a_creates_run_directories_under_output_root(
+def test_run_reproduction_pass_creates_run_directories_under_output_root(
     tmp_path, monkeypatch
 ) -> None:
     """Each completed run produces a directory under output_root."""
     fake_fit, fake_recompute = _make_fake_pipeline()
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     for record in summary.records:
         assert record.status == "completed"
@@ -468,14 +476,14 @@ def test_run_phase_a_creates_run_directories_under_output_root(
         assert sibling.is_file()
 
 
-def test_run_phase_a_writes_summary_with_expected_top_level_fields(
+def test_run_reproduction_pass_writes_summary_with_expected_top_level_fields(
     tmp_path, monkeypatch
 ) -> None:
     """Summary JSON carries every declared top-level field."""
     fake_fit, fake_recompute = _make_fake_pipeline()
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
     payload = json.loads(
         Path(summary.summary_path).read_text(encoding="utf-8")
     )
@@ -499,7 +507,7 @@ def test_run_phase_a_writes_summary_with_expected_top_level_fields(
         "mmd_primary_values",
         "threshold_robustness_available_count",
         "records",
-        "phase_a_status",
+        "reproduction_pass_status",
         "note",
         "output_root",
         "summary_path",
@@ -513,8 +521,8 @@ def test_run_phase_a_writes_summary_with_expected_top_level_fields(
 # ---------------------------------------------------------------------------
 
 
-def test_cli_phase_a_invokes_runner(tmp_path, monkeypatch) -> None:
-    """--phase phase_a --config PATH calls run_phase_a with the path."""
+def test_cli_reproduction_pass_invokes_runner(tmp_path, monkeypatch) -> None:
+    """--phase reproduction_pass --config PATH calls run_reproduction_pass."""
     from experiments.selection_study import run as run_module
 
     captured: dict[str, Any] = {}
@@ -523,12 +531,12 @@ def test_cli_phase_a_invokes_runner(tmp_path, monkeypatch) -> None:
         config_path: Path | str,
         *,
         output_root: Path | None = None,
-    ) -> PhaseASummary:
+    ) -> ReproductionPassSummary:
         captured["config_path"] = Path(config_path)
         captured["output_root"] = (
             None if output_root is None else Path(output_root)
         )
-        return PhaseASummary(
+        return ReproductionPassSummary(
             schema_version=1,
             config_path=str(config_path),
             model="dagma",
@@ -547,20 +555,21 @@ def test_cli_phase_a_invokes_runner(tmp_path, monkeypatch) -> None:
             mmd_primary_values=(),
             threshold_robustness_available_count=1,
             records=(),
-            phase_a_status="passed",
+            reproduction_pass_status="passed",
             note="stub",
             output_root=str(tmp_path),
             summary_path=str(tmp_path / "summary.json"),
         )
 
     monkeypatch.setattr(
-        "experiments.selection_study.phase_a.run_phase_a", fake_runner
+        "experiments.selection_study.reproduction_pass.run_reproduction_pass",
+        fake_runner,
     )
 
     run_module.main(
         [
             "--phase",
-            "phase_a",
+            "reproduction_pass",
             "--config",
             str(_DAGMA_PATH),
             "--output-root",
@@ -571,29 +580,39 @@ def test_cli_phase_a_invokes_runner(tmp_path, monkeypatch) -> None:
     assert captured["output_root"] == tmp_path
 
 
-def test_cli_phase_a_requires_config(tmp_path) -> None:
-    """--phase phase_a without --config raises ValueError."""
+def test_cli_reproduction_pass_requires_config(tmp_path) -> None:
+    """--phase reproduction_pass without --config raises ValueError."""
     from experiments.selection_study import run as run_module
 
     with pytest.raises(ValueError) as excinfo:
-        run_module.main(["--phase", "phase_a"])
+        run_module.main(["--phase", "reproduction_pass"])
     assert "--config" in str(excinfo.value)
 
 
-def test_cli_phase_a_rejects_unknown_phase() -> None:
+def test_cli_rejects_unknown_phase() -> None:
     """argparse rejects unknown --phase values with SystemExit."""
     from experiments.selection_study import run as run_module
 
     with pytest.raises(SystemExit):
-        run_module.main(["--phase", "phase_b", "--config", "/dev/null"])
+        run_module.main(["--phase", "unknown_stage", "--config", "/dev/null"])
+
+
+def test_cli_rejects_unsupported_phase_value() -> None:
+    """An unsupported --phase value is rejected by argparse."""
+    from experiments.selection_study import run as run_module
+
+    with pytest.raises(SystemExit):
+        run_module.main(
+            ["--phase", "not_a_stage", "--config", "/dev/null"]
+        )
 
 
 # ---------------------------------------------------------------------------
-# Stricter phase_a_status semantics
+# Stricter reproduction_pass_status semantics
 # ---------------------------------------------------------------------------
 
 
-def test_run_phase_a_status_warns_when_threshold_sibling_missing(
+def test_run_reproduction_pass_status_warns_when_threshold_sibling_missing(
     tmp_path, monkeypatch
 ) -> None:
     """All runs complete but a missing sibling demotes status to warnings."""
@@ -602,12 +621,12 @@ def test_run_phase_a_status_warns_when_threshold_sibling_missing(
     )
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     assert summary.completed_run_count == 3
     assert summary.failed_run_count == 0
     assert summary.threshold_robustness_available_count == 2
-    assert summary.phase_a_status == "completed_with_warnings"
+    assert summary.reproduction_pass_status == "completed_with_warnings"
     # The specific entry that did not get a sibling is flagged as
     # threshold_robustness_available=False at the record level.
     missing_records = [
@@ -617,7 +636,7 @@ def test_run_phase_a_status_warns_when_threshold_sibling_missing(
     assert len(missing_records) == 1
 
 
-def test_run_phase_a_status_warns_when_graph_status_not_valid_dag(
+def test_run_reproduction_pass_status_warns_when_graph_status_not_valid_dag(
     tmp_path, monkeypatch
 ) -> None:
     """A completed run with a non-valid_dag graph demotes status."""
@@ -626,16 +645,16 @@ def test_run_phase_a_status_warns_when_graph_status_not_valid_dag(
     )
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     assert summary.completed_run_count == 3
     assert summary.failed_run_count == 0
     assert summary.graph_status_counts.get("bidirected", 0) == 1
     assert summary.graph_status_counts.get("valid_dag", 0) == 2
-    assert summary.phase_a_status == "completed_with_warnings"
+    assert summary.reproduction_pass_status == "completed_with_warnings"
 
 
-def test_run_phase_a_status_warns_when_sampler_unavailable(
+def test_run_reproduction_pass_status_warns_when_sampler_unavailable(
     tmp_path, monkeypatch
 ) -> None:
     """A completed run with an unavailable sampler demotes status."""
@@ -644,7 +663,7 @@ def test_run_phase_a_status_warns_when_sampler_unavailable(
     )
     _patch_pipeline(monkeypatch, fake_fit, fake_recompute)
 
-    summary = run_phase_a(_DAGMA_PATH, output_root=tmp_path)
+    summary = run_reproduction_pass(_DAGMA_PATH, output_root=tmp_path)
 
     assert summary.completed_run_count == 3
     assert summary.failed_run_count == 0
@@ -653,4 +672,4 @@ def test_run_phase_a_status_warns_when_sampler_unavailable(
         == 1
     )
     assert summary.sampler_status_counts.get("available", 0) == 2
-    assert summary.phase_a_status == "completed_with_warnings"
+    assert summary.reproduction_pass_status == "completed_with_warnings"

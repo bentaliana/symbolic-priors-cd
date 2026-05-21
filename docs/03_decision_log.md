@@ -2395,13 +2395,288 @@ threshold-robustness artefact.
 
 ### Consequence
 
-- `python -m experiments.selection_study.run --phase phase_a
-  --config experiments/selection_study/configs/phase_a/dagma_reproduction.json`
+- `python -m experiments.selection_study.run --phase reproduction_pass
+  --config experiments/selection_study/configs/reproduction/dagma_reproduction.json`
   (and the DCDI counterpart) now drives the reproduction pass
   end to end. No filesystem path or wrapper module is hardcoded
   beyond the run-storage default `results/model_selection/`,
-  which can be overridden with `--output-root PATH`.
-- The Phase A runner does not commit generated run outputs; the
-  caller is responsible for keeping those out of version control.
-- Phase B and held-out evaluation remain stubs and are deferred
-  to a later commit; their plans are unchanged.
+  which can be overridden with `--output-root PATH`. Note: the
+  CLI value `--phase reproduction_pass` and the
+  `configs/reproduction/` directory reflect the rename recorded
+  in the follow-up entry "Implementation stage names made
+  semantic before reproduction execution". The implementation
+  module path and CLI value listed here are the post-rename
+  values; the body of the present entry still describes the
+  implementation introduced at this commit.
+- The reproduction-pass runner does not commit generated run
+  outputs; the caller is responsible for keeping those out of
+  version control.
+- Calibration and held-out evaluation remain stubs and are
+  deferred to a later commit; their plans are unchanged.
+
+---
+
+21/05/2026 - Implementation stage names made semantic before reproduction execution
+
+### What changes
+
+- The selection-study protocol documents continue to refer to the
+  two implemented stages as "Phase A: reproduction pass" and
+  "Phase B: calibration". The implementation code now uses the
+  semantic names `reproduction_pass` and `calibration` so module
+  paths, the CLI flag value, test names, output directories, and
+  summary field names are self-describing on first read.
+- File and directory renames (via `git mv` to preserve history):
+  - `experiments/selection_study/phase_a.py` ->
+    `experiments/selection_study/reproduction_pass.py`
+  - `experiments/selection_study/phase_b.py` ->
+    `experiments/selection_study/calibration.py`
+  - `experiments/selection_study/configs/phase_a/` ->
+    `experiments/selection_study/configs/reproduction/`
+  - `tests/test_phase_a_runner.py` ->
+    `tests/test_reproduction_pass_runner.py`
+- Public identifier renames:
+  - `run_phase_a` -> `run_reproduction_pass`
+  - `PhaseASummary` -> `ReproductionPassSummary`
+  - `PhaseARunRecord` -> `ReproductionPassRunRecord`
+  - `run_phase_b` -> `run_calibration`
+  - `calibration_ranking` keeps its name.
+- Summary / output identifier renames:
+  - `phase_a_status` -> `reproduction_pass_status`
+  - `phase_a_summary/` -> `reproduction_pass_summary/`
+  - `phase_a_summary.json` -> `reproduction_pass_summary.json`
+- CLI change:
+  - The `--phase` flag is preserved.
+  - The implemented value changes from `--phase phase_a` to
+    `--phase reproduction_pass`. The old `--phase phase_a` is
+    not accepted as an alias; argparse rejects it.
+
+### Why this matters
+
+- No real reproduction-pass artefacts had been generated before
+  this rename. The prior Commit 8c implementation existed, was
+  unit-tested with mocked pipeline fakes, but no real DAGMA/DCDI
+  reproduction artefacts were committed or generated. Renaming
+  now therefore does not invalidate any on-disk evidence.
+- "Phase A" / "Phase B" are useful protocol shorthand; they are
+  poor implementation names because a future reader has to map
+  the letter back to a stage purpose. Renaming the
+  implementation makes diffs, test failures, and CLI invocations
+  self-describing without changing the protocol vocabulary.
+
+### What does NOT change
+
+- No selection-study constant, threshold value, seed pool,
+  intervention value, model training budget, metric primitive,
+  metric call, wrapper call, `run_single_fit` behaviour, or
+  output-record semantics is changed.
+- The Configuration dataclass field `phase_b_configurations` and
+  the dataclass `PhaseBConfiguration` (both in
+  `experiments/selection_study/config.py`) keep their names.
+  They are configuration-schema identifiers, not runner
+  identifiers, and `config.py` is in the do-not-edit set for
+  this rename.
+- The real-study guard's stage label remains the literal string
+  `"phase_a"`. `experiments/selection_study/real_study.py` is in
+  the do-not-edit set for this rename; `run_reproduction_pass`
+  continues to call
+  `assert_real_study_constants(config, stage="phase_a")` via the
+  module-level constant `_REAL_STUDY_STAGE_LABEL`.
+- The on-disk JSON configuration values
+  (`dagma_reproduction.json`, `dcdi_reproduction.json`) are
+  unchanged after the directory rename. Only their containing
+  directory moved.
+- No source code under `src/symbolic_priors_cd/`, no metric
+  primitive, no wrapper, no notebook, and no generated result
+  was edited.
+
+### Behaviour-preservation verification
+
+- `reproduction_pass.py` is behaviour-equivalent to the previous
+  `phase_a.py` except for module name, summary directory name,
+  summary file name, public class and function names, and the
+  summary field rename `phase_a_status` ->
+  `reproduction_pass_status`. The run-record schema, manifest
+  validation, real-study guard call, threshold-robustness call,
+  per-entry failure policy, and `reproduction_pass_status`
+  derivation rule are unchanged.
+- `calibration.py` retains the same stub behaviour previously
+  held by `phase_b.py`: every callable raises
+  `NotImplementedError` with an explicit module-qualified
+  message; `calibration_ranking` keeps its name.
+- The CLI dispatcher in `run.py` is unchanged except for the
+  `--phase` choice value, the lazily-imported runner symbol, and
+  the log line that names the dispatched stage.
+
+### Tests
+
+- `tests/test_reproduction_pass_runner.py` is the renamed test
+  module. All test names, imports, monkeypatch targets, summary
+  field assertions, and CLI assertions are updated to the new
+  names. A new test
+  `test_cli_rejects_legacy_phase_a_value` pins that the old
+  `--phase phase_a` value is rejected by argparse, so the rename
+  is not silently aliased back.
+- `tests/test_selection_runner_scaffolding.py` imports
+  `reproduction_pass` and `calibration` in place of `phase_a`
+  and `phase_b`. The remaining-stub list now points at
+  `calibration.run_calibration` and
+  `calibration.calibration_ranking`.
+- `tests/test_real_study.py` updates the on-disk config path
+  variable, helper kwargs builders, and reproduction-related
+  test names to the semantic vocabulary. The
+  `assert_real_study_constants(..., stage="phase_a")` calls and
+  the Configuration field references (`phase_b_configurations`,
+  `PhaseBConfiguration`) are preserved verbatim, as they belong
+  to do-not-edit modules.
+
+### Search verification
+
+A repository-wide search for `phase_a`, `PhaseA`, `phase_b`,
+`PhaseB`, `phase_a_status`, `phase_a_summary`, `run_phase_a`,
+`run_phase_b`, `PhaseASummary`, `PhaseARunRecord`,
+`configs/phase_a`, `test_phase_a_runner`, and `--phase phase_a`
+shows remaining hits only in three categories that are
+deliberately retained:
+
+1. `stage="phase_a"` calls (protocol stage label consumed by the
+   real-study guard).
+2. `PhaseBConfiguration` / `phase_b_configurations` references
+   (Configuration dataclass / field names defined in
+   `experiments/selection_study/config.py`).
+3. Methodological prose in docstrings, comments, and earlier
+   `docs/03` entries that refer to the protocol stages by their
+   Phase A / Phase B names. These are historical or
+   methodological references, not current implementation
+   references.
+
+Any remaining occurrence falls into one of those categories.
+
+---
+
+21/05/2026 - Semantic stage-name refactor completed across guard and configuration schema
+
+### What changes
+
+- The real-study guard's accepted stage label is renamed from
+  `"phase_a"` to `"reproduction_pass"`. The constant
+  `_VALID_STAGES` in
+  `experiments/selection_study/real_study.py` now reads
+  `("reproduction_pass",)` and the `assert_real_study_constants`
+  docstring is updated accordingly.
+- The reproduction-pass runner's module-level constant
+  `_REAL_STUDY_STAGE_LABEL` in
+  `experiments/selection_study/reproduction_pass.py` is set to
+  `"reproduction_pass"`, removing the prior asymmetry between
+  implementation module name and guard stage label.
+- The Configuration calibration-grid schema is renamed:
+  - dataclass `PhaseBConfiguration` -> `CalibrationConfiguration`;
+  - field `Configuration.phase_b_configurations` ->
+    `Configuration.calibration_configurations`;
+  - the canonical-JSON key `"phase_b_configurations"` ->
+    `"calibration_configurations"`;
+  - the parsed-JSON local variable and `_REQUIRED_FIELDS` entry
+    follow the same rename.
+- The reproduction config files
+  (`configs/reproduction/dagma_reproduction.json`,
+  `configs/reproduction/dcdi_reproduction.json`) now carry the
+  key `"calibration_configurations": []` in place of
+  `"phase_b_configurations": []`. The list value is unchanged.
+- `docs/08c_real_run_constants_and_training_budget_audit.md`
+  Section table cell referencing
+  `PhaseBConfiguration.hyperparameters` is updated to
+  `CalibrationConfiguration.hyperparameters`. No other current
+  docs reference required updating; `docs/02`, `docs/08`, and
+  `docs/08a` did not contain stale schema-name references.
+
+### Why this matters
+
+- No real reproduction-pass artefacts existed before this
+  refactor, so the `configuration_hash` rotation caused by
+  renaming the canonical-JSON key
+  `phase_b_configurations` -> `calibration_configurations` does
+  not invalidate any on-disk evidence. Doing the rename now,
+  rather than after real artefacts exist, is the right
+  ordering.
+- The prior semantic-rename commit deferred these last two
+  identifier groups because `real_study.py` and `config.py`
+  were do-not-edit at that point. With this commit those
+  groups become consistent with the rest of the implementation:
+  `reproduction_pass` is the single semantic name for the
+  reproduction-pass stage everywhere in code (module name,
+  guard stage label, CLI value, summary field), and
+  `calibration` / `CalibrationConfiguration` is the single
+  semantic name for the calibration grid (module name, schema
+  class, schema field, canonical JSON key).
+
+### Test updates
+
+- `tests/test_real_study.py`: every
+  `assert_real_study_constants(config, stage="phase_a")` call
+  is updated to `stage="reproduction_pass"`. The
+  unknown-stage rejection test that previously probed with
+  `stage="phase_b"` now probes with `stage="unknown_stage"`.
+  Imports of `PhaseBConfiguration` and uses of
+  `phase_b_configurations` are renamed.
+- `tests/test_config_schema.py`,
+  `tests/test_preflight.py`, `tests/test_pipeline.py`,
+  `tests/test_threshold_robustness.py`: schema-identifier
+  imports and field usages renamed to
+  `CalibrationConfiguration` and
+  `calibration_configurations`. The private fixture constants
+  `_PHASE_B`, `_PHASE_B_CFG` are renamed to `_CALIBRATION_CFG`.
+- `tests/test_reproduction_pass_runner.py`: the prior
+  `test_cli_rejects_legacy_phase_a_value` is replaced by
+  `test_cli_rejects_unsupported_phase_value`, which probes
+  rejection of a generic unsupported phase value
+  (`"not_a_stage"`) rather than the stale `"phase_a"`
+  literal. The neighbouring `test_cli_rejects_unknown_phase`
+  uses `"unknown_stage"` in place of the previous
+  `"calibration"`.
+
+### What does NOT change
+
+- No scientific constants changed. `_SHARED_REQUIRED_VALUES`,
+  `_DAGMA_REQUIRED_VALUES`, `_DCDI_REQUIRED_VALUES`, every
+  threshold, every seed pool, every intervention value, every
+  model training budget, and every metric / wrapper / pipeline
+  call is byte-for-byte unchanged.
+- The reproduction-pass runner's control flow is unchanged
+  except that `_REAL_STUDY_STAGE_LABEL` now equals
+  `"reproduction_pass"` rather than `"phase_a"`. The guard
+  enforces the same value-equality rules on the same fields;
+  only the accepted stage label string changed.
+- The calibration runner remains a stub with the same
+  `NotImplementedError` behaviour previously held by the
+  `phase_b` module.
+- Reproduction config JSON files contain identical values
+  (every numeric and boolean field is unchanged); only the
+  key `phase_b_configurations` was renamed to
+  `calibration_configurations`, with an empty list as before.
+
+### Behaviour-preservation verification
+
+- Full pytest suite: 800 passed, 2 pre-existing
+  `RuntimeWarning`s from
+  `tests/test_dagma_wrapper_residuals.py::test_non_finite_sigma_sets_unavailable_unresolved_noise_policy`,
+  unrelated to this refactor.
+- `configuration_hash` will differ for any Configuration
+  serialised under the prior schema because the canonical
+  key `phase_b_configurations` has been renamed to
+  `calibration_configurations`. This rotation is expected and
+  is the sole cause of any hash change. No real artefacts
+  existed under the prior hash, so no resume / re-use logic
+  is invalidated.
+- The repository-wide search for `phase_a`, `phase_b`,
+  `PhaseA`, `PhaseB`, `run_phase_a`, `run_phase_b`,
+  `PhaseASummary`, `PhaseARunRecord`, `PhaseBConfiguration`,
+  `phase_b_configurations`, `phase_a_status`,
+  `phase_a_summary`, `configs/phase_a`,
+  `test_phase_a_runner`, and `--phase phase_a` returns zero
+  hits in `experiments/selection_study/`, `tests/`, and the
+  reproduction config JSONs after this commit. Remaining hits
+  in `docs/` are confined to: (a) the present and prior
+  `docs/03` historical entries describing earlier commits,
+  and (b) protocol / methodological prose in selection-study
+  protocol docs. Both categories are explicitly allowed by
+  the project's docs policy.

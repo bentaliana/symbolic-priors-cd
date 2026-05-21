@@ -1,11 +1,12 @@
 """Tests for the real-study protocol guard.
 
-Verifies that ``assert_real_study_constants`` accepts valid Phase A
-configurations and rejects toy/schema-gate values, wrong threshold
-triples, and cross-model field leakage. The guard is policy-only;
-it is never invoked from ``Configuration.__post_init__``, so toy
-fixtures remain constructible even though they do not pass the
-Phase A guard.
+Verifies that ``assert_real_study_constants`` accepts valid
+reproduction-pass configurations and rejects toy/schema-gate
+values, wrong threshold triples, and cross-model field leakage.
+The guard is policy-only; it is never invoked from
+``Configuration.__post_init__``, so toy fixtures remain
+constructible even though they do not pass the reproduction-pass
+guard.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from experiments.selection_study.config import (
     CONFIGURATION_HASH_ALGORITHM_NAME,
     Configuration,
     InterventionSpec,
-    PhaseBConfiguration,
+    CalibrationConfiguration,
     SEED_DERIVATION_RULE_NAME,
 )
 from experiments.selection_study.real_study import (
@@ -27,7 +28,7 @@ from experiments.selection_study.real_study import (
 
 
 # ---------------------------------------------------------------------------
-# Shared Phase A construction helpers
+# Shared reproduction-pass construction helpers
 # ---------------------------------------------------------------------------
 
 
@@ -44,13 +45,13 @@ _INTERVENTION_B = InterventionSpec(
 
 # The guard-construction tests use a placeholder reproduction
 # seed because ``assert_real_study_constants`` only requires a
-# non-empty reproduction population. The on-disk Phase A
+# non-empty reproduction population. The on-disk reproduction
 # config-file tests below pin the frozen reproduction seeds
 # (101, 102, 103).
 _REPRODUCTION_SEEDS: tuple[int, ...] = (1,)
 
 
-def _phase_a_dagma_kwargs() -> dict[str, Any]:
+def _reproduction_dagma_kwargs() -> dict[str, Any]:
     return {
         "model": "dagma",
         "condition": "centred_only",
@@ -61,8 +62,8 @@ def _phase_a_dagma_kwargs() -> dict[str, Any]:
             ("reproduction", _REPRODUCTION_SEEDS),
         ),
         "intervention_set": (_INTERVENTION_A, _INTERVENTION_B),
-        "phase_b_configurations": (
-            PhaseBConfiguration(
+        "calibration_configurations": (
+            CalibrationConfiguration(
                 name="anchor",
                 hyperparameters=(("lambda1", 0.05),),
             ),
@@ -89,7 +90,7 @@ def _phase_a_dagma_kwargs() -> dict[str, Any]:
     }
 
 
-def _phase_a_dcdi_kwargs() -> dict[str, Any]:
+def _reproduction_dcdi_kwargs() -> dict[str, Any]:
     return {
         "model": "dcdi",
         "condition": "centred_only",
@@ -100,8 +101,8 @@ def _phase_a_dcdi_kwargs() -> dict[str, Any]:
             ("reproduction", _REPRODUCTION_SEEDS),
         ),
         "intervention_set": (_INTERVENTION_A, _INTERVENTION_B),
-        "phase_b_configurations": (
-            PhaseBConfiguration(
+        "calibration_configurations": (
+            CalibrationConfiguration(
                 name="anchor",
                 hyperparameters=(("reg_coeff", 0.1),),
             ),
@@ -137,16 +138,16 @@ def _phase_a_dcdi_kwargs() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_valid_dagma_phase_a_config_passes_guard() -> None:
-    """A DAGMA Configuration carrying the Phase A real-study values passes."""
-    config = Configuration(**_phase_a_dagma_kwargs())
-    assert_real_study_constants(config, stage="phase_a")
+def test_valid_dagma_reproduction_config_passes_guard() -> None:
+    """A DAGMA Configuration carrying reproduction-pass real-study values passes."""
+    config = Configuration(**_reproduction_dagma_kwargs())
+    assert_real_study_constants(config, stage="reproduction_pass")
 
 
-def test_valid_dcdi_phase_a_config_passes_guard() -> None:
-    """A DCDI Configuration carrying the Phase A real-study values passes."""
-    config = Configuration(**_phase_a_dcdi_kwargs())
-    assert_real_study_constants(config, stage="phase_a")
+def test_valid_dcdi_reproduction_config_passes_guard() -> None:
+    """A DCDI Configuration carrying reproduction-pass real-study values passes."""
+    config = Configuration(**_reproduction_dcdi_kwargs())
+    assert_real_study_constants(config, stage="reproduction_pass")
 
 
 # ---------------------------------------------------------------------------
@@ -164,31 +165,31 @@ def test_valid_dcdi_phase_a_config_passes_guard() -> None:
         ("noise_scale", 0.5),
     ],
 )
-def test_shared_field_toy_value_is_rejected_for_phase_a(
+def test_shared_field_toy_value_is_rejected_for_reproduction(
     field_name: str, toy_value: Any,
 ) -> None:
-    """Each shared field's toy value is rejected as a Phase A constant."""
+    """Each shared field's toy value is rejected as a reproduction-pass constant."""
     if field_name == "n_nodes":
-        kwargs = {**_phase_a_dagma_kwargs(), "n_nodes": 3, "expected_edges": 3}
+        kwargs = {**_reproduction_dagma_kwargs(), "n_nodes": 3, "expected_edges": 3}
     elif field_name == "expected_edges":
-        kwargs = {**_phase_a_dagma_kwargs(), "expected_edges": 2}
+        kwargs = {**_reproduction_dagma_kwargs(), "expected_edges": 2}
     else:
-        kwargs = {**_phase_a_dagma_kwargs(), field_name: toy_value}
+        kwargs = {**_reproduction_dagma_kwargs(), field_name: toy_value}
     config = Configuration(**kwargs)
     with pytest.raises(ValueError) as excinfo:
-        assert_real_study_constants(config, stage="phase_a")
+        assert_real_study_constants(config, stage="reproduction_pass")
     assert field_name in str(excinfo.value)
 
 
 def test_weight_magnitude_range_off_anchor_is_rejected() -> None:
-    """A weight magnitude range off the Phase A anchor is rejected."""
+    """A weight magnitude range off the reproduction-pass anchor is rejected."""
     kwargs = {
-        **_phase_a_dagma_kwargs(),
+        **_reproduction_dagma_kwargs(),
         "weight_magnitude_range": (0.5, 1.5),
     }
     config = Configuration(**kwargs)
     with pytest.raises(ValueError) as excinfo:
-        assert_real_study_constants(config, stage="phase_a")
+        assert_real_study_constants(config, stage="reproduction_pass")
     assert "weight_magnitude_range" in str(excinfo.value)
 
 
@@ -211,22 +212,22 @@ def test_dagma_field_off_anchor_is_rejected(
     field_name: str, toy_value: Any,
 ) -> None:
     """Each DAGMA-only field's off-anchor value is rejected."""
-    kwargs = {**_phase_a_dagma_kwargs(), field_name: toy_value}
+    kwargs = {**_reproduction_dagma_kwargs(), field_name: toy_value}
     config = Configuration(**kwargs)
     with pytest.raises(ValueError) as excinfo:
-        assert_real_study_constants(config, stage="phase_a")
+        assert_real_study_constants(config, stage="reproduction_pass")
     assert field_name in str(excinfo.value)
 
 
-def test_dagma_phase_a_rejects_wrong_threshold_triple() -> None:
-    """DAGMA Phase A configs must carry the DAGMA threshold triple."""
+def test_dagma_reproduction_rejects_wrong_threshold_triple() -> None:
+    """DAGMA reproduction configs must carry the DAGMA threshold triple."""
     kwargs = {
-        **_phase_a_dagma_kwargs(),
+        **_reproduction_dagma_kwargs(),
         "threshold_robustness_triple": (0.4, 0.5, 0.6),
     }
     config = Configuration(**kwargs)
     with pytest.raises(ValueError) as excinfo:
-        assert_real_study_constants(config, stage="phase_a")
+        assert_real_study_constants(config, stage="reproduction_pass")
     assert "threshold_robustness_triple" in str(excinfo.value)
 
 
@@ -253,22 +254,22 @@ def test_dcdi_field_off_anchor_is_rejected(
     field_name: str, toy_value: Any,
 ) -> None:
     """Each DCDI-only field's off-anchor value is rejected."""
-    kwargs = {**_phase_a_dcdi_kwargs(), field_name: toy_value}
+    kwargs = {**_reproduction_dcdi_kwargs(), field_name: toy_value}
     config = Configuration(**kwargs)
     with pytest.raises(ValueError) as excinfo:
-        assert_real_study_constants(config, stage="phase_a")
+        assert_real_study_constants(config, stage="reproduction_pass")
     assert field_name in str(excinfo.value)
 
 
-def test_dcdi_phase_a_rejects_wrong_threshold_triple() -> None:
-    """DCDI Phase A configs must carry the DCDI threshold triple."""
+def test_dcdi_reproduction_rejects_wrong_threshold_triple() -> None:
+    """DCDI reproduction configs must carry the DCDI threshold triple."""
     kwargs = {
-        **_phase_a_dcdi_kwargs(),
+        **_reproduction_dcdi_kwargs(),
         "threshold_robustness_triple": (0.2, 0.3, 0.4),
     }
     config = Configuration(**kwargs)
     with pytest.raises(ValueError) as excinfo:
-        assert_real_study_constants(config, stage="phase_a")
+        assert_real_study_constants(config, stage="reproduction_pass")
     assert "threshold_robustness_triple" in str(excinfo.value)
 
 
@@ -277,8 +278,8 @@ def test_dcdi_phase_a_rejects_wrong_threshold_triple() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_dagma_phase_a_with_a_dcdi_only_field_is_rejected() -> None:
-    """A DAGMA Phase A config cannot have a DCDI-only field set.
+def test_dagma_reproduction_with_a_dcdi_only_field_is_rejected() -> None:
+    """A DAGMA reproduction config cannot have a DCDI-only field set.
 
     Configuration validation already enforces this at construction
     time; the guard catches the synthetic case where a hand-built
@@ -287,15 +288,15 @@ def test_dagma_phase_a_with_a_dcdi_only_field_is_rejected() -> None:
     test verifies the construction-time error mentions both models,
     which is the same end-state the guard guarantees.
     """
-    kwargs = {**_phase_a_dagma_kwargs(), "dcdi_num_train_iter": 300000}
+    kwargs = {**_reproduction_dagma_kwargs(), "dcdi_num_train_iter": 300000}
     with pytest.raises(ValueError) as excinfo:
         Configuration(**kwargs)
     assert "dcdi_num_train_iter" in str(excinfo.value)
 
 
-def test_dcdi_phase_a_with_a_dagma_only_field_is_rejected() -> None:
-    """A DCDI Phase A config cannot have a DAGMA-only field set."""
-    kwargs = {**_phase_a_dcdi_kwargs(), "dagma_warm_iter": 20000}
+def test_dcdi_reproduction_with_a_dagma_only_field_is_rejected() -> None:
+    """A DCDI reproduction config cannot have a DAGMA-only field set."""
+    kwargs = {**_reproduction_dcdi_kwargs(), "dagma_warm_iter": 20000}
     with pytest.raises(ValueError) as excinfo:
         Configuration(**kwargs)
     assert "dagma_warm_iter" in str(excinfo.value)
@@ -306,15 +307,15 @@ def test_dcdi_phase_a_with_a_dagma_only_field_is_rejected() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_phase_a_requires_reproduction_seed_population() -> None:
-    """Phase A configs must carry the 'reproduction' seed population."""
+def test_reproduction_pass_requires_reproduction_seed_population() -> None:
+    """Reproduction-pass configs must carry the 'reproduction' seed population."""
     kwargs = {
-        **_phase_a_dagma_kwargs(),
+        **_reproduction_dagma_kwargs(),
         "seed_populations": (("calibration", (1,)),),
     }
     config = Configuration(**kwargs)
     with pytest.raises(ValueError) as excinfo:
-        assert_real_study_constants(config, stage="phase_a")
+        assert_real_study_constants(config, stage="reproduction_pass")
     assert "reproduction" in str(excinfo.value)
 
 
@@ -325,11 +326,11 @@ def test_phase_a_requires_reproduction_seed_population() -> None:
 
 def test_unknown_stage_is_rejected() -> None:
     """An unknown stage label raises ValueError."""
-    config = Configuration(**_phase_a_dagma_kwargs())
+    config = Configuration(**_reproduction_dagma_kwargs())
     with pytest.raises(ValueError) as excinfo:
-        assert_real_study_constants(config, stage="phase_b")
+        assert_real_study_constants(config, stage="unknown_stage")
     assert "stage" in str(excinfo.value).lower()
-    assert "phase_b" in str(excinfo.value)
+    assert "unknown_stage" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
@@ -338,15 +339,16 @@ def test_unknown_stage_is_rejected() -> None:
 
 
 def test_toy_configuration_remains_constructible_outside_guard() -> None:
-    """Schema-gate Configurations construct without the Phase A guard.
+    """Schema-gate Configurations construct without the reproduction-pass
+    guard.
 
     The guard must be policy-only; ``Configuration.__post_init__``
     must not silently invoke it. A schema-gate-sized Configuration
-    is constructed here and then explicitly fails the Phase A
-    guard, demonstrating the separation.
+    is constructed here and then explicitly fails the
+    reproduction-pass guard, demonstrating the separation.
     """
     schema_gate_kwargs = {
-        **_phase_a_dagma_kwargs(),
+        **_reproduction_dagma_kwargs(),
         "n_nodes": 3,
         "expected_edges": 3,
         "n_train": 64,
@@ -354,12 +356,12 @@ def test_toy_configuration_remains_constructible_outside_guard() -> None:
     }
     config = Configuration(**schema_gate_kwargs)
     with pytest.raises(ValueError):
-        assert_real_study_constants(config, stage="phase_a")
+        assert_real_study_constants(config, stage="reproduction_pass")
 
 
 
 # ---------------------------------------------------------------------------
-# Phase A reproduction config files on disk
+# Reproduction-pass config files on disk
 # ---------------------------------------------------------------------------
 
 
@@ -375,59 +377,59 @@ from experiments.selection_study.preflight import (
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_PHASE_A_DIR = (
+_REPRODUCTION_CONFIG_DIR = (
     _PROJECT_ROOT
     / "experiments"
     / "selection_study"
     / "configs"
-    / "phase_a"
+    / "reproduction"
 )
-_DAGMA_PATH = _PHASE_A_DIR / "dagma_reproduction.json"
-_DCDI_PATH = _PHASE_A_DIR / "dcdi_reproduction.json"
+_DAGMA_PATH = _REPRODUCTION_CONFIG_DIR / "dagma_reproduction.json"
+_DCDI_PATH = _REPRODUCTION_CONFIG_DIR / "dcdi_reproduction.json"
 
 
-def test_phase_a_dagma_reproduction_config_file_exists() -> None:
-    """The DAGMA Phase A reproduction config file is present on disk."""
+def test_dagma_reproduction_config_file_exists() -> None:
+    """The DAGMA reproduction-pass config file is present on disk."""
     assert _DAGMA_PATH.is_file(), (
-        f"missing Phase A DAGMA config file: {_DAGMA_PATH}"
+        f"missing reproduction-pass DAGMA config file: {_DAGMA_PATH}"
     )
 
 
-def test_phase_a_dcdi_reproduction_config_file_exists() -> None:
-    """The DCDI Phase A reproduction config file is present on disk."""
+def test_dcdi_reproduction_config_file_exists() -> None:
+    """The DCDI reproduction-pass config file is present on disk."""
     assert _DCDI_PATH.is_file(), (
-        f"missing Phase A DCDI config file: {_DCDI_PATH}"
+        f"missing reproduction-pass DCDI config file: {_DCDI_PATH}"
     )
 
 
-def test_phase_a_dagma_config_loads_through_load_config() -> None:
-    """load_config accepts the DAGMA Phase A reproduction file."""
+def test_dagma_reproduction_config_loads_through_load_config() -> None:
+    """load_config accepts the DAGMA reproduction-pass file."""
     config = load_config(_DAGMA_PATH)
     assert config.model == "dagma"
     assert config.condition == "centred_only"
 
 
-def test_phase_a_dcdi_config_loads_through_load_config() -> None:
-    """load_config accepts the DCDI Phase A reproduction file."""
+def test_dcdi_reproduction_config_loads_through_load_config() -> None:
+    """load_config accepts the DCDI reproduction-pass file."""
     config = load_config(_DCDI_PATH)
     assert config.model == "dcdi"
     assert config.condition == "centred_only"
 
 
-def test_phase_a_dagma_config_passes_real_study_guard() -> None:
-    """The DAGMA Phase A config satisfies the real-study guard."""
+def test_dagma_reproduction_config_passes_real_study_guard() -> None:
+    """The DAGMA reproduction-pass config satisfies the real-study guard."""
     config = load_config(_DAGMA_PATH)
-    assert_real_study_constants(config, stage="phase_a")
+    assert_real_study_constants(config, stage="reproduction_pass")
 
 
-def test_phase_a_dcdi_config_passes_real_study_guard() -> None:
-    """The DCDI Phase A config satisfies the real-study guard."""
+def test_dcdi_reproduction_config_passes_real_study_guard() -> None:
+    """The DCDI reproduction-pass config satisfies the real-study guard."""
     config = load_config(_DCDI_PATH)
-    assert_real_study_constants(config, stage="phase_a")
+    assert_real_study_constants(config, stage="reproduction_pass")
 
 
-def test_phase_a_dagma_config_carries_reproduction_seeds() -> None:
-    """The DAGMA Phase A config carries the frozen reproduction seeds."""
+def test_dagma_reproduction_config_carries_reproduction_seeds() -> None:
+    """The DAGMA reproduction-pass config carries the frozen reproduction seeds."""
     config = load_config(_DAGMA_PATH)
     pops = dict(config.seed_populations)
     assert "reproduction" in pops
@@ -436,8 +438,8 @@ def test_phase_a_dagma_config_carries_reproduction_seeds() -> None:
     assert "held_out_evaluation" not in pops
 
 
-def test_phase_a_dcdi_config_carries_reproduction_seeds() -> None:
-    """The DCDI Phase A config carries the frozen reproduction seeds."""
+def test_dcdi_reproduction_config_carries_reproduction_seeds() -> None:
+    """The DCDI reproduction-pass config carries the frozen reproduction seeds."""
     config = load_config(_DCDI_PATH)
     pops = dict(config.seed_populations)
     assert "reproduction" in pops
@@ -446,7 +448,7 @@ def test_phase_a_dcdi_config_carries_reproduction_seeds() -> None:
     assert "held_out_evaluation" not in pops
 
 
-def test_phase_a_dagma_config_enumerates_through_manifest(tmp_path) -> None:
+def test_dagma_reproduction_config_enumerates_through_manifest(tmp_path) -> None:
     """enumerate_manifest produces three reproduction entries for DAGMA."""
     config = load_config(_DAGMA_PATH)
     manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
@@ -455,7 +457,7 @@ def test_phase_a_dagma_config_enumerates_through_manifest(tmp_path) -> None:
         assert entry.seed_population == "reproduction"
 
 
-def test_phase_a_dcdi_config_enumerates_through_manifest(tmp_path) -> None:
+def test_dcdi_reproduction_config_enumerates_through_manifest(tmp_path) -> None:
     """enumerate_manifest produces three reproduction entries for DCDI."""
     config = load_config(_DCDI_PATH)
     manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
@@ -464,15 +466,15 @@ def test_phase_a_dcdi_config_enumerates_through_manifest(tmp_path) -> None:
         assert entry.seed_population == "reproduction"
 
 
-def test_phase_a_dagma_manifest_validates(tmp_path) -> None:
-    """validate_manifest succeeds on the DAGMA Phase A manifest."""
+def test_dagma_reproduction_manifest_validates(tmp_path) -> None:
+    """validate_manifest succeeds on the DAGMA reproduction-pass manifest."""
     config = load_config(_DAGMA_PATH)
     manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
     validate_manifest(manifest, hash_recheck_config=config)
 
 
-def test_phase_a_dcdi_manifest_validates(tmp_path) -> None:
-    """validate_manifest succeeds on the DCDI Phase A manifest."""
+def test_dcdi_reproduction_manifest_validates(tmp_path) -> None:
+    """validate_manifest succeeds on the DCDI reproduction-pass manifest."""
     config = load_config(_DCDI_PATH)
     manifest = enumerate_manifest(config, base_dir=tmp_path / "runs")
     validate_manifest(manifest, hash_recheck_config=config)
@@ -530,17 +532,17 @@ def _check_preflight_does_not_load_forbidden_modules(
     )
 
 
-def test_dagma_phase_a_preflight_does_not_import_wrappers_or_wandb() -> None:
+def test_dagma_reproduction_preflight_does_not_import_wrappers_or_wandb() -> None:
     """Preflight on the DAGMA config loads no wrapper/DAGMA/wandb module."""
     _check_preflight_does_not_load_forbidden_modules(_DAGMA_PATH)
 
 
-def test_dcdi_phase_a_preflight_does_not_import_wrappers_or_wandb() -> None:
+def test_dcdi_reproduction_preflight_does_not_import_wrappers_or_wandb() -> None:
     """Preflight on the DCDI config loads no wrapper/DCDI/wandb module."""
     _check_preflight_does_not_load_forbidden_modules(_DCDI_PATH)
 
 
-def test_phase_a_dagma_manifest_does_not_create_run_directories(
+def test_dagma_reproduction_manifest_does_not_create_run_directories(
     tmp_path,
 ) -> None:
     """enumerate_manifest + validate_manifest create no run dirs."""
@@ -556,7 +558,7 @@ def test_phase_a_dagma_manifest_does_not_create_run_directories(
     )
 
 
-def test_phase_a_dcdi_manifest_does_not_create_run_directories(
+def test_dcdi_reproduction_manifest_does_not_create_run_directories(
     tmp_path,
 ) -> None:
     """enumerate_manifest + validate_manifest create no run dirs."""
@@ -574,24 +576,24 @@ def test_phase_a_dcdi_manifest_does_not_create_run_directories(
 
 
 # ---------------------------------------------------------------------------
-# Phase A-only choices pinned by the on-disk config files
+# Reproduction-pass-only choices pinned by the on-disk config files
 # ---------------------------------------------------------------------------
 
 
-def test_phase_a_dagma_config_uses_centred_only_condition() -> None:
-    """The DAGMA Phase A config uses the centred_only preprocessing condition."""
+def test_dagma_reproduction_config_uses_centred_only_condition() -> None:
+    """The DAGMA reproduction-pass config uses the centred_only preprocessing condition."""
     config = load_config(_DAGMA_PATH)
     assert config.condition == "centred_only"
 
 
-def test_phase_a_dcdi_config_uses_centred_only_condition() -> None:
-    """The DCDI Phase A config uses the centred_only preprocessing condition."""
+def test_dcdi_reproduction_config_uses_centred_only_condition() -> None:
+    """The DCDI reproduction-pass config uses the centred_only preprocessing condition."""
     config = load_config(_DCDI_PATH)
     assert config.condition == "centred_only"
 
 
-def _assert_minimal_phase_a_intervention_set(config) -> None:
-    """Verify the Phase A intervention set is the minimal +/-2 pair on node 0.
+def _assert_minimal_reproduction_intervention_set(config) -> None:
+    """Verify the reproduction-pass intervention set is the minimal +/-2 pair on node 0.
 
     The two interventions must target node 0 and carry values
     -2.0 and +2.0. The exact ``intervention_id`` strings are
@@ -599,48 +601,48 @@ def _assert_minimal_phase_a_intervention_set(config) -> None:
     """
     interventions = config.intervention_set
     assert len(interventions) == 2, (
-        f"Phase A intervention set must have exactly 2 entries; "
+        f"reproduction-pass intervention set must have exactly 2 entries; "
         f"got {len(interventions)}"
     )
     for spec in interventions:
         assert spec.target_node == 0, (
-            f"Phase A interventions must target node 0; got "
+            f"reproduction-pass interventions must target node 0; got "
             f"{spec.target_node} on intervention "
             f"{spec.intervention_id!r}"
         )
     values = sorted(float(spec.value_raw) for spec in interventions)
     assert values == [-2.0, 2.0], (
-        f"Phase A intervention values must be exactly -2.0 and +2.0; "
+        f"reproduction-pass intervention values must be exactly -2.0 and +2.0; "
         f"got {values}"
     )
 
 
-def test_phase_a_dagma_config_uses_minimal_intervention_set() -> None:
-    """DAGMA Phase A carries do(X0 = +/-2) and nothing else."""
+def test_dagma_reproduction_config_uses_minimal_intervention_set() -> None:
+    """DAGMA reproduction-pass carries do(X0 = +/-2) and nothing else."""
     config = load_config(_DAGMA_PATH)
-    _assert_minimal_phase_a_intervention_set(config)
+    _assert_minimal_reproduction_intervention_set(config)
 
 
-def test_phase_a_dcdi_config_uses_minimal_intervention_set() -> None:
-    """DCDI Phase A carries do(X0 = +/-2) and nothing else."""
+def test_dcdi_reproduction_config_uses_minimal_intervention_set() -> None:
+    """DCDI reproduction-pass carries do(X0 = +/-2) and nothing else."""
     config = load_config(_DCDI_PATH)
-    _assert_minimal_phase_a_intervention_set(config)
+    _assert_minimal_reproduction_intervention_set(config)
 
 
-def test_phase_a_dagma_config_has_empty_phase_b_configurations() -> None:
-    """DAGMA Phase A carries an empty phase_b_configurations tuple."""
+def test_dagma_reproduction_config_has_empty_calibration_configurations() -> None:
+    """DAGMA reproduction-pass carries an empty calibration_configurations tuple."""
     config = load_config(_DAGMA_PATH)
-    assert config.phase_b_configurations == ()
+    assert config.calibration_configurations == ()
 
 
-def test_phase_a_dcdi_config_has_empty_phase_b_configurations() -> None:
-    """DCDI Phase A carries an empty phase_b_configurations tuple."""
+def test_dcdi_reproduction_config_has_empty_calibration_configurations() -> None:
+    """DCDI reproduction-pass carries an empty calibration_configurations tuple."""
     config = load_config(_DCDI_PATH)
-    assert config.phase_b_configurations == ()
+    assert config.calibration_configurations == ()
 
 
-def test_phase_a_dagma_config_seed_fields_are_all_none() -> None:
-    """DAGMA Phase A has null seed_torch / seed_numpy / seed_dagma.
+def test_dagma_reproduction_config_seed_fields_are_all_none() -> None:
+    """DAGMA reproduction-pass has null seed_torch / seed_numpy / seed_dagma.
 
     DAGMA does not call torch.manual_seed, np.random.seed, or
     dagma.utils.set_random_seed, so null seed fields are the
@@ -653,12 +655,12 @@ def test_phase_a_dagma_config_seed_fields_are_all_none() -> None:
     assert config.seed_dagma is None
 
 
-def test_phase_a_dcdi_config_uses_fixed_fit_seed_42() -> None:
-    """DCDI Phase A carries seed_torch = seed_numpy = 42, seed_dagma = None.
+def test_dcdi_reproduction_config_uses_fixed_fit_seed_42() -> None:
+    """DCDI reproduction-pass carries seed_torch = seed_numpy = 42, seed_dagma = None.
 
     DCDI requires matched non-null seed_torch / seed_numpy at fit
-    time; the scalar 42 is an explicit Phase A config value that
-    enters configuration_hash.
+    time; the scalar 42 is an explicit reproduction-pass config
+    value that enters configuration_hash.
     """
     config = load_config(_DCDI_PATH)
     assert config.seed_torch == 42

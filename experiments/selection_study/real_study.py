@@ -18,12 +18,13 @@ from experiments.selection_study.config import Configuration
 
 
 # Stage labels accepted by ``assert_real_study_constants``.
-_VALID_STAGES: tuple[str, ...] = ("phase_a",)
+_VALID_STAGES: tuple[str, ...] = ("reproduction_pass",)
 
 _REQUIRED_REPRODUCTION_POPULATION = "reproduction"
 
-# Shared real-study constants. Each Phase A Configuration must
-# carry exactly these values regardless of model.
+# Shared real-study constants. Each reproduction-pass
+# Configuration must carry exactly these values regardless of
+# model.
 _SHARED_REQUIRED_VALUES: tuple[tuple[str, object], ...] = (
     ("n_nodes", 10),
     ("expected_edges", 20),
@@ -33,7 +34,7 @@ _SHARED_REQUIRED_VALUES: tuple[tuple[str, object], ...] = (
     ("mmd_n_samples", 1000),
 )
 
-# DAGMA-required values for Phase A.
+# DAGMA-required values for the reproduction pass.
 _DAGMA_REQUIRED_VALUES: tuple[tuple[str, object], ...] = (
     ("threshold_robustness_triple", (0.2, 0.3, 0.4)),
     ("dagma_warm_iter", 20000),
@@ -55,7 +56,7 @@ _DAGMA_REQUIRED_NONE_FIELDS: tuple[str, ...] = (
     "dcdi_hidden_layers",
 )
 
-# DCDI-required values for Phase A.
+# DCDI-required values for the reproduction pass.
 _DCDI_REQUIRED_VALUES: tuple[tuple[str, object], ...] = (
     ("threshold_robustness_triple", (0.4, 0.5, 0.6)),
     ("n_val_dcdi", 200),
@@ -111,7 +112,7 @@ def _enforce_field(
     actual = getattr(config, field_name)
     if not _values_equal(actual, expected):
         raise ValueError(
-            "Phase A real-study protocol violation: field "
+            "reproduction-pass real-study protocol violation: field "
             f"{field_name!r} must equal {expected!r}; got {actual!r}"
         )
 
@@ -128,7 +129,7 @@ def _enforce_none(
     ]
     if offenders:
         raise ValueError(
-            "Phase A real-study protocol violation: "
+            "reproduction-pass real-study protocol violation: "
             f"{reason}; offending field(s): {', '.join(offenders)}"
         )
 
@@ -143,7 +144,7 @@ def _enforce_reproduction_population(config: Configuration) -> None:
     names = [name for name, _ in config.seed_populations]
     if _REQUIRED_REPRODUCTION_POPULATION not in names:
         raise ValueError(
-            "Phase A real-study protocol violation: "
+            "reproduction-pass real-study protocol violation: "
             "seed_populations must contain the 'reproduction' "
             f"population; got populations={names!r}"
         )
@@ -151,7 +152,7 @@ def _enforce_reproduction_population(config: Configuration) -> None:
         if name == _REQUIRED_REPRODUCTION_POPULATION:
             if len(seeds) < 1:
                 raise ValueError(
-                    "Phase A real-study protocol violation: "
+                    "reproduction-pass real-study protocol violation: "
                     "the 'reproduction' seed population is empty"
                 )
             break
@@ -167,7 +168,7 @@ def assert_real_study_constants(
     config : Configuration
         Configuration to validate against the real-study protocol.
     stage : str
-        Stage name. The only accepted value is ``"phase_a"``.
+        Stage name. The only accepted value is ``"reproduction_pass"``.
         Future stages may be added separately.
 
     Raises
@@ -200,8 +201,8 @@ def assert_real_study_constants(
             config,
             field_names=_DAGMA_REQUIRED_NONE_FIELDS,
             reason=(
-                "DAGMA Phase A configurations must leave every "
-                "DCDI-only field None"
+                "DAGMA reproduction-pass configurations must leave "
+                "every DCDI-only field None"
             ),
         )
     elif config.model == "dcdi":
@@ -215,13 +216,13 @@ def assert_real_study_constants(
             config,
             field_names=_DCDI_REQUIRED_NONE_FIELDS,
             reason=(
-                "DCDI Phase A configurations must leave every "
-                "DAGMA-only field None"
+                "DCDI reproduction-pass configurations must leave "
+                "every DAGMA-only field None"
             ),
         )
     else:
         raise ValueError(
-            "Phase A real-study protocol violation: "
+            "reproduction-pass real-study protocol violation: "
             f"model must be 'dagma' or 'dcdi'; got {config.model!r}"
         )
 

@@ -76,14 +76,14 @@ def test_dagmaconfig_wrapper_constants():
     assert cfg.h_diagnostic_threshold == 1e-5
 
 
-def test_dagma_config_default_lambda1_matches_phase_a_anchor():
-    """DAGMAConfig().lambda1 must equal the Phase A anchor value 0.05.
+def test_dagma_config_default_lambda1_matches_reproduction_anchor():
+    """DAGMAConfig().lambda1 must equal the reproduction-pass anchor value 0.05.
 
     The selection-study Configuration does not carry ``lambda1`` as
-    a top-level field; the Phase A anchor for DAGMA is therefore
-    delivered through the DAGMAConfig default. This regression test
-    pins the default so a future wrapper-default change cannot
-    silently move the Phase A anchor.
+    a top-level field; the reproduction-pass anchor for DAGMA is
+    therefore delivered through the DAGMAConfig default. This
+    regression test pins the default so a future wrapper-default
+    change cannot silently move the reproduction-pass anchor.
     """
     cfg = DAGMAConfig()
     assert cfg.lambda1 == 0.05

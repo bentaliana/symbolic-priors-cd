@@ -1,4 +1,4 @@
-"""Phase B calibration runner.
+"""Calibration runner.
 
 This module will drive the equal-budget local calibration runs,
 persist them under the ``calibration`` seed population, and apply
@@ -12,8 +12,8 @@ from __future__ import annotations
 from typing import Any, NoReturn
 
 
-def run_phase_b(config: Any) -> NoReturn:
-    """Run the Phase B calibration runs.
+def run_calibration(config: Any) -> NoReturn:
+    """Run the calibration runs.
 
     Parameters
     ----------
@@ -24,12 +24,12 @@ def run_phase_b(config: Any) -> NoReturn:
     Raises
     ------
     NotImplementedError
-        Always. The Phase B runner is not implemented in the current
-        state.
+        Always. The calibration runner is not implemented in the
+        current state.
     """
     raise NotImplementedError(
-        "experiments.selection_study.phase_b.run_phase_b is not "
-        "implemented yet."
+        "experiments.selection_study.calibration.run_calibration is "
+        "not implemented yet."
     )
 
 
@@ -49,6 +49,6 @@ def calibration_ranking(records: Any) -> NoReturn:
         current state.
     """
     raise NotImplementedError(
-        "experiments.selection_study.phase_b.calibration_ranking is "
-        "not implemented yet."
+        "experiments.selection_study.calibration.calibration_ranking "
+        "is not implemented yet."
     )

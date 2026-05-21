@@ -200,8 +200,8 @@ experiments/selection_study/preflight.py
 experiments/selection_study/pipeline.py
 experiments/selection_study/sampling.py
 experiments/selection_study/threshold_robustness.py
-experiments/selection_study/phase_a.py
-experiments/selection_study/phase_b.py
+experiments/selection_study/reproduction_pass.py
+experiments/selection_study/calibration.py
 experiments/selection_study/held_out.py
 experiments/selection_study/resume.py
 experiments/selection_study/report.py
@@ -212,8 +212,8 @@ tests/test_selection_runner_preflight.py
 tests/test_selection_runner_pipeline.py
 tests/test_selection_runner_sampling.py
 tests/test_selection_runner_threshold_robustness.py
-tests/test_selection_runner_phase_a.py
-tests/test_selection_runner_phase_b.py
+tests/test_reproduction_pass_runner.py
+tests/test_calibration_runner.py
 tests/test_selection_runner_held_out.py
 tests/test_selection_runner_resume.py
 tests/test_selection_runner_report.py
@@ -275,9 +275,9 @@ What the commit does:
   commit; no fits are invoked from any flag.
 - Adds stubbed modules `config.py`, `identity.py`, `preflight.py`,
   `pipeline.py`, `sampling.py`, `threshold_robustness.py`,
-  `phase_a.py`, `phase_b.py`, `held_out.py`, `resume.py`,
-  `report.py`, `loader.py`. Stubs raise `NotImplementedError`
-  with explicit messages.
+  `reproduction_pass.py`, `calibration.py`, `held_out.py`,
+  `resume.py`, `report.py`, `loader.py`. Stubs raise
+  `NotImplementedError` with explicit messages.
 
 Acceptance criteria:
 
@@ -682,9 +682,9 @@ cell.
 
 What the commit does:
 
-- Implements `phase_a.py`. Reads the configuration, enumerates
-  the reproduction-pass runs, drives the pipeline (Commit 5) for
-  each run, and persists each record under
+- Implements `reproduction_pass.py`. Reads the configuration,
+  enumerates the reproduction-pass runs, drives the pipeline
+  (Commit 5) for each run, and persists each record under
   `seed_population = "reproduction"`.
 - Records, per run, whether the result meets the disqualification
   thresholds defined in `docs/02_base_model_selection.md`.
@@ -703,15 +703,16 @@ Acceptance criteria:
 - No mid-run threshold or criterion adjustment.
 
 Files touched (allowed):
-`experiments/selection_study/phase_a.py`. Files forbidden:
-anything else.
+`experiments/selection_study/reproduction_pass.py`. Files
+forbidden: anything else.
 
 Tests required:
-`test_phase_a_records_use_reproduction_seed_population`,
-`test_phase_a_disqualification_recorded_in_record`,
-`test_phase_a_does_not_overlap_with_calibration_or_held_out`.
-Invariant: "Phase A records are separable from Phase B and
-held-out evaluation by their `seed_population` value alone".
+`test_reproduction_records_use_reproduction_seed_population`,
+`test_reproduction_disqualification_recorded_in_record`,
+`test_reproduction_does_not_overlap_with_calibration_or_held_out`.
+Invariant: "reproduction-pass records are separable from
+calibration and held-out evaluation by their `seed_population`
+value alone".
 
 Dependencies: Commits 1, 2, 3, 4, 5, 6, 7.
 
@@ -725,7 +726,7 @@ per condition under a frozen ranking rule.
 
 What the commit does:
 
-- Implements `phase_b.py`. Enumerates the calibration runs from
+- Implements `calibration.py`. Enumerates the calibration runs from
   the configuration, drives the pipeline (Commit 5) for each
   run, and persists each record under
   `seed_population = "calibration"`.
@@ -762,7 +763,7 @@ Acceptance criteria:
   read set and asserting the ranking output is unchanged.
 
 Files touched (allowed):
-`experiments/selection_study/phase_b.py`. Files forbidden:
+`experiments/selection_study/calibration.py`. Files forbidden:
 anything else.
 
 Tests required:

@@ -20,7 +20,7 @@ from experiments.selection_study.config import (
     SEED_DERIVATION_RULE_NAME,
     Configuration,
     InterventionSpec,
-    PhaseBConfiguration,
+    CalibrationConfiguration,
 )
 from experiments.selection_study.identity import (
     derive_run_directory,
@@ -121,7 +121,7 @@ _INTERVENTION_A = InterventionSpec(
 _INTERVENTION_B = InterventionSpec(
     intervention_id="intv_b", target_node=1, value_raw=-2.0
 )
-_PHASE_B = PhaseBConfiguration(
+_CALIBRATION_CFG = CalibrationConfiguration(
     name="default", hyperparameters=(("lr", 0.01),)
 )
 
@@ -161,7 +161,7 @@ def _make_dagma_config(
         seed_dagma=None,
         seed_populations=((seed_population, seeds),),
         intervention_set=(_INTERVENTION_A, _INTERVENTION_B),
-        phase_b_configurations=(_PHASE_B,),
+        calibration_configurations=(_CALIBRATION_CFG,),
         threshold_robustness_triple=(0.2, 0.3, 0.4),
         wrapper_api_reference=wrapper_reference,
         seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
@@ -187,7 +187,7 @@ def _make_dcdi_config(
         seed_dagma=None,
         seed_populations=((seed_population, seeds),),
         intervention_set=(_INTERVENTION_A, _INTERVENTION_B),
-        phase_b_configurations=(_PHASE_B,),
+        calibration_configurations=(_CALIBRATION_CFG,),
         threshold_robustness_triple=(0.4, 0.5, 0.6),
         wrapper_api_reference=wrapper_reference,
         seed_derivation_rule=SEED_DERIVATION_RULE_NAME,
@@ -868,7 +868,7 @@ def _make_dagma_config_with(**overrides) -> Configuration:
         seed_dagma=None,
         seed_populations=(("calibration", (10,)),),
         intervention_set=(_INTERVENTION_A, _INTERVENTION_B),
-        phase_b_configurations=(_PHASE_B,),
+        calibration_configurations=(_CALIBRATION_CFG,),
         threshold_robustness_triple=(0.2, 0.3, 0.4),
         wrapper_api_reference=(
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -889,7 +889,7 @@ def _make_dcdi_config_with(**overrides) -> Configuration:
         seed_dagma=None,
         seed_populations=(("calibration", (10,)),),
         intervention_set=(_INTERVENTION_A, _INTERVENTION_B),
-        phase_b_configurations=(_PHASE_B,),
+        calibration_configurations=(_CALIBRATION_CFG,),
         threshold_robustness_triple=(0.4, 0.5, 0.6),
         wrapper_api_reference=(
             "symbolic_priors_cd.wrappers.dcdi:DCDIWrapper"

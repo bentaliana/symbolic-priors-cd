@@ -1,9 +1,9 @@
 """Scaffolding tests for the selection-study runner.
 
 These tests verify import hygiene, help-path behaviour, remaining
-stub surfaces, and global RNG non-mutation. Phase A execution is
-now implemented and is tested separately under
-``tests/test_phase_a_runner.py``.
+stub surfaces, and global RNG non-mutation. The reproduction-pass
+runner is now implemented and is tested separately under
+``tests/test_reproduction_pass_runner.py``.
 """
 
 from __future__ import annotations
@@ -203,23 +203,23 @@ def test_every_stub_module_callable_raises_not_implemented_error() -> None:
     ``NotImplementedError`` when called.
     """
     from experiments.selection_study import (
+        calibration,
         config,
         held_out,
         identity,
         loader,
-        phase_a,
-        phase_b,
         pipeline,
         preflight,
         report,
+        reproduction_pass,
         resume,
         sampling,
         threshold_robustness,
     )
 
     stub_callables: list[tuple[object, tuple[object, ...]]] = [
-        (phase_b.run_phase_b, (None,)),
-        (phase_b.calibration_ranking, (None,)),
+        (calibration.run_calibration, (None,)),
+        (calibration.calibration_ranking, (None,)),
         (held_out.run_held_out_evaluation, (None,)),
         (resume.resume_run, (None,)),
         (report.generate_report, (None,)),
@@ -231,13 +231,13 @@ def test_every_stub_module_callable_raises_not_implemented_error() -> None:
     # pipeline.run_single_fit, loader.load_run,
     # sampling.compute_per_intervention_records,
     # threshold_robustness.recompute_at_thresholds, and
-    # phase_a.run_phase_a are no longer stubs; each is exercised
-    # under its own test module.
+    # reproduction_pass.run_reproduction_pass are no longer stubs;
+    # each is exercised under its own test module.
     _ = pipeline.run_single_fit
     _ = loader.load_run
     _ = sampling.compute_per_intervention_records
     _ = threshold_robustness.recompute_at_thresholds
-    _ = phase_a.run_phase_a
+    _ = reproduction_pass.run_reproduction_pass
 
 
 def _numpy_states_equal(
@@ -272,15 +272,15 @@ def test_fresh_import_does_not_mutate_global_rng_state() -> None:
     import experiments.selection_study  # noqa: F401
     import experiments.selection_study.run  # noqa: F401
     from experiments.selection_study import (  # noqa: F401
+        calibration,
         config,
         held_out,
         identity,
         loader,
-        phase_a,
-        phase_b,
         pipeline,
         preflight,
         report,
+        reproduction_pass,
         resume,
         sampling,
         threshold_robustness,

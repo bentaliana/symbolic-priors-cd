@@ -22,7 +22,7 @@ from experiments.selection_study.config import (
     CONFIGURATION_HASH_ALGORITHM_NAME,
     Configuration,
     InterventionSpec,
-    PhaseBConfiguration,
+    CalibrationConfiguration,
     SEED_DERIVATION_RULE_NAME,
 )
 from experiments.selection_study.loader import load_run
@@ -48,7 +48,7 @@ _INTERVENTION_A = InterventionSpec(
 _INTERVENTION_B = InterventionSpec(
     intervention_id="intv_b", target_node=1, value_raw=-2.0
 )
-_PHASE_B = PhaseBConfiguration(
+_CALIBRATION_CFG = CalibrationConfiguration(
     name="default", hyperparameters=(("lr", 0.01),)
 )
 
@@ -72,7 +72,7 @@ def _make_dagma_config() -> Configuration:
         seed_dagma=None,
         seed_populations=(("calibration", (10,)),),
         intervention_set=(_INTERVENTION_A, _INTERVENTION_B),
-        phase_b_configurations=(_PHASE_B,),
+        calibration_configurations=(_CALIBRATION_CFG,),
         threshold_robustness_triple=(0.2, 0.3, 0.4),
         wrapper_api_reference=(
             "symbolic_priors_cd.wrappers.dagma:DAGMAWrapper"
@@ -753,7 +753,7 @@ def test_invalid_graph_stop_leaves_no_run_json_for_recompute(
         seed_dagma=None,
         seed_populations=(("calibration", (10,)),),
         intervention_set=(_INTERVENTION_A, _INTERVENTION_B),
-        phase_b_configurations=(_PHASE_B,),
+        calibration_configurations=(_CALIBRATION_CFG,),
         threshold_robustness_triple=(0.2, 0.3, 0.4),
         wrapper_api_reference=(
             "tests.test_pipeline:_BidirectedFakeWrapper"

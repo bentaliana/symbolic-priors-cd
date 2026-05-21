@@ -3,12 +3,12 @@
 The CLI accepts the following flags: ``--help``, ``--config``,
 ``--dry-run``, ``--resume``, ``--phase``, and ``--output-root``.
 The ``--dry-run`` path is functional: it runs preflight manifest
-enumeration and validation and exits. The ``--phase phase_a`` path
-is functional: it loads the configuration, validates it against the
-real-study protocol guard, runs the reproduction pass, and writes a
-Phase A summary JSON. All other non-help execution paths raise
-``NotImplementedError`` with a message naming the unimplemented
-path.
+enumeration and validation and exits. The ``--phase reproduction_pass``
+path is functional: it loads the configuration, validates it
+against the real-study protocol guard, runs the reproduction pass,
+and writes a reproduction-pass summary JSON. All other non-help
+execution paths raise ``NotImplementedError`` with a message naming
+the unimplemented path.
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="experiments.selection_study.run",
         description=(
             "Base-model selection-study runner. "
-            "Drives Phase A reproduction, Phase B calibration, and "
-            "held-out evaluation under the selection-study protocol."
+            "Drives the reproduction pass, calibration, and held-out "
+            "evaluation under the selection-study protocol."
         ),
     )
     parser.add_argument(
@@ -66,11 +66,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase",
         type=str,
         default=None,
-        choices=("phase_a",),
+        choices=("reproduction_pass",),
         metavar="STAGE",
         help=(
-            "Selection-study phase to drive. Only 'phase_a' is "
-            "implemented in the current state."
+            "Selection-study phase to drive. Only 'reproduction_pass' "
+            "is implemented in the current state."
         ),
     )
     parser.add_argument(
@@ -111,13 +111,14 @@ def main(
     Raises
     ------
     ValueError
-        If ``--dry-run`` or ``--phase phase_a`` is passed without
-        ``--config``.
+        If ``--dry-run`` or ``--phase reproduction_pass`` is passed
+        without ``--config``.
     NotImplementedError
         For still-unimplemented execution paths (``--resume`` and the
         bare ``--config`` path with no ``--phase``). The message
-        names the unimplemented path. The ``--phase phase_a`` and
-        ``--dry-run`` paths are implemented and do not raise this.
+        names the unimplemented path. The ``--phase reproduction_pass``
+        and ``--dry-run`` paths are implemented and do not raise
+        this.
     SystemExit
         With status 1 if preflight validation fails.
     """
@@ -158,23 +159,25 @@ def main(
             "experiments.selection_study.run --resume is not "
             "implemented yet."
         )
-    if args.phase == "phase_a":
+    if args.phase == "reproduction_pass":
         if args.config is None:
             raise ValueError(
-                "--phase phase_a requires --config PATH; no "
-                "configuration file was supplied."
+                "--phase reproduction_pass requires --config PATH; "
+                "no configuration file was supplied."
             )
-        from experiments.selection_study.phase_a import run_phase_a
+        from experiments.selection_study.reproduction_pass import (
+            run_reproduction_pass,
+        )
 
         output_root: Path | None = (
             Path(args.output_root) if args.output_root is not None else None
         )
-        summary = run_phase_a(
+        summary = run_reproduction_pass(
             Path(args.config), output_root=output_root
         )
         _LOGGER.info(
-            "phase_a completed with status %s; summary at %s",
-            summary.phase_a_status,
+            "reproduction_pass completed with status %s; summary at %s",
+            summary.reproduction_pass_status,
             summary.summary_path,
         )
         return
