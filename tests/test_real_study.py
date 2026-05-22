@@ -666,3 +666,340 @@ def test_dcdi_reproduction_config_uses_fixed_fit_seed_42() -> None:
     assert config.seed_torch == 42
     assert config.seed_numpy == 42
     assert config.seed_dagma is None
+
+
+# ---------------------------------------------------------------------------
+# Calibration-stage guard
+# ---------------------------------------------------------------------------
+
+
+_CALIBRATION_CONFIG_DIR = (
+    _PROJECT_ROOT
+    / "experiments"
+    / "selection_study"
+    / "configs"
+    / "calibration"
+)
+_DAGMA_CALIBRATION_CENTRED_PATH = (
+    _CALIBRATION_CONFIG_DIR / "dagma_calibration_centred_only.json"
+)
+_DAGMA_CALIBRATION_STANDARDISED_PATH = (
+    _CALIBRATION_CONFIG_DIR / "dagma_calibration_standardised.json"
+)
+_DCDI_CALIBRATION_CENTRED_PATH = (
+    _CALIBRATION_CONFIG_DIR / "dcdi_calibration_centred_only.json"
+)
+_DCDI_CALIBRATION_STANDARDISED_PATH = (
+    _CALIBRATION_CONFIG_DIR / "dcdi_calibration_standardised.json"
+)
+
+_CALIBRATION_SEEDS: tuple[int, ...] = (201, 202)
+_TWENTY_NODE_INTERVENTIONS: tuple[InterventionSpec, ...] = tuple(
+    InterventionSpec(
+        intervention_id=f"do_X{node}_{'neg' if sign < 0 else 'pos'}2",
+        target_node=node,
+        value_raw=float(sign),
+    )
+    for node in range(10)
+    for sign in (-2, 2)
+)
+_DAGMA_CALIBRATION_GRID = (
+    CalibrationConfiguration(
+        name="lambda1_0p01",
+        hyperparameters=(("lambda1", 0.01),),
+    ),
+    CalibrationConfiguration(
+        name="lambda1_0p025",
+        hyperparameters=(("lambda1", 0.025),),
+    ),
+    CalibrationConfiguration(
+        name="lambda1_0p05",
+        hyperparameters=(("lambda1", 0.05),),
+    ),
+    CalibrationConfiguration(
+        name="lambda1_0p1",
+        hyperparameters=(("lambda1", 0.1),),
+    ),
+    CalibrationConfiguration(
+        name="lambda1_0p25",
+        hyperparameters=(("lambda1", 0.25),),
+    ),
+)
+_DCDI_CALIBRATION_GRID = (
+    CalibrationConfiguration(
+        name="reg_coeff_0p01",
+        hyperparameters=(("reg_coeff", 0.01),),
+    ),
+    CalibrationConfiguration(
+        name="reg_coeff_0p03",
+        hyperparameters=(("reg_coeff", 0.03),),
+    ),
+    CalibrationConfiguration(
+        name="reg_coeff_0p1",
+        hyperparameters=(("reg_coeff", 0.1),),
+    ),
+    CalibrationConfiguration(
+        name="reg_coeff_0p3",
+        hyperparameters=(("reg_coeff", 0.3),),
+    ),
+    CalibrationConfiguration(
+        name="reg_coeff_1p0",
+        hyperparameters=(("reg_coeff", 1.0),),
+    ),
+)
+
+
+def _calibration_dagma_kwargs() -> dict[str, Any]:
+    """Return constructor kwargs for a valid DAGMA calibration Configuration."""
+    base = _reproduction_dagma_kwargs()
+    base.update(
+        {
+            "seed_populations": (("calibration", _CALIBRATION_SEEDS),),
+            "intervention_set": _TWENTY_NODE_INTERVENTIONS,
+            "calibration_configurations": _DAGMA_CALIBRATION_GRID,
+        }
+    )
+    return base
+
+
+def _calibration_dcdi_kwargs() -> dict[str, Any]:
+    """Return constructor kwargs for a valid DCDI calibration Configuration."""
+    base = _reproduction_dcdi_kwargs()
+    base.update(
+        {
+            "seed_populations": (("calibration", _CALIBRATION_SEEDS),),
+            "intervention_set": _TWENTY_NODE_INTERVENTIONS,
+            "calibration_configurations": _DCDI_CALIBRATION_GRID,
+        }
+    )
+    return base
+
+
+def test_calibration_stage_is_accepted_label() -> None:
+    """assert_real_study_constants accepts the 'calibration' stage label."""
+    config = Configuration(**_calibration_dagma_kwargs())
+    assert_real_study_constants(config, stage="calibration")
+
+
+def test_valid_dagma_calibration_config_passes_guard() -> None:
+    """A DAGMA Configuration with the calibration-stage shape passes."""
+    config = Configuration(**_calibration_dagma_kwargs())
+    assert_real_study_constants(config, stage="calibration")
+
+
+def test_valid_dcdi_calibration_config_passes_guard() -> None:
+    """A DCDI Configuration with the calibration-stage shape passes."""
+    config = Configuration(**_calibration_dcdi_kwargs())
+    assert_real_study_constants(config, stage="calibration")
+
+
+def test_calibration_rejects_wrong_seed_pool() -> None:
+    """A calibration Configuration with seeds other than (201, 202) is rejected."""
+    kwargs = _calibration_dagma_kwargs()
+    kwargs["seed_populations"] = (("calibration", (201, 999)),)
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "calibration" in str(excinfo.value).lower()
+    assert "201" in str(excinfo.value)
+
+
+def test_calibration_rejects_missing_calibration_population() -> None:
+    """A Configuration that lacks the 'calibration' population is rejected."""
+    kwargs = _calibration_dagma_kwargs()
+    kwargs["seed_populations"] = (("reproduction", (101,)),)
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "calibration" in str(excinfo.value).lower()
+
+
+def test_calibration_rejects_held_out_population_alongside_calibration() -> None:
+    """A calibration parent must not carry the held_out_evaluation population.
+
+    Held-out seeds are reserved for the held-out evaluation runner.
+    A calibration parent that lists held-out seeds in addition to
+    calibration seeds would risk leaking held-out evaluation runs
+    into the calibration enumeration.
+    """
+    kwargs = _calibration_dagma_kwargs()
+    kwargs["seed_populations"] = (
+        ("calibration", _CALIBRATION_SEEDS),
+        ("held_out_evaluation", (301, 302, 303, 304, 305)),
+    )
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "held_out_evaluation" in str(excinfo.value)
+
+
+def test_calibration_rejects_dcdi_seed_torch_off_anchor() -> None:
+    """A DCDI calibration Configuration with seed_torch != 42 is rejected."""
+    kwargs = _calibration_dcdi_kwargs()
+    kwargs["seed_torch"] = 43
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "seed_torch" in str(excinfo.value)
+
+
+def test_calibration_rejects_dcdi_seed_numpy_off_anchor() -> None:
+    """A DCDI calibration Configuration with seed_numpy != 42 is rejected."""
+    kwargs = _calibration_dcdi_kwargs()
+    kwargs["seed_numpy"] = 43
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "seed_numpy" in str(excinfo.value)
+
+
+def test_calibration_rejects_wrong_dagma_grid_size() -> None:
+    """A DAGMA calibration parent with fewer than five grid points is rejected."""
+    kwargs = _calibration_dagma_kwargs()
+    kwargs["calibration_configurations"] = _DAGMA_CALIBRATION_GRID[:4]
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "calibration_configurations" in str(excinfo.value)
+
+
+def test_calibration_rejects_wrong_dagma_grid_value() -> None:
+    """A DAGMA calibration parent off-anchor on a lambda1 value is rejected."""
+    kwargs = _calibration_dagma_kwargs()
+    swapped = (
+        CalibrationConfiguration(
+            name="lambda1_0p011",
+            hyperparameters=(("lambda1", 0.011),),
+        ),
+        *_DAGMA_CALIBRATION_GRID[1:],
+    )
+    kwargs["calibration_configurations"] = swapped
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "lambda1" in str(excinfo.value)
+
+
+def test_calibration_rejects_wrong_dcdi_grid_value() -> None:
+    """A DCDI calibration parent off-anchor on a reg_coeff value is rejected."""
+    kwargs = _calibration_dcdi_kwargs()
+    swapped = (
+        CalibrationConfiguration(
+            name="reg_coeff_0p02",
+            hyperparameters=(("reg_coeff", 0.02),),
+        ),
+        *_DCDI_CALIBRATION_GRID[1:],
+    )
+    kwargs["calibration_configurations"] = swapped
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "reg_coeff" in str(excinfo.value)
+
+
+def test_calibration_rejects_grid_with_wrong_hyperparameter_name() -> None:
+    """A DAGMA calibration grid carrying 'reg_coeff' rather than 'lambda1' is rejected."""
+    kwargs = _calibration_dagma_kwargs()
+    wrong_name_grid = tuple(
+        CalibrationConfiguration(
+            name=f"wrong_{i}",
+            hyperparameters=(("reg_coeff", float(value)),),
+        )
+        for i, value in enumerate((0.01, 0.025, 0.05, 0.1, 0.25))
+    )
+    kwargs["calibration_configurations"] = wrong_name_grid
+    config = Configuration(**kwargs)
+    with pytest.raises(ValueError) as excinfo:
+        assert_real_study_constants(config, stage="calibration")
+    assert "lambda1" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Calibration-stage config files on disk
+# ---------------------------------------------------------------------------
+
+
+def test_dagma_calibration_centred_config_file_exists() -> None:
+    """The DAGMA centred-only calibration config file is present on disk."""
+    assert _DAGMA_CALIBRATION_CENTRED_PATH.is_file(), (
+        "missing calibration DAGMA centred_only config file: "
+        f"{_DAGMA_CALIBRATION_CENTRED_PATH}"
+    )
+
+
+def test_dagma_calibration_standardised_config_file_exists() -> None:
+    """The DAGMA standardised calibration config file is present on disk."""
+    assert _DAGMA_CALIBRATION_STANDARDISED_PATH.is_file(), (
+        "missing calibration DAGMA standardised config file: "
+        f"{_DAGMA_CALIBRATION_STANDARDISED_PATH}"
+    )
+
+
+def test_dcdi_calibration_centred_config_file_exists() -> None:
+    """The DCDI centred-only calibration config file is present on disk."""
+    assert _DCDI_CALIBRATION_CENTRED_PATH.is_file(), (
+        "missing calibration DCDI centred_only config file: "
+        f"{_DCDI_CALIBRATION_CENTRED_PATH}"
+    )
+
+
+def test_dcdi_calibration_standardised_config_file_exists() -> None:
+    """The DCDI standardised calibration config file is present on disk."""
+    assert _DCDI_CALIBRATION_STANDARDISED_PATH.is_file(), (
+        "missing calibration DCDI standardised config file: "
+        f"{_DCDI_CALIBRATION_STANDARDISED_PATH}"
+    )
+
+
+def test_all_calibration_configs_pass_real_study_guard() -> None:
+    """Each on-disk calibration parent satisfies the calibration guard."""
+    paths = (
+        _DAGMA_CALIBRATION_CENTRED_PATH,
+        _DAGMA_CALIBRATION_STANDARDISED_PATH,
+        _DCDI_CALIBRATION_CENTRED_PATH,
+        _DCDI_CALIBRATION_STANDARDISED_PATH,
+    )
+    for path in paths:
+        config = load_config(path)
+        assert_real_study_constants(config, stage="calibration")
+
+
+def test_all_calibration_configs_carry_calibration_seed_pair() -> None:
+    """Each on-disk calibration parent carries the (201, 202) calibration pool."""
+    paths = (
+        _DAGMA_CALIBRATION_CENTRED_PATH,
+        _DAGMA_CALIBRATION_STANDARDISED_PATH,
+        _DCDI_CALIBRATION_CENTRED_PATH,
+        _DCDI_CALIBRATION_STANDARDISED_PATH,
+    )
+    for path in paths:
+        config = load_config(path)
+        populations = dict(config.seed_populations)
+        assert "calibration" in populations
+        assert populations["calibration"] == (201, 202)
+        assert "held_out_evaluation" not in populations
+        assert "reproduction" not in populations
+
+
+def test_dcdi_calibration_configs_carry_fit_rng_42() -> None:
+    """Each on-disk DCDI calibration parent pins fit RNG to 42."""
+    for path in (
+        _DCDI_CALIBRATION_CENTRED_PATH,
+        _DCDI_CALIBRATION_STANDARDISED_PATH,
+    ):
+        config = load_config(path)
+        assert config.seed_torch == 42
+        assert config.seed_numpy == 42
+        assert config.seed_dagma is None
+
+
+def test_dagma_calibration_configs_have_null_seed_fields() -> None:
+    """Each on-disk DAGMA calibration parent carries null seed setter fields."""
+    for path in (
+        _DAGMA_CALIBRATION_CENTRED_PATH,
+        _DAGMA_CALIBRATION_STANDARDISED_PATH,
+    ):
+        config = load_config(path)
+        assert config.seed_torch is None
+        assert config.seed_numpy is None
+        assert config.seed_dagma is None
