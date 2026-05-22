@@ -3237,3 +3237,78 @@ A fresh grep was run across `src/` and `tests/` for any `Section 4.3`, `Section 
 ### Forward note
 
 Commit 9 implementation may now begin. The implementation prompt should cite this entry for the executable-Configuration-per-grid-point convention and the `calibration_run_hash` derivation, and should cite the 22/05/2026 selected-configurations handoff entry plus its subsequent condition × model correction for the artefact schema.
+
+---
+
+22/05/2026 — Within-model calibration ranking edge cases frozen before Commit 9.3
+
+### Context
+
+Commit 9.1 (workload enumeration) and Commit 9.2 (selected-configurations artefact writer) are complete. Commit 9.3 implements the within-model lexicographic ranking that produces the per-`(model, condition)` rank-1 configuration and the full five-candidate ranking persisted by the artefact writer. A read-only pre-Commit-9.3 protocol verification surfaced two ambiguities in the previously frozen Section 4.7 chain that would otherwise be resolved silently by code: (A) the exact 10 percent SID-band formula, and (B) the policy for non-finite (`NaN`, `None`, `+inf`, `-inf`) ranking metrics. This entry freezes both decisions before any ranker code is written so the runner's behaviour is pre-registered rather than data-dependent.
+
+The four-step lexicographic chain itself is unchanged: mean SID, then mean MMD inside the SID band, then mean SHD, then full `configuration_hash` lexicographic order as the deterministic fallback. The four pre-Commit-9 decisions (adjudications (a), (b), (c), and the promotion of the ranking rule into docs/02 §4.7) remain in force.
+
+### Decision A: SID-band formula
+
+- The SID band is computed **per `(model, condition)` cell**. There are four cells in total: `(dagma, centred_only)`, `(dagma, standardised)`, `(dcdi, centred_only)`, `(dcdi, standardised)`. Each cell contains the five executable candidates from that model's frozen sparsity grid.
+- The **reference** is `best_finite_mean_sid` over the cell: the minimum `mean_sid` across those candidates in the cell whose `mean_sid` is finite. Non-finite values do not contribute to the reference.
+- The **inclusion predicate** is
+
+  ```
+  candidate_mean_sid <= best_finite_mean_sid * 1.10
+  ```
+
+  evaluated as an inclusive `<=` comparison. A candidate whose `mean_sid` equals `best_finite_mean_sid * 1.10` exactly is inside the band.
+- **Zero-SID edge case**: if `best_finite_mean_sid == 0`, only candidates whose `mean_sid == 0` are inside the band. No positive `mean_sid` is inside a zero-anchored band. This avoids the multiplicative-band degeneracy at zero.
+- **No MMD promotion across the band boundary**: candidates outside the SID band cannot be promoted by MMD. For two candidates where one is inside the band and the other is outside, the ranking is decided by `mean_sid` alone. MMD only resolves the order among candidates that are both inside the band.
+- **Full ranking still emitted**: the ranker outputs a complete ordered list of all five candidates per `(model, condition)` cell. Candidates outside the SID band do not disappear from the ranking; they appear at ranks downstream of the band's contents.
+
+### Decision B: Non-finite metric policy
+
+- The values `NaN`, `None`, `+inf`, and `-inf` are all treated as **non-finite** for ranking. The policy applies to every ranking metric: `mean_sid`, `mean_mmd`, and `mean_shd`.
+- **Finite-better-than-non-finite**: for any ranking metric being compared, finite values rank strictly better than non-finite values. Two non-finite values for the same metric are treated as tied at that step; the ranking falls through to the next step in the chain.
+- **No silent dropping**: candidates with non-finite metrics are retained in the five-candidate ranking. They appear at rank positions consistent with the policy above. Removing them from the ranking would hide degenerate behaviour from the calibration readout and from any auditor reading the artefact.
+- **Fall-through across the chain**: if every candidate in a `(model, condition)` cell is non-finite on `mean_sid`, the chain falls through to `mean_mmd`. If every candidate is also non-finite on `mean_mmd`, the chain falls through to `mean_shd`. If every candidate is also non-finite on `mean_shd`, the deterministic fallback (lexicographic order over the full 64-character lowercase hex `configuration_hash`) decides the ranking. The chain therefore always produces a complete, deterministic 5-candidate ordering.
+- **Degenerate-metric diagnostic fields**: the ranking output must flag degenerate metrics using candidate-level fields:
+  - `has_degenerate_metric` (boolean): True if any of the candidate's compared metrics was non-finite at ranking time.
+  - `degenerate_metric_names` (list of strings): names of the candidate's ranking metrics that were non-finite, drawn from `{"mean_sid", "mean_mmd", "mean_shd"}`.
+  - `ranking_warning` (string): short human-readable description of why the candidate's ranking is degenerate.
+- These fields are diagnostic only. They do not change the rank assigned by the four-step rule.
+
+### Rationale
+
+- These rules prevent Commit 9.3 from silently choosing edge-case behaviour at code-writing time. Two implementations of "differs by 10 percent or less" could rank the same calibration records differently; pinning a single multiplicative inclusive predicate removes that ambiguity.
+- The zero-SID clause matters in practice because reproduction-pass evidence already includes seeds where DAGMA produced `SID == 0`; if calibration sees a similar pattern, the multiplicative band collapses without an explicit rule.
+- Non-finite policy makes the ranking deterministic and inspectable before any real calibration data is observed. Pre-registering the policy avoids a post-hoc "non-finite cleanup" step that could otherwise look like result-dependent tuning.
+- The diagnostic fields preserve the principle that degenerate metrics are surfaced for human inspection rather than hidden. The selected-configurations artefact writer already exposes the per-candidate fields necessary to add these diagnostics without a schema-version bump.
+- The decision-boundary restatement preserves the no-final-winner boundary: the ranker selects within-model configurations only; the DAGMA-vs-DCDI decision remains a held-out-evidence decision under Section 2.
+
+### Documentation change
+
+`docs/02_base_model_selection.md` is updated to v1.12. Three sub-subsections are appended at the tail of Section 4.7 (after `Scope limit`):
+
+- `SID-band formula` — pins the four properties of Decision A.
+- `Non-finite metric policy` — pins the four properties of Decision B and lists the three candidate-level diagnostic field names.
+- `Decision-boundary restatement` — repeats the within-model-only scope and the list of forbidden field names.
+
+No existing Section 4 subsection is renumbered. No cross-reference outside Section 4.7 is updated. The four-step lexicographic chain text from v1.11 is unchanged.
+
+### What does NOT change
+
+- The four-step lexicographic chain in Section 4.7: mean SID, then mean MMD inside the SID band, then mean SHD, then full `configuration_hash` fallback.
+- The Section 2 base-model lexicographic decision rule (operates on held-out evidence).
+- Adjudications (a), (b), and (c).
+- The no-leakage requirement: held-out records MUST NOT influence calibration ranking.
+- Reproduction_pass / Phase A policy.
+- Seed pools, threshold triples, sparsity grids, training budgets, metric primitives, wrapper APIs, the wrapper status taxonomy, and `configuration_hash` semantics.
+- The C-P11 real-budget reapplication requirement.
+- The selected-configurations artefact's required-field set: the new diagnostic fields are candidate-level (inside `candidate_ranking[condition][model][i]`), not new top-level fields. The Commit 9.2 writer's top-level allowed-field check is unchanged.
+- The artefact writer's forbidden-field-name rejection list: `winner`, `model_winner`, `base_model_winner`, `recommended_model`, `final_decision`, `decision` remain rejected at every nesting depth.
+- No source code, no test, no configuration JSON, and no result artefact is created or modified by this entry. The change is documentation-only.
+
+### Forward note
+
+- Commit 9.3 implements the within-model lexicographic ranking against calibration records only, applying Decision A and Decision B as above, and writes the rank-1 selection plus the full five-candidate ranking into the `selected_configurations.json` artefact through the Commit 9.2 writer.
+- Commit 9.3 may add the three candidate-level diagnostic fields (`has_degenerate_metric`, `degenerate_metric_names`, `ranking_warning`) to the artefact-validator's accepted per-candidate fields. This is a candidate-level schema additive change that does not require a top-level schema bump and is not a base-model decision.
+- Commit 9.3 must keep the no-leakage gate: the ranker reads only `seed_population == "calibration"` records.
+- Commit 9.3 must not store any of the six forbidden winner field names. The Commit 9.2 writer's recursive forbidden-field-name check enforces this independently of the ranker.
