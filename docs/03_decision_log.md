@@ -2792,3 +2792,89 @@ No artefacts exist under the old convention. `results/model_selection/` does not
 
 - `tests/test_reproduction_pass_runner.py::test_run_reproduction_pass_writes_summary_at_canonical_path` updated to expect the 12-character prefix on the summary directory leaf. The literal `12` is used in the test directly (rather than importing `_HASH_PREFIX_LENGTH`) so the test is independent of the source-side constant; the constant itself is pinned by separate regressions in `tests/test_run_identity.py` and `tests/test_config_schema.py`.
 - New regression `tests/test_reproduction_pass_runner.py::test_run_reproduction_pass_summary_field_carries_full_hash` pins that `summary.configuration_hash` and the JSON `configuration_hash` key both retain the full 64-character lowercase hex digest, so the directory-leaf shortening cannot silently propagate into the content field in a future refactor.
+
+---
+
+22/05/2026 - Reproduction-pass stage mechanically closed under Path B
+
+### Decision
+
+The reproduction_pass stage is **mechanically closed** under docs/02 v1.8 Path B. Both DAGMA-linear and DCDI-G completed `--phase reproduction_pass` end-to-end on the 10-node ER2 selection cell and produced the full artefact set required by the project schema. Both candidates report `reproduction_pass_status = "passed"`. No model-selection decision is made or implied by this closure. The factual readout lives in `docs/08e_reproduction_pass_readout.md`; this `docs/03` entry records the closure.
+
+### Configuration hashes
+
+- DAGMA reproduction config: `15328a8f730f3bfc864ccf45f1aea38fbec2bc81dac8ff76485497ee2d676537` (directory leaf `15328a8f730f`).
+- DCDI reproduction config: `826de9ce39d70f2ca2416523bf1526470b0f07734001ac05dbd2de00fb55ae0a` (directory leaf `826de9ce39d7`).
+
+### Artefact-convention compliance
+
+- Artefacts were generated under docs/02 v1.8 Path B.
+- Per-run directories and the reproduction-pass summary directory both use the 12-character `configuration_hash` prefix as the directory leaf (the unified convention from the 21/05/2026 path-unification entry above). The full 64-character digest is retained as a content field in summary, per-run `run.json`, and sibling `threshold_robustness.json`.
+- `ReproductionPassSummary` carries no `note` prose field; only 21 factual fields per the 21/05/2026 note-removal entry.
+- No `phase_a` / `phase_b` implementation path appears in any artefact.
+
+### Headline counts
+
+For each candidate: 3 reproduction-pool entries; `completed_run_count = 3`, `failed_run_count = 0`; `graph_status_counts = {"valid_dag": 3}`; `sampler_status_counts = {"available": 3}`; `training_status_counts = {"converged": 3}`; `threshold_robustness_available_count = 3`.
+
+### Section 5 disqualification interpretation
+
+- Items 1, 3, 4: not triggered for either candidate.
+- Item 2: not directly evaluable under Path B for the current configs; reported as "not directly evaluable", not "passed".
+- Item 5: out of scope at this stage.
+
+### Diagnostic warnings carried forward (not selection signals)
+
+- **DCDI has substantially higher SHD/SID/MMD than DAGMA at anchor `reg_coeff = 0.1`**: DAGMA SHD `[2, 0, 0]` / SID `[6, 0, 0]` / mmd_primary `[0.0041, 0.0045, 0.0030]`; DCDI SHD `[26, 25, 31]` / SID `[65, 41, 65]` / mmd_primary `[0.0770, 0.0111, 0.1068]`. DCDI/DAGMA MMD ratios `[19.0x, 2.5x, 35.6x]` across seeds 0/1/2. The comparison is at the reproduction anchor only (DAGMA `lambda1 = 0.05`, DCDI `reg_coeff = 0.1`) and is not informative about either candidate's behaviour at calibration-selected sparsity values.
+- **DCDI seed 2 is a coherent outlier**: sparse graph (thresholded-adjacency edge count `10` against the ER2 cell's `expected_edges = 20`), highest MMD primary, upper-end validation-NLL last-3-value mean (~2.27), and largest per-intervention median-heuristic bandwidths (~514-540). The four signals are mutually consistent on the same seed. Recorded as a diagnostic pattern only.
+- **DCDI MMD gap does not by itself resolve the C-P11 question.** The C-P11 real-budget reapplication probe on a fresh 10-node ER2 fixture remains required before any held-out interpretation of DCDI sampler quality, per docs/02 Section 7.
+- **DCDI validation-NLL trajectory is non-monotonic** (lower values earlier, later increases as the augmented-Lagrangian acyclicity pressure dominates), consistent with the C-P15 pilot shape documented in `docs/08d_dcdi_training_budget_pilot.md`.
+
+### What this closure does not establish
+
+- No base-model selection.
+- No statement about paper reproduction for either candidate.
+- No claim that DCDI is rejected; Phase B calibration may produce a selected `reg_coeff` that improves on the anchor.
+- No H1-H4 hypothesis evidence; the DCDI seed-2 outlier pattern is consistent with the **type** of cross-seed instability H4 will later test, not evidence for H4.
+
+### Next step
+
+Pre-Commit-9 adjudication of the three open items recorded in `docs/08e` Section 8:
+
+1. Eligible-node intervention-set policy for Phase B calibration and held-out evaluation.
+2. DCDI fit-RNG convention beyond the reproduction_pass `seed_torch = seed_numpy = 42` value.
+3. The selected-configuration artefact path produced by Phase B and consumed by held-out evaluation.
+
+These three decisions must be frozen before Commit 9 (calibration runner) begins.
+
+### What does NOT change under this closure
+
+- No source / test / configuration JSON edit. The runtime artefacts under `results/model_selection/` are not modified by this closure.
+- No selection criterion, evaluation rule, metric primitive, wrapper API, real-study guard, schema field, seed-pool integer, threshold triple, training budget, or intervention value changed.
+
+---
+
+22/05/2026 — DAGMA training_status semantics verified
+
+### Context
+
+After mechanical closure of the reproduction_pass (entry above), a focused read-only inspection was carried out on the DAGMA `training_status` field. The question was whether `training_status = "converged"` in the reproduction-pass DAGMA artefacts denotes a real algorithmic convergence check on the acyclicity penalty `h_final`, or merely the convention that the configured optimisation budget completed without error. The latter would matter, because the DAGMA wrapper does not implement observed inner-loop early stopping and every reproduction-pass run reached the full configured budget of `(T - 1) * warm_iter + max_iter = 130000` iterations.
+
+### Inspection
+
+The inspection was read-only. It traced the wrapper's status-emission branch in `src/symbolic_priors_cd/wrappers/dagma.py` and confirmed that `training_status` is set by an `if/elif/else` chain on `h_final`: `not np.isfinite(h_final)` -> `"diverged"`; `h_final <= cfg.h_diagnostic_threshold` -> `"converged"`; otherwise -> `"max_iter"`. The default `h_diagnostic_threshold` is `1e-5`. No code path emits `"converged"` purely on budget exhaustion; budget exhaustion with finite but above-threshold `h_final` is routed to `"max_iter"` instead. The pipeline writes the wrapper's `training_status` verbatim into `run.json` with no translation. The three existing DAGMA reproduction-pass runs recorded `h_final` of approximately `2.91e-6`, `2.84e-6`, `2.59e-6`, all well below `1e-5`, so the emission of `"converged"` on each run is independently justified by the source predicate. The three dedicated wrapper-diagnostics tests (`test_training_status_converged`, `test_training_status_max_iter`, `test_training_status_diverged`) pin the same three-way distinction at the test level.
+
+### Decision
+
+The DAGMA `training_status` semantics in the current code are correct and consistent with the wrapper API contract: `"converged"` is an `h_final`-predicate label, not a budget-completion label. No source, configuration, test, or result-artefact change is required. The mechanical closure of the reproduction_pass remains semantically reliable. The `training_status_counts = {"converged": 3}` value carried in the DAGMA reproduction-pass summary is supported by the per-run `h_final` evidence and by the source-level predicate.
+
+### Documentation change
+
+A short DAGMA-specific clarification was added to `docs/04_wrapper_api_contract.md` Section 7 immediately after the `training_status` bullet list. It states (a) that the DAGMA wrapper does not implement observed inner-loop early stopping and therefore leaves the top-level `n_iterations` field as `null`, and (b) that for DAGMA the `converged` / `max_iter` distinction is an `h_final` predicate, not an early-stop iteration-count predicate. This is a documentation clarification only; no new policy is introduced and the status taxonomy is not rewritten.
+
+### What does NOT change under this entry
+
+- No source, test, configuration JSON, or result artefact is modified.
+- The reproduction-pass close-out recorded in the entry above remains in force.
+- No selection criterion, evaluation rule, schema field, training budget, threshold value, or seed-pool value changed.
+- `docs/02`, `docs/08`, `docs/08a`, `docs/08b`, `docs/08c`, `docs/08d`, and `CLAUDE.md` are not edited. `docs/08e_reproduction_pass_readout.md` is added; this `docs/03` entry records the closure.

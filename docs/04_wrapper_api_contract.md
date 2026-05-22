@@ -172,6 +172,18 @@ overloaded fit status. Each axis answers a separate question.
 - `diverged`
 - `wrapper_error`
 
+DAGMA-specific note. The DAGMA wrapper does not implement observed
+inner-loop early stopping; each stage of the central-path schedule runs
+to its configured `warm_iter` or `max_iter` budget, and the top-level
+`n_iterations` field on a DAGMA run record therefore remains `null`.
+Within this taxonomy, `training_status = converged` for DAGMA means
+`h_final <= h_diagnostic_threshold` after the configured optimisation
+budget, and `training_status = max_iter` for DAGMA means `h_final` is
+finite but above `h_diagnostic_threshold` after the configured
+optimisation budget. The DAGMA converged-versus-`max_iter` distinction
+is therefore an `h_final` predicate, not an early-stop iteration-count
+predicate.
+
 `graph_status` describes the structural validity of the thresholded boolean
 adjacency:
 
