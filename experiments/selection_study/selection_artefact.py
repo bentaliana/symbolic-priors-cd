@@ -68,6 +68,16 @@ CANDIDATES_PER_CONDITION_PER_MODEL = 5
 HASH_PREFIX_LENGTH = 12
 FULL_HASH_LENGTH = 64
 
+# Stable policy identifiers carried in the artefact metadata. These
+# constants are the single source of truth for the calibration-stage
+# policy refs; downstream code (the calibration runner, the
+# identity-hash payload builder, the held-out runner) should import
+# them rather than embed the strings.
+SELECTION_RULE_ID = "within_model_sid_band_mmd_shd_hash_v1"
+SELECTION_RULE_REF = "within_model_calibration_ranking_rule"
+INTERVENTION_POLICY_REF = "all_nodes_plus_minus_2_v1"
+FIT_RNG_POLICY_REF = "dcdi_fixed_fit_rng_42_v1"
+
 _HEX_DIGITS = frozenset("0123456789abcdef")
 
 _REQUIRED_TOP_LEVEL_FIELDS: tuple[str, ...] = (
@@ -1032,8 +1042,10 @@ __all__ = [
     "CANDIDATES_PER_CONDITION_PER_MODEL",
     "CONDITIONS",
     "DECISION_SCOPE",
+    "FIT_RNG_POLICY_REF",
     "FULL_HASH_LENGTH",
     "HASH_PREFIX_LENGTH",
+    "INTERVENTION_POLICY_REF",
     "MODELS",
     "MODEL_SELECTION_DIRECTORY",
     "SCHEMA_VERSION",
@@ -1041,6 +1053,8 @@ __all__ = [
     "SELECTED_CONFIGURATIONS_ARTEFACT_TYPE",
     "SELECTED_CONFIGURATIONS_FILENAME",
     "SELECTED_CONFIGURATION_SEMANTICS",
+    "SELECTION_RULE_ID",
+    "SELECTION_RULE_REF",
     "STAGE_LABEL",
     "build_calibration_run_identity_payload",
     "compute_calibration_run_hash12",

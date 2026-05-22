@@ -218,7 +218,6 @@ def test_every_stub_module_callable_raises_not_implemented_error() -> None:
     )
 
     stub_callables: list[tuple[object, tuple[object, ...]]] = [
-        (calibration.run_calibration, (None,)),
         (calibration.calibration_ranking, (None,)),
         (held_out.run_held_out_evaluation, (None,)),
         (resume.resume_run, (None,)),
@@ -230,14 +229,16 @@ def test_every_stub_module_callable_raises_not_implemented_error() -> None:
             stub(*args)  # type: ignore[operator]
     # pipeline.run_single_fit, loader.load_run,
     # sampling.compute_per_intervention_records,
-    # threshold_robustness.recompute_at_thresholds, and
-    # reproduction_pass.run_reproduction_pass are no longer stubs;
-    # each is exercised under its own test module.
+    # threshold_robustness.recompute_at_thresholds,
+    # reproduction_pass.run_reproduction_pass, and
+    # calibration.run_calibration are no longer stubs; each is
+    # exercised under its own test module.
     _ = pipeline.run_single_fit
     _ = loader.load_run
     _ = sampling.compute_per_intervention_records
     _ = threshold_robustness.recompute_at_thresholds
     _ = reproduction_pass.run_reproduction_pass
+    _ = calibration.run_calibration
 
 
 def _numpy_states_equal(
