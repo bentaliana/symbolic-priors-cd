@@ -2940,3 +2940,63 @@ Two pre-Commit-9 adjudications recorded in `docs/08e` Section 8 remain open and 
 
 - Adjudication (b): DCDI fit-RNG convention beyond the reproduction_pass `seed_torch = seed_numpy = 42` value.
 - Adjudication (c): selected-configuration artefact path produced by Phase B and consumed by held-out evaluation.
+
+---
+
+22/05/2026 — DCDI fit-RNG seed convention frozen for calibration and held-out evaluation (Adjudication (b) closed)
+
+### Context
+
+Adjudication (a) is already closed (eligible-nodes intervention-set policy, docs/02 v1.9). Adjudication (b) concerns optimiser/fit RNG, not SCM-generation RNG and not intervention-target selection RNG. The reproduction_pass already used `seed_torch = seed_numpy = 42` for DCDI fits (the value records the optimiser-RNG inputs to `LearnableModel_NonLinGaussANM` and the per-fit NumPy/Torch state initialisation inside the wrapper). The open question was whether the same single integer remains across Phase B configurations and held-out evaluation, or whether the calibration / held-out configs carry per-stage fit-RNG values.
+
+The Q1 Elicit report did not address this question because Q1 concerned intervention-selection policy. No separate literature synthesis is required for adjudication (b); the decision is methodological and engineering-driven, and is recorded in this entry rather than in a new `docs/08*` document.
+
+### Decision
+
+- For every DCDI fit at Phase B calibration and at held-out evaluation, `seed_torch = seed_numpy = 42`.
+- This matches the reproduction_pass convention exactly.
+- Each `(SCM seed, DCDI configuration)` pair therefore produces a deterministic DCDI fit under the project's fixed fit-RNG convention.
+
+### Rationale
+
+- The selection study compares DAGMA and DCDI under their selected configurations on the fixed 10-node ER2 thesis cell. It does not aim to estimate DCDI optimiser variance.
+- Only two calibration seeds (`{201, 202}`) are available per DCDI configuration; varying DCDI optimiser seeds during calibration would inject unestimated optimiser noise into the within-model hyperparameter ranking and contaminate the choice of `reg_coeff`.
+- Fixed DCDI fit RNG makes DCDI deterministic conditional on the SCM/data seed, placing it on cleaner footing relative to DAGMA, whose optimisation is effectively deterministic given the input data and which does not use DCDI-style Gumbel/Bernoulli sampling.
+- The primary held-out variation should therefore reflect SCM / data-realisation variation under the fixed fit-RNG convention, rather than a mixture of SCM variation and DCDI optimiser variation.
+
+### Supplementary sensitivity diagnostic
+
+A pre-declared post-selection diagnostic is added so that the project does not silently treat "DCDI is deterministic given the SCM seed" as evidence about total DCDI optimisation variance.
+
+- Commit 10 held-out evaluation runs five additional DCDI fits on the calibration-selected DCDI configuration only.
+- Held-out SCM seed: `301`.
+- Additional DCDI fit RNGs: `{43, 44, 45, 46, 47}` (matched `seed_torch = seed_numpy = k` for each `k`).
+- Report SHD, SID, primary MMD, per-intervention MMD, `graph_status`, `sampler_status`, `training_status`, `final_h`, `final_gamma` / `final_mu` where available, and runtime.
+- The diagnostic is separate from calibration selection, from held-out base-model selection, and from the docs/02 Section 2 lexicographic decision rule.
+- It is a local sensitivity estimate at one selected DCDI configuration and one held-out SCM seed; it is not a global variance bound and does not exhaustively characterise DCDI optimiser variance across configurations or held-out seeds.
+
+### Documentation change
+
+`docs/02_base_model_selection.md` updated to v1.10. A new Section 4.6 titled "DCDI fit-RNG seed convention for calibration and held-out evaluation" is added at the tail of Section 4, immediately after the existing Section 4.5 (Criterion 3: Standardisation robustness). No existing Section 4 subsection is renumbered. No internal cross-reference is updated by this amendment.
+
+### What does NOT change
+
+- Section 2 lexicographic selection rule.
+- Reproduction_pass / Phase A policy (Section 3.3), including the Phase A `seed_torch = seed_numpy = 42` value already in force.
+- Section 4.2 intervention magnitude convention (`|X_j| = 2`).
+- Section 4.3 eligible-nodes intervention-set policy.
+- Seed pools `reproduction = (101, 102, 103)`, `calibration = (201, 202)`, `held_out_evaluation = (301, 302, 303, 304, 305)`.
+- DAGMA and DCDI threshold triples and sparsity grids.
+- DAGMA and DCDI training budgets, including `dcdi_num_train_iter = 300000`.
+- Metric primitives (SHD, SID, MMD), wrapper APIs, the wrapper status taxonomy, and configuration-hash semantics.
+- The C-P11 real-budget reapplication requirement (Section 7).
+
+### Forward note
+
+- Commit 9 (calibration runner) must implement the fixed DCDI fit-RNG convention `seed_torch = seed_numpy = 42` across every DCDI fit in the calibration grid.
+- Commit 10 (held-out evaluation runner) must implement and report the supplementary fit-RNG sensitivity diagnostic on the calibration-selected DCDI configuration at held-out SCM seed `301` over fit RNGs `{43, 44, 45, 46, 47}`, in a clearly separated artefact path.
+- The reproduction_pass `seed_torch = seed_numpy = 42` convention recorded on 20/05/2026 is unchanged.
+
+### Adjudication (c) remains open
+
+Adjudication (c) (selected-configuration artefact path and schema produced by Phase B calibration and consumed by held-out evaluation) is now the only remaining pre-Commit-9 adjudication. It must be frozen before Commit 9 begins.
