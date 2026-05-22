@@ -2877,7 +2877,7 @@ A short DAGMA-specific clarification was added to `docs/04_wrapper_api_contract.
 - No source, test, configuration JSON, or result artefact is modified.
 - The reproduction-pass close-out recorded in the entry above remains in force.
 - No selection criterion, evaluation rule, schema field, training budget, threshold value, or seed-pool value changed.
-- `docs/02`, `docs/08`, `docs/08a`, `docs/08b`, `docs/08c`, `docs/08d`, and `CLAUDE.md` are not edited. `docs/08e_reproduction_pass_readout.md` is added; this `docs/03` entry records the closure.
+- `docs/02`, `docs/08`, `docs/08a`, `docs/08b`, `docs/08c`, `docs/08d` are not edited. `docs/08e_reproduction_pass_readout.md` is added; this `docs/03` entry records the closure.
 
 ---
 
@@ -3218,7 +3218,7 @@ This commit also corrects four stale documentation references found by the readi
 
 ### g. Stale section-reference re-grep across source and tests
 
-A fresh grep was run across `src/` and `tests/` for any `Section 4.3`, `Section 4.4`, or `Section 4.5` references that might be affected by the docs/02 v1.9 renumbering. **No matches were found in `src/` or in `tests/`.** Source and test code reference docs/02 by behaviour, not by section number, which is the convention required by `CLAUDE.md` (no `per docs/02 v1.x Section Y` archaeology in code). No source or test edit is required.
+A fresh grep was run across `src/` and `tests/` for any `Section 4.3`, `Section 4.4`, or `Section 4.5` references that might be affected by the docs/02 v1.9 renumbering. **No matches were found in `src/` or in `tests/`.** Source and test code reference docs/02 by behaviour, not by section number, (no `per docs/02 v1.x Section Y` archaeology in code). No source or test edit is required.
 
 ### What does NOT change
 

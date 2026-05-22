@@ -1195,3 +1195,120 @@ def test_missing_manifest_entry_is_classified_as_infrastructure_failure(
         )
     )
     assert candidate_paths == []
+
+
+def test_file_exists_error_from_pipeline_is_infrastructure_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-existing raw run directory aborts the run as infrastructure failure.
+
+    pipeline.run_single_fit calls identity.create_run_directory, which
+    raises FileExistsError when the target per-run directory is already
+    populated. That is on-disk state left by a prior interrupted attempt
+    (infrastructure) and not a model-fit fault. The default fit runner
+    must re-raise the exception as _CalibrationInfrastructureError so
+    the orchestrator aborts the run, leaves earlier records on disk,
+    does not persist a degenerate placeholder for the affected job, and
+    does not write selected_configurations.json.
+    """
+    from experiments.selection_study import pipeline
+    from experiments.selection_study import threshold_robustness
+
+    config_dir = _copy_calibration_configs_to_tmp(tmp_path)
+    results_root = tmp_path / "results"
+    call_index = {"value": 0}
+
+    def fake_run_single_fit(
+        manifest: Any, entry_index: int, *, run_root: Path
+    ) -> Path:
+        call_index["value"] += 1
+        entry = manifest.entries[entry_index]
+        # Raise FileExistsError on the third invocation so that the
+        # first two jobs persist records before the abort, and we can
+        # verify "earlier records remain on disk".
+        if call_index["value"] == 3:
+            stale_path = (
+                run_root
+                / entry.model
+                / entry.condition
+                / entry.seed_population
+                / f"seed{int(entry.seed_replicate_index)}"
+                / entry.configuration_hash[:HASH_PREFIX_LENGTH]
+            )
+            raise FileExistsError(
+                "run directory is already populated; refusing to "
+                f"overwrite: {stale_path}"
+            )
+        from experiments.selection_study.calibration import (
+            enumerate_calibration_workload,
+        )
+
+        parents = tuple(
+            load_config(_CALIBRATION_CONFIG_DIR / name)
+            for name in _PARENT_FILENAMES
+        )
+        workload = enumerate_calibration_workload(parents)
+        matching_job = next(
+            job
+            for job in workload.fit_jobs
+            if (
+                job.candidate.model == entry.model
+                and job.candidate.condition == entry.condition
+                and job.candidate.configuration_hash_full
+                == entry.configuration_hash
+                and int(job.seed_replicate_index)
+                == int(entry.seed_replicate_index)
+            )
+        )
+        fit_result = _synthetic_fit_result(matching_job)
+        return _write_synthetic_run_json(
+            fit_result=fit_result,
+            threshold_records=_synthetic_threshold_records(),
+            base_dir=run_root,
+        )
+
+    monkeypatch.setattr(pipeline, "run_single_fit", fake_run_single_fit)
+    monkeypatch.setattr(
+        threshold_robustness,
+        "recompute_at_thresholds",
+        lambda run_dir, *, write_sibling=True: {
+            "records": _synthetic_threshold_records()
+        },
+    )
+
+    with pytest.raises(_CalibrationInfrastructureError) as excinfo:
+        run_calibration(
+            config_dir,
+            results_root,
+            fit_runner=None,
+            now_fn=_FakeClock(),
+        )
+    message = str(excinfo.value)
+    assert "pre-existing raw run directory" in message
+    assert "seed_value=" in message
+    assert "model=" in message and "condition=" in message
+
+    # The run aborted with infrastructure failure: no
+    # selected_configurations.json was written under the calibration
+    # tree.
+    calibration_run_root = results_root / "model_selection" / "calibration"
+    artefact_paths = list(
+        calibration_run_root.rglob(SELECTED_CONFIGURATIONS_FILENAME)
+    )
+    assert artefact_paths == []
+
+    # Two records (the successful first two fits) remain on disk; no
+    # degenerate record was written for the FileExistsError job.
+    record_dirs = list(calibration_run_root.glob("*/records"))
+    assert len(record_dirs) == 1
+    record_files = sorted(record_dirs[0].glob("*.json"))
+    assert len(record_files) == 2
+    for record_path in record_files:
+        with record_path.open(encoding="utf-8") as handle:
+            persisted = json.load(handle)
+        # Each remaining record must be a healthy converged fit, not
+        # a degenerate FileExistsError placeholder.
+        assert persisted["graph_status"] == "valid_dag"
+        assert persisted["sampler_status"] == "available"
+        assert persisted["training_status"] == "converged"
+        assert persisted.get("failure_type") is None

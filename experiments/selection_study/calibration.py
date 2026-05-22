@@ -1117,15 +1117,36 @@ def _build_default_fit_runner(
                 f"seed_value={int(job.seed_value)})"
             )
 
-        # A failure inside ``run_single_fit`` (wrapper raising, DCDI
-        # convergence failure, schema-gate refusal, etc.) is treated
-        # by the caller as a model-fit failure: the exception
-        # propagates out of the runner and the orchestrator
-        # constructs a degenerate calibration record, then continues
-        # the run.
-        run_json_path = run_single_fit(
-            manifest, target_index, run_root=base_dir
-        )
+        # A genuine model-fit failure inside ``run_single_fit``
+        # (wrapper raising, DCDI convergence failure, schema-gate
+        # refusal, DCDI seed mismatch, etc.) is treated by the
+        # caller as a model-fit failure: the exception propagates
+        # out of the runner and the orchestrator constructs a
+        # degenerate calibration record, then continues the run.
+        #
+        # FileExistsError is the exception: ``run_single_fit`` calls
+        # ``identity.create_run_directory`` early, which refuses to
+        # start when the raw per-run directory is already populated.
+        # That is on-disk state left over from a prior interrupted
+        # attempt - infrastructure rather than a model fault - so
+        # the runner re-raises it as an infrastructure error and
+        # the orchestrator aborts rather than silently masking the
+        # broken assumption with a degenerate record.
+        try:
+            run_json_path = run_single_fit(
+                manifest, target_index, run_root=base_dir
+            )
+        except FileExistsError as exc:
+            raise _CalibrationInfrastructureError(
+                "pipeline.run_single_fit refused to start because a "
+                "pre-existing raw run directory was detected for "
+                "calibration job "
+                f"(model={candidate.model!r}, "
+                f"condition={candidate.condition!r}, "
+                f"hash_prefix="
+                f"{candidate.configuration_hash_prefix!r}, "
+                f"seed_value={int(job.seed_value)}): {exc}"
+            ) from exc
 
         # Failures after a successful fit are infrastructure failures:
         # the recompute, the loader, and the adapter together check
@@ -1714,6 +1735,380 @@ def run_calibration(
 
 
 # ---------------------------------------------------------------------------
+# Public entry point: repair_single_calibration_job
+# ---------------------------------------------------------------------------
+
+
+def _build_artefact_envelope(
+    *,
+    setup: _CalibrationSetup,
+    ranking_output: Mapping[str, Any],
+    generated_at_utc: str,
+) -> dict[str, Any]:
+    """Assemble the selected-configurations artefact envelope.
+
+    Identical to the envelope built by ``run_calibration``; factored
+    here so the repair entry point can rebuild the artefact from
+    on-disk records without duplicating envelope construction.
+    """
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artefact_type": SELECTED_CONFIGURATIONS_ARTEFACT_TYPE,
+        "decision_scope": DECISION_SCOPE,
+        "base_model_decision_made": False,
+        "selected_configuration_semantics": SELECTED_CONFIGURATION_SEMANTICS,
+        "calibration_run_hash_prefix": setup.calibration_run_hash12,
+        "calibration_run_hash_full": setup.calibration_run_hash_full,
+        "selection_rule_id": SELECTION_RULE_ID,
+        "selection_rule_ref": SELECTION_RULE_REF,
+        "seed_population": SEED_POPULATION_LABEL,
+        "calibration_seeds": list(CALIBRATION_SEEDS),
+        "intervention_policy_ref": INTERVENTION_POLICY_REF,
+        "fit_rng_policy_ref": FIT_RNG_POLICY_REF,
+        "selections": ranking_output["selections"],
+        "candidate_ranking": ranking_output["candidate_ranking"],
+        "generated_at_utc": generated_at_utc,
+    }
+
+
+def _validate_repair_hash_prefix(value: object) -> str:
+    """Return ``value`` if it is a 12-char lowercase hex string."""
+    if not isinstance(value, str):
+        raise ValueError(
+            "configuration_hash_prefix must be a string; got "
+            f"{type(value).__name__}"
+        )
+    if len(value) != _HASH_PREFIX_LENGTH:
+        raise ValueError(
+            "configuration_hash_prefix must be a "
+            f"{_HASH_PREFIX_LENGTH}-character lowercase hex string; "
+            f"got length {len(value)}"
+        )
+    hex_chars = frozenset("0123456789abcdef")
+    for ch in value:
+        if ch not in hex_chars:
+            raise ValueError(
+                "configuration_hash_prefix must contain only "
+                f"lowercase hex digits 0-9 and a-f; got {value!r}"
+            )
+    return value
+
+
+def _find_single_repair_job(
+    *,
+    workload: "CalibrationWorkload",
+    model: str,
+    condition: str,
+    configuration_hash_prefix: str,
+    seed_value: int,
+) -> "CalibrationFitJob":
+    """Locate the unique calibration job for the given identity tuple.
+
+    Fails with ``ValueError`` if zero or more than one job matches.
+    """
+    matches: list["CalibrationFitJob"] = []
+    for job in workload.fit_jobs:
+        candidate = job.candidate
+        if (
+            candidate.model == model
+            and candidate.condition == condition
+            and candidate.configuration_hash_prefix == configuration_hash_prefix
+            and int(job.seed_value) == int(seed_value)
+        ):
+            matches.append(job)
+    if not matches:
+        raise ValueError(
+            "no calibration job matched the repair target "
+            f"(model={model!r}, condition={condition!r}, "
+            f"configuration_hash_prefix={configuration_hash_prefix!r}, "
+            f"seed_value={int(seed_value)})"
+        )
+    if len(matches) > 1:
+        raise ValueError(
+            "multiple calibration jobs matched the repair target "
+            f"(model={model!r}, condition={condition!r}, "
+            f"configuration_hash_prefix={configuration_hash_prefix!r}, "
+            f"seed_value={int(seed_value)}); expected exactly one"
+        )
+    return matches[0]
+
+
+def _load_all_persisted_records(
+    records_dir: Path,
+) -> list[dict[str, Any]]:
+    """Read every per-fit record under ``records_dir`` as a dict, in name order."""
+    records: list[dict[str, Any]] = []
+    for path in sorted(records_dir.glob("*.json")):
+        with path.open(encoding="utf-8") as handle:
+            records.append(json.load(handle))
+    return records
+
+
+def repair_single_calibration_job(
+    config_dir: Path | str,
+    results_root: Path | str,
+    *,
+    model: str,
+    condition: str,
+    configuration_hash_prefix: str,
+    seed_value: int,
+    fit_runner: Callable[["CalibrationFitJob"], Mapping[str, Any]] | None = None,
+    now_fn: Callable[[], datetime] | None = None,
+) -> dict[str, Any]:
+    """Re-run one calibration job, overwrite its record, and re-rank.
+
+    Targeted repair entry point: given the on-disk calibration tree
+    produced by a completed ``run_calibration`` invocation, repeat
+    exactly one calibration fit (the one identified by ``model``,
+    ``condition``, ``configuration_hash_prefix``, and ``seed_value``),
+    overwrite the matching per-fit record file, re-rank the full
+    40-record set from disk, and rewrite ``selected_configurations.json``
+    via the artefact writer with ``force=True``. The other 39 records
+    and their raw run.json files are untouched.
+
+    Preconditions enforced before the fit is invoked:
+
+    - the four parent calibration configs are present and pass the
+      calibration-stage real-study guard;
+    - the workload contains a unique job matching the identity tuple;
+    - the calibration run directory at
+      ``<results_root>/model_selection/calibration/<hash12>/`` exists;
+    - the ``records`` subdirectory exists;
+    - ``selected_configurations.json`` exists at its canonical path;
+    - exactly 40 per-fit records are present on disk before the repair;
+    - the target record file exists.
+
+    If any precondition fails the function raises before invoking
+    the fit. No record is overwritten and no artefact is rewritten.
+
+    Parameters
+    ----------
+    config_dir : Path or str
+        Directory containing the four parent calibration JSON files.
+    results_root : Path or str
+        Root of the results tree. The calibration tree is resolved
+        as ``<results_root>/model_selection/calibration/<hash12>/``.
+    model : str
+        ``"dagma"`` or ``"dcdi"``.
+    condition : str
+        ``"centred_only"`` or ``"standardised"``.
+    configuration_hash_prefix : str
+        12-character lowercase hex prefix of the executable
+        configuration's ``configuration_hash_full``.
+    seed_value : int
+        ``201`` or ``202``.
+    fit_runner : callable or None, optional
+        Optional injection point; if omitted the production default
+        fit runner is built (lazy-imports the pipeline).
+    now_fn : callable or None, optional
+        Optional wall-clock source; if omitted the current UTC time
+        is used.
+
+    Returns
+    -------
+    dict
+        JSON-safe repair report with the fields documented in the
+        module top docstring.
+
+    Raises
+    ------
+    ValueError
+        On invalid identity values, missing or duplicate job
+        matches, missing record count, or fit-result identity
+        mismatch (via the orchestrator's validator).
+    FileNotFoundError
+        If ``config_dir`` is missing a parent config file or the
+        calibration run directory / records directory / artefact
+        does not exist.
+    _CalibrationInfrastructureError
+        On structural fit-result adaptation failure or pre-existing
+        raw run directory.
+    """
+    # Validate identity inputs before touching the filesystem.
+    if model not in MODELS:
+        raise ValueError(
+            f"model must be one of {sorted(MODELS)}; got {model!r}"
+        )
+    if condition not in CONDITIONS:
+        raise ValueError(
+            f"condition must be one of {sorted(CONDITIONS)}; got "
+            f"{condition!r}"
+        )
+    if isinstance(seed_value, bool) or not isinstance(seed_value, int):
+        raise ValueError(
+            f"seed_value must be a plain int; got {seed_value!r}"
+        )
+    if int(seed_value) not in CALIBRATION_SEEDS:
+        raise ValueError(
+            "seed_value must be one of "
+            f"{list(CALIBRATION_SEEDS)}; got {int(seed_value)}"
+        )
+    _validate_repair_hash_prefix(configuration_hash_prefix)
+
+    setup = _prepare_calibration_setup(config_dir, results_root)
+    target_job = _find_single_repair_job(
+        workload=setup.workload,
+        model=model,
+        condition=condition,
+        configuration_hash_prefix=configuration_hash_prefix,
+        seed_value=int(seed_value),
+    )
+
+    # On-disk preconditions.
+    if not setup.run_dir.is_dir():
+        raise FileNotFoundError(
+            "calibration run directory does not exist; cannot "
+            f"repair: {setup.run_dir}"
+        )
+    if not setup.records_dir.is_dir():
+        raise FileNotFoundError(
+            "records directory does not exist; cannot repair: "
+            f"{setup.records_dir}"
+        )
+    if not setup.artefact_path.is_file():
+        raise FileNotFoundError(
+            "selected_configurations.json does not exist; cannot "
+            f"repair: {setup.artefact_path}"
+        )
+    existing_record_files = sorted(setup.records_dir.glob("*.json"))
+    if len(existing_record_files) != _EXPECTED_FIT_JOB_COUNT:
+        raise ValueError(
+            "records directory must contain exactly "
+            f"{_EXPECTED_FIT_JOB_COUNT} per-fit records before "
+            f"repair; got {len(existing_record_files)} at "
+            f"{setup.records_dir}"
+        )
+
+    record_id = _build_record_id(
+        model=model,
+        condition=condition,
+        configuration_hash_prefix=configuration_hash_prefix,
+        seed_value=int(seed_value),
+    )
+    target_record_path = setup.records_dir / f"{record_id}.json"
+    if not target_record_path.is_file():
+        raise FileNotFoundError(
+            "target per-fit record does not exist; cannot repair: "
+            f"{target_record_path}"
+        )
+
+    # Capture the prior record's status for the repair report.
+    with target_record_path.open(encoding="utf-8") as handle:
+        previous_record = json.load(handle)
+    previous_record_status = str(
+        previous_record.get("training_status", "unknown")
+    )
+
+    resolved_now_fn: Callable[[], datetime] = (
+        now_fn if now_fn is not None else _default_now_fn
+    )
+    if fit_runner is not None:
+        resolved_fit_runner: Callable[
+            ["CalibrationFitJob"], Mapping[str, Any]
+        ] = fit_runner
+    else:
+        resolved_fit_runner = _build_default_fit_runner(
+            results_root=setup.results_root
+        )
+
+    _LOGGER.info(
+        "calibration repair: running one job model=%s condition=%s "
+        "hash_prefix=%s seed_value=%d",
+        model,
+        condition,
+        configuration_hash_prefix,
+        int(seed_value),
+    )
+
+    start_dt = resolved_now_fn()
+    raw_result: Any = None
+    failure_type: str | None = None
+    failure_message: str | None = None
+    try:
+        raw_result = resolved_fit_runner(target_job)
+    except _CalibrationInfrastructureError:
+        # Infrastructure failures (FileExistsError on a stale raw
+        # directory, identity-mismatched fit result, loader / adapter
+        # failure) abort the repair and leave every record and the
+        # selected-configurations artefact unchanged.
+        raise
+    except Exception as exc:
+        failure_type = type(exc).__name__
+        failure_message = str(exc)
+    end_dt = resolved_now_fn()
+    runtime_seconds = _elapsed_seconds(start_dt, end_dt)
+
+    if failure_type is not None:
+        new_record = _build_degenerate_record(
+            job=target_job,
+            runtime_seconds=runtime_seconds,
+            failure_type=failure_type,
+            failure_message=failure_message or "",
+        )
+    else:
+        new_record = _validate_fit_result(raw_result, job=target_job)
+        if "runtime_seconds" not in new_record:
+            new_record["runtime_seconds"] = runtime_seconds
+
+    # Overwrite the target record atomically (force semantics: the
+    # repair entry point is the only producer of overwrites here).
+    _atomic_write_record(new_record, target_record_path)
+    new_record_status = str(
+        new_record.get("training_status", "unknown")
+    )
+
+    # Re-read every record from disk so the ranker sees the
+    # just-repaired record alongside the other 39 untouched ones.
+    all_records = _load_all_persisted_records(setup.records_dir)
+    if len(all_records) != _EXPECTED_FIT_JOB_COUNT:
+        raise RuntimeError(
+            "internal error: after repair the records directory "
+            f"contains {len(all_records)} files; expected "
+            f"{_EXPECTED_FIT_JOB_COUNT}"
+        )
+
+    ranking_output = rank_calibration_records(all_records)
+    artefact = _build_artefact_envelope(
+        setup=setup,
+        ranking_output=ranking_output,
+        generated_at_utc=_format_utc(resolved_now_fn()),
+    )
+    write_selected_configurations(
+        artefact, setup.artefact_path, force=True
+    )
+
+    selected_hashes_after_repair: dict[str, dict[str, str]] = {}
+    selected_degeneracy_flags_after_repair: dict[str, dict[str, bool]] = {}
+    for cond in CONDITIONS:
+        selected_hashes_after_repair[cond] = {}
+        selected_degeneracy_flags_after_repair[cond] = {}
+        for mdl in MODELS:
+            sel = ranking_output["selections"][cond][mdl]
+            selected_hashes_after_repair[cond][mdl] = (
+                sel["selected_configuration_hash_prefix"]
+            )
+            selected_degeneracy_flags_after_repair[cond][mdl] = bool(
+                sel.get("degeneracy_flag", False)
+            )
+
+    return {
+        "calibration_run_hash_prefix": setup.calibration_run_hash12,
+        "repaired_record_path": target_record_path.as_posix(),
+        "selected_configurations_path": setup.artefact_path.as_posix(),
+        "model": model,
+        "condition": condition,
+        "configuration_hash_prefix": configuration_hash_prefix,
+        "seed_value": int(seed_value),
+        "previous_record_status": previous_record_status,
+        "new_record_status": new_record_status,
+        "selected_hashes_after_repair": selected_hashes_after_repair,
+        "selected_degeneracy_flags_after_repair": (
+            selected_degeneracy_flags_after_repair
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Legacy placeholder for the ranking entry point that lives in
 # calibration_ranking.py. The placeholder remains so existing
 # scaffolding tests that exercise NotImplementedError stubs continue
@@ -1754,5 +2149,6 @@ __all__ = [
     "enumerate_calibration_workload",
     "expand_calibration_candidates",
     "preflight_calibration",
+    "repair_single_calibration_job",
     "run_calibration",
 ]

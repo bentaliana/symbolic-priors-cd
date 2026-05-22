@@ -1,5 +1,6 @@
 external/*
 papers/*
+archive/*
 
 # Python
 __pycache__/
