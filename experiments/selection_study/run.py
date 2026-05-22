@@ -6,9 +6,20 @@ The ``--dry-run`` path is functional: it runs preflight manifest
 enumeration and validation and exits. The ``--phase reproduction_pass``
 path is functional: it loads the configuration, validates it
 against the real-study protocol guard, runs the reproduction pass,
-and writes a reproduction-pass summary JSON. All other non-help
-execution paths raise ``NotImplementedError`` with a message naming
-the unimplemented path.
+and writes a reproduction-pass summary JSON.
+
+The ``--phase calibration`` path is enumeration-only in the current
+state. It loads the four parent calibration Configurations from the
+directory supplied via ``--config``, validates each against the
+calibration-stage real-study guard, expands each parent into one
+executable Configuration per sparsity grid point, and prints the
+workload arithmetic (20 executable candidates; 40 fit jobs after
+calibration-seed expansion). No model fit is invoked from this code
+path. Real calibration execution, ranking, and the selected-
+configurations artefact writer are introduced later.
+
+All other non-help execution paths raise ``NotImplementedError`` with
+a message naming the unimplemented path.
 """
 
 from __future__ import annotations
@@ -21,6 +32,14 @@ from pathlib import Path
 
 
 _LOGGER = logging.getLogger(__name__)
+
+
+_CALIBRATION_PARENT_FILENAMES: tuple[str, ...] = (
+    "dagma_calibration_centred_only.json",
+    "dagma_calibration_standardised.json",
+    "dcdi_calibration_centred_only.json",
+    "dcdi_calibration_standardised.json",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,7 +66,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default=None,
         metavar="PATH",
-        help="Path to the runner configuration file.",
+        help=(
+            "Path to the runner configuration. For "
+            "--phase reproduction_pass this is a single JSON file. "
+            "For --phase calibration this is a directory containing "
+            "the four parent calibration configs "
+            "(dagma_calibration_centred_only.json, "
+            "dagma_calibration_standardised.json, "
+            "dcdi_calibration_centred_only.json, "
+            "dcdi_calibration_standardised.json)."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -66,11 +94,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase",
         type=str,
         default=None,
-        choices=("reproduction_pass",),
+        choices=("reproduction_pass", "calibration"),
         metavar="STAGE",
         help=(
-            "Selection-study phase to drive. Only 'reproduction_pass' "
-            "is implemented in the current state."
+            "Selection-study phase to drive. "
+            "'reproduction_pass' runs the reproduction-pass stage "
+            "end-to-end. 'calibration' currently runs enumeration "
+            "and the calibration-stage real-study guard only, "
+            "without invoking any model fit."
         ),
     )
     parser.add_argument(
@@ -84,6 +115,79 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     return parser
+
+
+def _resolve_calibration_parent_paths(config_dir: Path) -> tuple[Path, ...]:
+    """Return the four expected parent calibration config paths.
+
+    The runner expects all four files to be present in the supplied
+    directory; a missing file is an explicit error rather than a
+    silent partial-workload condition.
+    """
+    if not config_dir.exists():
+        raise FileNotFoundError(
+            "calibration --config directory does not exist: "
+            f"{config_dir}"
+        )
+    if not config_dir.is_dir():
+        raise NotADirectoryError(
+            "calibration --config must be a directory containing "
+            "the four parent calibration JSON files; got a path "
+            f"that is not a directory: {config_dir}"
+        )
+
+    paths: list[Path] = []
+    missing: list[str] = []
+    for filename in _CALIBRATION_PARENT_FILENAMES:
+        candidate = config_dir / filename
+        if not candidate.is_file():
+            missing.append(filename)
+        else:
+            paths.append(candidate)
+    if missing:
+        raise FileNotFoundError(
+            "calibration --config directory is missing required "
+            "parent config file(s): " + ", ".join(missing)
+            + f"; directory={config_dir}"
+        )
+    return tuple(paths)
+
+
+def _run_phase_calibration_enumeration(config_dir_arg: str) -> None:
+    """Drive the enumeration-only calibration code path.
+
+    Loads the four parent calibration configs, validates each via
+    the calibration-stage real-study guard inside
+    ``enumerate_calibration_workload``, expands each parent into per-
+    grid-point executable Configurations, and logs the workload
+    arithmetic. No model fit is invoked.
+    """
+    from experiments.selection_study.calibration import (
+        enumerate_calibration_workload,
+    )
+    from experiments.selection_study.config import load_config
+
+    config_dir = Path(config_dir_arg)
+    parent_paths = _resolve_calibration_parent_paths(config_dir)
+    parents = tuple(load_config(path) for path in parent_paths)
+    workload = enumerate_calibration_workload(parents)
+
+    _LOGGER.info(
+        "calibration enumeration: %d executable candidates, "
+        "%d fit jobs, calibration seeds %s",
+        len(workload.candidates),
+        len(workload.fit_jobs),
+        list(workload.calibration_seeds),
+    )
+    for candidate in workload.candidates:
+        _LOGGER.info(
+            "calibration candidate: model=%s condition=%s "
+            "grid_point=%s configuration_hash_prefix=%s",
+            candidate.model,
+            candidate.condition,
+            candidate.grid_point_name,
+            candidate.configuration_hash_prefix,
+        )
 
 
 def main(
@@ -111,14 +215,12 @@ def main(
     Raises
     ------
     ValueError
-        If ``--dry-run`` or ``--phase reproduction_pass`` is passed
-        without ``--config``.
+        If ``--dry-run``, ``--phase reproduction_pass``, or
+        ``--phase calibration`` is passed without ``--config``.
     NotImplementedError
         For still-unimplemented execution paths (``--resume`` and the
         bare ``--config`` path with no ``--phase``). The message
-        names the unimplemented path. The ``--phase reproduction_pass``
-        and ``--dry-run`` paths are implemented and do not raise
-        this.
+        names the unimplemented path.
     SystemExit
         With status 1 if preflight validation fails.
     """
@@ -180,6 +282,15 @@ def main(
             summary.reproduction_pass_status,
             summary.summary_path,
         )
+        return
+    if args.phase == "calibration":
+        if args.config is None:
+            raise ValueError(
+                "--phase calibration requires --config PATH pointing "
+                "to a directory containing the four parent "
+                "calibration configs; no configuration was supplied."
+            )
+        _run_phase_calibration_enumeration(args.config)
         return
     if args.config is not None:
         raise NotImplementedError(
