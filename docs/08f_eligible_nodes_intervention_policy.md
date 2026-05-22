@@ -33,8 +33,8 @@ The decision below resolves all six.
 - The cross-seed and cross-method consistency discipline within calibration and within held-out.
 
 **This document explicitly does not decide:**
-- Adjudication (b): DCDI fit-RNG seed convention for stages beyond reproduction-pass. Open; awaits Q2 Elicit report.
-- Adjudication (c): Commit-9 selected-configuration artefact path. Open; engineering decision, no literature input required.
+- Adjudication (b): DCDI fit-RNG seed convention for stages beyond reproduction-pass. Closed by docs/02 v1.10 and the 22/05/2026 docs/03 entry "DCDI fit-RNG seed convention frozen for calibration and held-out evaluation"; the fit-RNG was frozen at `seed_torch = seed_numpy = 42` for every DCDI fit at Phase B calibration and held-out evaluation, with a small pre-declared post-selection sensitivity diagnostic.
+- Adjudication (c): Commit-9 selected-configuration artefact path. Closed by the 22/05/2026 docs/03 entry "Selected-configuration artefact path and schema frozen for Commit 9 to Commit 10 handoff" together with the subsequent condition × model schema correction; the artefact is the JSON file `results/model_selection/calibration/<calibration_run_hash12>/selected_configurations.json` with top-level `selections[condition][model]`.
 - Phase A (reproduction-pass) policy: unchanged. Phase A retains its minimal `do(X_0 = ±2)` smoke coverage as documented in docs/02 §3.3.
 - Intervention magnitude convention: unchanged. The `do(X_j = ±2)` magnitude is preserved from docs/02 §4.2.
 - The §2 lexicographic selection rule, seed pools, thresholds, budgets, metrics, wrapper APIs, configuration hash semantics, or any other frozen convention.

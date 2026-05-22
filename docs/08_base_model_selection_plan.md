@@ -763,8 +763,32 @@ Acceptance criteria:
   read set and asserting the ranking output is unchanged.
 
 Files touched (allowed):
-`experiments/selection_study/calibration.py`. Files forbidden:
-anything else.
+`experiments/selection_study/calibration.py`. The original
+"`calibration.py` only" constraint predates adjudication (c),
+which froze a selected-configurations handoff artefact with a
+JSON schema, no-overwrite-by-default idempotency, and an atomic
+tmp-file-plus-`os.replace` writer. Commit 9 may therefore add
+the minimal helper and test files required by that contract,
+including (a) a selection-artefact writer module (suggested
+`experiments/selection_study/selection_artefact.py`) housing the
+schema, validator, idempotency rule, and atomic writer, and
+(b) the corresponding test file (suggested
+`tests/test_selection_artefact.py`). Any additional file must be
+explicitly justified inside the Commit 9 implementation prompt
+before it is created. The runner-stage extensions required by
+the calibration phase (extending `_VALID_STAGES` in
+`experiments/selection_study/real_study.py`, the `--phase`
+choices in `experiments/selection_study/run.py`, and the per-
+condition / per-grid-point calibration config JSON files under
+`experiments/selection_study/configs/calibration/`) are also
+permitted under Commit 9 because they are mechanical consequences
+of the now-frozen protocol surface. Files forbidden: anything not
+justified above, and in particular any change to held-out
+evaluation, prior-loss code, or the final base-model decision
+artefact. This relaxation does not change Commit 9's scope:
+calibration only, no held-out evaluation, no prior-loss
+experiments, no final base-model decision, and no paper-
+reproduction probe.
 
 Tests required:
 `test_calibration_records_use_calibration_seed_population`,

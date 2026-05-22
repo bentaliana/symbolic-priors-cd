@@ -125,7 +125,7 @@ The DCDI MMD gap recorded in Section 4 is **relevant context** for the deferred 
 
 Three protocol decisions remain open before Phase B calibration begins:
 
-- **Eligible-node intervention-set policy.** The reproduction_pass used `do(X_0 = +/-2)` as Phase A-only smoke / sanity coverage (recorded 20/05/2026). Phase B and held-out evaluation need the full eligible-node intervention-set policy (target-node selection rule, intervention values, intervention count per cell) frozen.
+- **Eligible-node intervention-set policy.** The reproduction_pass used `do(X_0 = +/-2)` as Phase A-only smoke / sanity coverage (recorded 20/05/2026). Phase B and held-out evaluation need the full eligible-node intervention-set policy (target-node selection rule, intervention values, intervention count per cell) frozen. (Now frozen by docs/02 v1.9 Section 4.3 and the 22/05/2026 docs/03 entry "Eligible-nodes intervention-set policy frozen for calibration and held-out evaluation".)
 - **DCDI fit-RNG convention beyond reproduction_pass.** The reproduction_pass used `seed_torch = seed_numpy = 42` (recorded 20/05/2026 docs/03 entry). Whether this single integer remains across Phase B configurations and held-out evaluation, or whether the calibration / held-out configs carry per-stage fit-RNG values, needs an explicit decision.
 - **Selected-configuration artefact path.** Phase B produces a "selected configuration per model per condition" record consumed by held-out evaluation (per docs/08 Commit 9 / Commit 10). The artefact's on-disk path, filename, and schema are not yet specified.
 

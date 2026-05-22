@@ -3149,3 +3149,91 @@ The selected configuration per `(model, condition)` pair is written into the `se
 - Commit 9 (calibration runner) implements the ranking rule above against calibration records only, and writes the selected configuration per `(model, condition)` pair into the `selected_configurations.json` artefact frozen by adjudication (c).
 - Commit 9 must enforce the no-leakage requirement at the runner level: the ranking code path must not open or read any file under `results/model_selection/<model>/<condition>/held_out_evaluation/` or any record carrying `seed_population == "held_out_evaluation"`.
 - No source, test, configuration JSON, schema file, or result artefact is created or modified by this entry. The change is documentation-only.
+
+---
+
+22/05/2026 — Pre-Commit-9 calibration identity and documentation cleanup
+
+### Context
+
+After closure of adjudications (a), (b), and (c) and promotion of the within-model calibration ranking rule into docs/02 v1.11, a read-only pre-Commit-9 readiness audit was performed. The audit confirmed all four pre-Commit-9 decisions are in the operative protocol trail, and flagged two implementation-contract details and four documentation-cleanup items that should be settled before Commit 9 implementation begins. This entry records the implementation-contract decisions and the cleanup pass. No protocol decision is reopened.
+
+### a. Executable Configuration granularity at calibration
+
+Commit 9 MUST instantiate one executable `Configuration` per `(model, condition, grid_point)` triple. The total executable candidate count is:
+
+```
+2 models × 2 conditions × 5 grid points = 20 executable candidate configurations
+```
+
+The calibration runner then combines those 20 executable configurations with the two calibration seeds `{201, 202}`, yielding the 40 fits already pinned by docs/02 Section 4.3 implementation arithmetic.
+
+Each of the 20 executable Configurations MUST produce a distinct full 64-character lowercase hex `configuration_hash`. Two distinct grid points within the same `(model, condition)` pair therefore have distinct executable configuration hashes by construction; any genuine hash collision would indicate either an upstream bug or an accidental duplication of grid points, and the runner MUST surface it explicitly rather than silently merging the rows.
+
+### b. Why bundled grid configurations are rejected
+
+A configuration shape in which all five sparsity grid points for a `(model, condition)` pair are bundled into a single `Configuration` (for example via the existing `calibration_configurations` field carrying all five values) would make `selected_configuration_hash_full` ambiguous: the five candidate hyperparameter settings would all share one `configuration_hash`. That collapses the schema-level identity that `selected_configurations.json` is required to carry per `selections[condition][model]`, and is inconsistent with the within-model ranking rule whose tie-break step compares full configuration hashes. Bundled grid Configurations are therefore rejected as a Commit 9 implementation shape; one executable Configuration per grid point is the chosen convention.
+
+### c. `calibration_run_hash` derivation
+
+The full 64-character `calibration_run_hash_full` recorded inside `selected_configurations.json` is derived as the SHA-256 digest of a canonical JSON payload that describes the executable calibration candidate set and the selection context. The canonical payload MUST include at least:
+
+- `artefact_type = "calibration_run_identity"` (or an equivalent calibration-run identity tag separate from the `selected_configurations.json` `artefact_type`).
+- `schema_version` for the calibration-run-identity payload.
+- `stage = "calibration"`.
+- `executable_configuration_hashes_full`: the full 64-character lowercase hex `configuration_hash` of each of the 20 executable candidate configurations, sorted deterministically (for example by `(model, condition, configuration_hash)` triples).
+- `model_coverage`: the two models `["dagma", "dcdi"]`.
+- `condition_coverage`: the two conditions `["centred_only", "standardised"]`.
+- `calibration_seeds`: `[201, 202]`.
+- `selection_rule_id` or `selection_rule_ref`: identifier or short reference for the within-model selection rule applied (docs/02 Section 4.7).
+- `intervention_policy_ref`: reference to the eligible-nodes intervention-set policy from adjudication (a) (docs/02 Section 4.3).
+- `fit_rng_policy_ref`: reference to the DCDI fit-RNG policy from adjudication (b) (docs/02 Section 4.6).
+
+The canonical serialisation uses the project's existing `canonical_json` discipline (sorted keys, deterministic float repr, no non-deterministic object reprs). Any change to any of the 20 executable Configurations, to the calibration seeds, or to the selection-rule / intervention-policy / fit-RNG-policy references produces a new `calibration_run_hash`. The 12-character prefix of this digest is the directory leaf of:
+
+```
+results/model_selection/calibration/<calibration_run_hash12>/selected_configurations.json
+```
+
+Implementation-level details of the canonical payload (exact field names, payload version integer, list-ordering tie-breakers when configuration hashes are equal in the contrived case described in §a) are left to Commit 9 but must be auditable from the writer code.
+
+### d. Top-level JSON key
+
+Commit 9 MUST follow the current docs/03 selected-configurations schema, with the top-level handoff mapping keyed `selections`, structured as `selections[condition][model]`. The artefact filename remains `selected_configurations.json` (the filename is unchanged from adjudication (c) and does not need to match the top-level JSON key name). The two condition keys are `"centred_only"` and `"standardised"`; the two model keys under each condition are `"dagma"` and `"dcdi"`.
+
+### e. Implementation-plan consequences
+
+- `experiments/selection_study/selection_artefact.py` (housing the `selected_configurations.json` schema, validator, no-overwrite-by-default idempotency rule, and tmp-file + `os.replace` atomic writer) and `tests/test_selection_artefact.py` are treated as REQUIRED for Commit 9 unless the implementation prompt discovers an equally clean existing module under `experiments/selection_study/` that already houses the equivalent artefact-writer logic. If such an existing module is identified, the implementation prompt MUST cite it explicitly.
+- The held-out runner's explicit `--selected-config` CLI consumption test is DEFERRED to Commit 10; Commit 9 tests verify the artefact contract (schema, idempotency, atomic write, ranking determinism, no-leakage) but do not test a non-existent held-out runner.
+- The calibration-stage extensions to `experiments/selection_study/real_study.py` (`_VALID_STAGES`, calibration-required-values block) and `experiments/selection_study/run.py` (`--phase` choices, calibration dispatch), plus the four (or equivalent number of) calibration config JSON files under `experiments/selection_study/configs/calibration/`, are mechanical consequences of the now-frozen protocol surface and are permitted under Commit 9. They are recorded in the relaxed `docs/08` Commit 9 allowed-file note appended in this cleanup commit.
+
+### f. Documentation cleanup applied in this commit
+
+This commit also corrects four stale documentation references found by the readiness audit:
+
+- `docs/08b` Section 6.3 and Section 6.7: stale `docs/02 Section 4.3` and `docs/02 Section 4.4` references corrected to `docs/02 Section 4.4` and `docs/02 Section 4.5` respectively, after the v1.9 insertion of Section 4.3 and the resulting renumbering of the existing Criterion 2 and Criterion 3 subsections.
+- `docs/08f` Section 2: the "adjudication (b) Open" and "adjudication (c) Open" lines updated to record closure by docs/02 v1.10 and the 22/05/2026 docs/03 entries. The evidence-document voice is preserved; docs/08f remains the evidence base for adjudication (a) only.
+- `docs/08e`: appended a parenthetical confirmation to the eligible-node policy line noting that the policy is now frozen by docs/02 v1.9 Section 4.3 and the 22/05/2026 docs/03 entry. The reproduction-pass readout itself is not rewritten.
+- `docs/08` Commit 9 allowed-file note: relaxed to permit the selected-configurations writer module, its test file, and the mechanical calibration-stage runner extensions, with the scope of Commit 9 still pinned to calibration only.
+
+### g. Stale section-reference re-grep across source and tests
+
+A fresh grep was run across `src/` and `tests/` for any `Section 4.3`, `Section 4.4`, or `Section 4.5` references that might be affected by the docs/02 v1.9 renumbering. **No matches were found in `src/` or in `tests/`.** Source and test code reference docs/02 by behaviour, not by section number, which is the convention required by `CLAUDE.md` (no `per docs/02 v1.x Section Y` archaeology in code). No source or test edit is required.
+
+### What does NOT change
+
+- docs/02 v1.11 protocol.
+- Adjudication (a) eligible-nodes intervention-set policy.
+- Adjudication (b) DCDI fit-RNG convention.
+- Adjudication (c) selected-configuration artefact path / format / schema / discovery / idempotency / atomicity.
+- The within-model calibration ranking rule (docs/02 Section 4.7).
+- The selected-configurations file path `results/model_selection/calibration/<calibration_run_hash12>/selected_configurations.json`.
+- Seed pools `reproduction = (101, 102, 103)`, `calibration = (201, 202)`, `held_out_evaluation = (301, 302, 303, 304, 305)`.
+- Metric primitives (SHD, SID, MMD), threshold triples, training budgets (`warm_iter`, `max_iter`, `dcdi_num_train_iter = 300000`).
+- Wrapper APIs, the wrapper status taxonomy, and `configuration_hash` semantics.
+- The C-P11 real-budget reapplication requirement.
+- No held-out execution is in scope for Commit 9.
+
+### Forward note
+
+Commit 9 implementation may now begin. The implementation prompt should cite this entry for the executable-Configuration-per-grid-point convention and the `calibration_run_hash` derivation, and should cite the 22/05/2026 selected-configurations handoff entry plus its subsequent condition × model correction for the artefact schema.

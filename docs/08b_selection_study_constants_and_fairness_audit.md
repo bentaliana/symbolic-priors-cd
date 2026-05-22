@@ -593,8 +593,8 @@ Supersession note (docs/02 v1.8 Path B, 21/05/2026): the "reproduction cell is p
 |---|---|---|---|---|---|---|---|---|
 | SID tie margin (Criterion 1) | 10% | docs/02 Section 2 Criterion 1b | protocol-critical | global | indirectly | SID-first lexicographic ordering | project-document | none |
 | MMD tiebreaker | mean over available interventions | docs/02 Sections 2 and 4.2 | protocol-critical | global | per-record via interventions list | secondary to SID | project-document | none |
-| Criterion 2 (prior-injection ergonomics) | qualitative; smoke test | docs/02 Section 4.3 | protocol-critical | global | not currently in run record | this criterion is post-selection-study, not a per-run field | project-document | none |
-| Criterion 3 (standardisation robustness) | 50% mean-SHD-degradation threshold | docs/02 Section 4.4 | protocol-critical | global | implicitly via condition pairs | catastrophic-scale-artefact test | project-document | none |
+| Criterion 2 (prior-injection ergonomics) | qualitative; smoke test | docs/02 Section 4.4 | protocol-critical | global | not currently in run record | this criterion is post-selection-study, not a per-run field | project-document | none |
+| Criterion 3 (standardisation robustness) | 50% mean-SHD-degradation threshold | docs/02 Section 4.5 | protocol-critical | global | implicitly via condition pairs | catastrophic-scale-artefact test | project-document | none |
 | SHD reversal cost | 2 | docs/03 metrics-layer entry; docs/04j | diagnostic-only | global | yes (shd_reversal_cost field) | stricter convention, documented | project-document, source-inspection, runtime-probe | none |
 
 ### 6.4 MMD policy
@@ -678,8 +678,8 @@ the paper's reported convergence point on a comparable cell.
 
 | Constant | Value | Source | Status | Scope | Run record | Rationale | Evidence | Action |
 |---|---|---|---|---|---|---|---|---|
-| centred_only | per-variable mean subtraction; no scaling | docs/02 Section 4.4 | protocol-critical | per-condition | yes (condition field) | leakage-safe centring | project-document | none |
-| standardised | per-variable mean and std normalisation | docs/02 Section 4.4 | protocol-critical | per-condition | yes | leakage-safe standardisation | project-document | none |
+| centred_only | per-variable mean subtraction; no scaling | docs/02 Section 4.5 | protocol-critical | per-condition | yes (condition field) | leakage-safe centring | project-document | none |
+| standardised | per-variable mean and std normalisation | docs/02 Section 4.5 | protocol-critical | per-condition | yes | leakage-safe standardisation | project-document | none |
 
 ### 6.8 Sampling policies
 
