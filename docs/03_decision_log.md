@@ -3000,3 +3000,152 @@ A pre-declared post-selection diagnostic is added so that the project does not s
 ### Adjudication (c) remains open
 
 Adjudication (c) (selected-configuration artefact path and schema produced by Phase B calibration and consumed by held-out evaluation) is now the only remaining pre-Commit-9 adjudication. It must be frozen before Commit 9 begins.
+
+---
+
+22/05/2026 — Selected-configuration artefact path and schema frozen for Commit 9 to Commit 10 handoff (Adjudication (c) closed)
+
+### Context
+
+Adjudication (a) freezes the eligible-node intervention policy (docs/02 v1.9, Section 4.3). Adjudication (b) freezes the DCDI fit-RNG convention (docs/02 v1.10, Section 4.6). Adjudication (c) is an engineering handoff contract: Commit 9 calibration selects one within-model configuration for DAGMA from the frozen `lambda1` grid `{0.01, 0.025, 0.05, 0.1, 0.25}` and one within-model configuration for DCDI from the frozen `reg_coeff` grid `{0.01, 0.03, 0.1, 0.3, 1.0}`; Commit 10 held-out evaluation must consume those selections explicitly and reproducibly. This entry freezes the path, format, schema, discovery, idempotency, and atomicity properties of the handoff artefact. It does not pick the within-model selection metric — that is whatever rule Commit 9 actually applies, recorded inside the artefact itself.
+
+### Decision
+
+#### 1. Path
+
+The calibration runner writes the selected-configuration artefact to:
+
+```
+results/model_selection/calibration/<calibration_run_hash12>/selected_configurations.json
+```
+
+where `<calibration_run_hash12>` is the 12-character prefix of the full calibration-run hash, matching the project's 12-character directory-leaf convention from the 21/05/2026 path-unification entry. The full 64-character lowercase hex calibration-run hash is retained as a content field inside the JSON.
+
+#### 2. Format
+
+The artefact is JSON, UTF-8, human-readable. It must be written with stable formatting: `indent=2`, `sort_keys=True`. No pickle, YAML, plaintext, or shelf-based handoff format is allowed.
+
+#### 3. Multi-model layout
+
+The artefact is a single JSON file containing the DAGMA and DCDI selected within-model configurations for both data-variant conditions (`centred_only` and `standardised`). Commit 10 does not coordinate separate per-model or per-condition selection files; it loads the one selected-configurations artefact and reads the selections it needs from `selections[condition][model]`.
+
+#### 4. Minimal schema
+
+The artefact MUST contain at least the following top-level fields:
+
+- `schema_version`: integer.
+- `artefact_type`: literal string `"calibration_selected_configurations"`.
+- `calibration_run_hash_prefix`: 12-character lowercase hex prefix of the calibration-run hash; matches the directory leaf.
+- `calibration_run_hash_full`: 64-character lowercase hex calibration-run hash.
+- `selection_rule_id` or `selection_rule_ref`: identifier or short reference for the within-model selection rule that Commit 9 actually applied. The rule's substance is recorded by Commit 9 here; the rule is not hard-coded by this adjudication, and in particular `"lowest_aggregate_mmd"` is not pre-committed by this entry.
+- `seed_population`: literal string `"calibration"`.
+- `calibration_seeds`: the calibration-pool seeds actually used, namely `[201, 202]`.
+- `intervention_policy_ref`: reference to the frozen eligible-node intervention policy from adjudication (a) (docs/02 Section 4.3).
+- `fit_rng_policy_ref`: reference to the frozen DCDI fit-RNG policy from adjudication (b) (docs/02 Section 4.6).
+- `selections`: a two-level mapping keyed first by data-variant condition and then by candidate model. The condition keys are `"centred_only"` and `"standardised"` (matching the two data variants frozen in docs/02 Section 3.1 and operationalised by the preprocessing equations in Section 4.5). The model keys under each condition are `"dagma"` and `"dcdi"`. Each `selections[condition][model]` entry MUST contain:
+  - `selected_configuration_hash_prefix`: 12-character prefix of the selected configuration's `configuration_hash`.
+  - `selected_configuration_hash_full`: 64-character full `configuration_hash` of the selected configuration.
+  - `selected_hyperparameters`: the resolved hyperparameter dict for the selected configuration (for example `{"lambda1": 0.05}` for DAGMA; `{"reg_coeff": 0.1}` for DCDI).
+  - `selected_rank`: 1-based rank of this configuration in the within-model candidate ordering for this condition.
+  - `selection_metrics`: the metric values that placed this configuration first under `selection_rule_id` for this condition.
+  - `source_run_ids`: list of `run.json` identifiers (run-id values or relative paths) that contributed to the selection for this configuration under this condition.
+
+  The selected configuration may differ across conditions for the same model; the schema accommodates this by construction. Commit 10 held-out evaluation consumes `selections[condition][model]` for the condition(s) it is asked to evaluate.
+- `candidate_ranking` or `candidate_summary`: a per-condition, per-model list of the 5 candidates in the within-model ordering, with enough fields (configuration hash, hyperparameter, selection-metric value, rank) to audit why the selected configuration won under each condition. This MUST be sufficient for an audit reader to reproduce the within-model ordering from the JSON alone for each condition.
+- `generated_at_utc`: ISO-8601 UTC timestamp of artefact creation.
+- `code_version`: git commit SHA (or whatever version-of-code metadata the project already records in `run.json`), recorded only if such metadata is already available in the project's run-record conventions. If it is not yet recorded by the runner, this field may be omitted by Commit 9; held-out evaluation does not gate on it.
+
+Additional fields beyond the minimal schema are permitted; readers MUST ignore unknown fields rather than fail. Future schema-version bumps are recorded under `schema_version`.
+
+#### 5. Discovery
+
+Commit 10 held-out evaluation MUST consume the artefact via an explicit CLI argument, for example:
+
+```
+--selected-config results/model_selection/calibration/<calibration_run_hash12>/selected_configurations.json
+```
+
+Commit 10 MUST NOT silently discover the latest calibration output by directory mtime, glob, or any other implicit mechanism. The path is operator-supplied, recorded in the held-out run record, and validated against `artefact_type == "calibration_selected_configurations"` before any held-out fit begins.
+
+#### 6. Idempotency
+
+The calibration runner MUST refuse to overwrite an existing `selected_configurations.json` by default. The default behaviour on a path that already contains a selected-configurations artefact is to raise an explicit error naming the existing path. Overwrite is allowed only with an explicit force mechanism (for example a `--force-overwrite-selected-config` CLI flag); the force path must be a deliberate operator action, never the default.
+
+#### 7. Atomicity
+
+The calibration runner MUST avoid leaving partial or corrupted canonical artefacts on disk. The writer flow is:
+
+1. Serialise the schema to a temporary file in the same directory (for example `selected_configurations.json.tmp` or a `tempfile`-managed sibling).
+2. Validate / read-back the temporary file as JSON and re-check `artefact_type` and `schema_version`.
+3. Atomically replace the canonical path (`os.replace` / `Path.replace`), which is atomic on the same filesystem on the platforms the project supports.
+
+If step 2 fails, the writer must delete the temporary file and raise; the canonical `selected_configurations.json` is never partially written.
+
+#### 8. Scope
+
+This adjudication does not choose the selected base model. It defines only the handoff artefact for within-model selected configurations produced by Commit 9 and consumed by Commit 10. The formal base-model decision remains deferred to the selection-study report, applying the docs/02 Section 2 lexicographic decision rule to held-out evidence.
+
+### What does NOT change
+
+- docs/02 Section 2 lexicographic decision rule.
+- The Section 4.3 eligible-node intervention policy (adjudication (a)).
+- The Section 4.6 DCDI fit-RNG policy (adjudication (b)), including `seed_torch = seed_numpy = 42` at calibration and held-out and the five-RNG `{43, 44, 45, 46, 47}` post-selection sensitivity diagnostic at held-out SCM seed `301`.
+- Seed pools `reproduction = (101, 102, 103)`, `calibration = (201, 202)`, `held_out_evaluation = (301, 302, 303, 304, 305)`.
+- DAGMA and DCDI threshold triples and sparsity grids.
+- DAGMA and DCDI training budgets, including `dcdi_num_train_iter = 300000`.
+- Metric primitives (SHD, SID, MMD), wrapper APIs, the wrapper status taxonomy, and `configuration_hash` semantics.
+- The C-P11 real-budget reapplication requirement.
+- The reproduction_pass / Phase A policy.
+
+### Forward note
+
+- Commit 9 (calibration runner) implements the writer, the minimal schema above, the idempotency default, and the atomic replace flow described in Section 7 of this entry. Commit 9 also records the within-model selection rule it applies under `selection_rule_id` / `selection_rule_ref` so the rule is auditable from the artefact alone.
+- Commit 10 (held-out evaluation runner) requires the explicit `--selected-config` CLI argument, validates `artefact_type`, `schema_version`, and `calibration_run_hash_full` consistency with `calibration_run_hash_prefix`, and records the consumed artefact path in its own held-out run record.
+- No further pre-Commit-9 adjudications remain after this entry. All three pre-Commit-9 adjudications recorded in `docs/08e` Section 8 (eligible-node intervention policy, DCDI fit-RNG convention, selected-configuration artefact path/schema) are now closed.
+
+---
+
+22/05/2026 — Within-model calibration ranking rule frozen for Commit 9
+
+### Context
+
+`docs/08_base_model_selection_plan.md` already specifies that Commit 9 ranks configurations within each model by a deterministic lexicographic rule on calibration records. Until now that rule lived in the plan document alone. With Commit 9 about to begin implementation, the rule is promoted into the operative protocol trail (`docs/02` + `docs/03`) so that the calibration runner does not depend on the plan document. The three pre-Commit-9 adjudications recorded in `docs/08e` Section 8 — eligible-node intervention policy (a), DCDI fit-RNG convention (b), and selected-configuration artefact path/schema (c) — were already closed. This entry adds the within-model calibration ranking rule as a fourth piece of the pre-Commit-9 protocol surface.
+
+### Decision
+
+For each `(model, condition)` pair during Phase B calibration, candidate configurations are ranked by the following deterministic lexicographic rule on calibration records only:
+
+1. **Primary:** lower mean SID across calibration seeds and intervention cells.
+2. **MMD tiebreaker inside the docs/02 Section 2 SID margin:** if mean SID differs by 10% or less between the top candidates, lower mean MMD across calibration seeds and intervention cells.
+3. **SHD fallback:** if mean MMD does not separate the candidates, lower mean SHD across calibration seeds.
+4. **Deterministic fallback:** lexicographic order over the full 64-character lowercase hex `configuration_hash`.
+
+The rule consumes calibration records only (`seed_population == "calibration"`); the runner MUST NOT read or consult held-out records (`seed_population == "held_out_evaluation"`) while ranking calibration candidates. This is the explicit no-leakage requirement.
+
+The selected configuration per `(model, condition)` pair is written into the `selections[condition][model]` mapping of the `selected_configurations.json` handoff artefact frozen by adjudication (c). The runner records the rule identifier under the artefact's `selection_rule_id` / `selection_rule_ref` field so the rule is auditable from the artefact alone.
+
+### Rationale
+
+- The rule mirrors the docs/02 Section 2 Criterion 1 logic within-model: SID primary, MMD tiebreaker inside a 10% SID margin, SHD as a further fallback. This keeps the within-model selection consistent with the base-model selection lens applied later by the selection-study report.
+- Criterion 2 (prior-injection ergonomics) and Criterion 3 (standardisation robustness) are deliberately NOT used for within-model ranking. Ergonomics is a base-model comparison criterion that does not vary across sparsity values of the same model; standardisation robustness is a comparison across data-variant conditions, not across sparsity values within one condition. Using either at within-model ranking would conflate base-model criteria with hyperparameter selection.
+- The `configuration_hash` lexicographic fallback removes any non-determinism from pathological ties (which are unlikely at floating-point precision but cannot be ruled out by construction).
+
+### Documentation change
+
+`docs/02_base_model_selection.md` updated to v1.11. A new Section 4.7 titled "Within-model calibration ranking rule" is added at the tail of Section 4, immediately after the existing Section 4.6 (DCDI fit-RNG seed convention). No existing Section 4 subsection is renumbered. No internal cross-reference is updated by this amendment.
+
+### What does NOT change
+
+- docs/02 Section 2 base-model lexicographic decision rule (operates on held-out evidence, not on calibration evidence).
+- Adjudication (a): eligible-node intervention-set policy.
+- Adjudication (b): DCDI fit-RNG convention `seed_torch = seed_numpy = 42` and the post-selection fit-RNG sensitivity diagnostic.
+- Adjudication (c): selected-configuration artefact path, format, multi-condition schema, discovery, idempotency, and atomicity.
+- Reproduction_pass / Phase A policy.
+- Seed pools, threshold triples, sparsity grids, training budgets, metric primitives, wrapper APIs, the wrapper status taxonomy, and `configuration_hash` semantics.
+- The C-P11 real-budget reapplication requirement.
+
+### Forward note
+
+- Commit 9 (calibration runner) implements the ranking rule above against calibration records only, and writes the selected configuration per `(model, condition)` pair into the `selected_configurations.json` artefact frozen by adjudication (c).
+- Commit 9 must enforce the no-leakage requirement at the runner level: the ranking code path must not open or read any file under `results/model_selection/<model>/<condition>/held_out_evaluation/` or any record carrying `seed_population == "held_out_evaluation"`.
+- No source, test, configuration JSON, schema file, or result artefact is created or modified by this entry. The change is documentation-only.
