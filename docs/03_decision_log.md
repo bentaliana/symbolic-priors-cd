@@ -2878,3 +2878,65 @@ A short DAGMA-specific clarification was added to `docs/04_wrapper_api_contract.
 - The reproduction-pass close-out recorded in the entry above remains in force.
 - No selection criterion, evaluation rule, schema field, training budget, threshold value, or seed-pool value changed.
 - `docs/02`, `docs/08`, `docs/08a`, `docs/08b`, `docs/08c`, `docs/08d`, and `CLAUDE.md` are not edited. `docs/08e_reproduction_pass_readout.md` is added; this `docs/03` entry records the closure.
+
+---
+
+22/05/2026 — Eligible-nodes intervention-set policy frozen for calibration and held-out evaluation (Adjudication (a) closed)
+
+### Context
+
+Phase B calibration and held-out evaluation require an explicitly frozen eligible-nodes intervention-set policy before Commit 9 (calibration runner) and Commit 10 (held-out evaluation runner) begin. Phase A reproduction-pass used minimal `do(X_0 = ±2)` smoke coverage; that policy is documented in docs/02 Section 3.3 and remains in force for Phase A. Calibration and held-out evaluation need a full policy that resolves the six per-axis questions: intervention magnitude, node coverage, intervention signs, inclusion of root-of-DAG nodes, topological-depth stratification, and the constancy of the policy across replicate seeds and across the two candidate base models within each stage.
+
+The evidence base for the decision is `docs/08f_eligible_nodes_intervention_policy.md`. That document records the six per-axis findings, the primary precedent read directly (Brouillard et al. 2020 DCDI Appendix B.1 — the dominant precedent at `d = 10`), supplementary precedent for sample-based distributional evaluation (Chevalley et al. 2025, Communications Biology CausalBench), field-heterogeneity context from the Q1 Elicit report May 2026, and honest limitations regarding the literature's lack of convergence on intervention-selection policies for held-out evaluation of learned SCMs.
+
+### Decision (six per-axis positions)
+
+1. **Intervention magnitude:** unchanged from docs/02 Section 4.2: `|X_j| = 2`, deterministic point intervention, uniform across nodes.
+2. **Node coverage:** all 10 nodes of the 10-node ER2 selection cell are intervention targets.
+3. **Intervention signs:** both positive and negative for every targeted node, yielding 20 intervention conditions per seed (`{do(X_j = +2), do(X_j = -2) for j ∈ [0, 9]}`).
+4. **Roots inclusion:** root-of-DAG nodes are included without exclusion.
+5. **Topological stratification:** not applied; all-nodes coverage at `d = 10` obviates per-stratum selection.
+6. **Cross-seed and cross-model uniformity:** the same node-index policy is applied across all replicate seeds within a stage (calibration-pool seeds `{201, 202}`; held-out-pool seeds `{301, 302, 303, 304, 305}`) and across both candidate base models (DAGMA, DCDI) within each stage. The same policy is used at calibration and at held-out evaluation. The node-index policy is index-stable across seeds; the causal roles of those indices (root, intermediate, leaf) vary per SCM realisation, as expected under random ER2 graph generation.
+
+### Implementation arithmetic
+
+- Calibration: 20 intervention conditions × 2 calibration seeds = 40 intervention cells per candidate configuration. The frozen calibration grid evaluates 5 candidate configurations per model, producing 200 intervention cells per model across the grid.
+- Held-out: 20 intervention conditions × 5 held-out seeds = 100 intervention cells per selected configuration per model.
+
+### Evidence base
+
+- Brouillard et al. 2020 (DCDI, NeurIPS 2020), Appendix B.1 and B.5 — read directly as the primary precedent for all-nodes coverage at `d = 10`.
+- Q1 Elicit report (May 2026) — supplied the field-heterogeneity context and the methodological framing that the literature does not converge on a single intervention-selection policy for held-out evaluation of learned SCMs.
+- Chevalley et al. 2025 (Communications Biology, CausalBench) — supplementary precedent for sample-based distributional evaluation.
+- Full per-axis reasoning, citation tier markers, and verification audit trail: `docs/08f_eligible_nodes_intervention_policy.md`.
+
+The literature does not converge on a single policy for this question; this document records the project's reasoned choice from the documented defensible range. That framing is preserved verbatim from `docs/08f` §5.
+
+### Documentation change
+
+`docs/02_base_model_selection.md` updated to v1.9. A new Section 4.3 titled "Eligible-nodes intervention-set policy for calibration and held-out evaluation" is inserted immediately after Section 4.2. As a structural consequence, the previous Section 4.3 (Criterion 2: Prior-injection ergonomics) and Section 4.4 (Criterion 3: Standardisation robustness) are renumbered to Section 4.4 and Section 4.5 respectively. The substance of those two subsections is unchanged. The six internal cross-references that previously pointed to "Section 4.4" (the preprocessing equations under Project-owned preprocessing) are updated to "Section 4.5" as numeric-pointer updates only, with no substance change. The Section 4.2 pointer language "for eligible nodes in the selection study graph" is updated to reference Section 3.3 (Phase A coverage) and the new Section 4.3 (calibration and held-out coverage) as the eligible-nodes sources per stage.
+
+### What does NOT change
+
+- Section 4.2 intervention magnitude convention (`|X_j| = 2`).
+- Section 3.3 Phase A reproduction-pass intervention coverage (minimal `do(X_0 = ±2)` smoke).
+- Section 2 lexicographic decision rule.
+- Section 7 C-P11 real-budget reapplication policy.
+- Section 8 timeline and compute budget.
+- Section 9 tactical-constants block, including `mmd_n_samples = 1000`.
+- Seed pools `reproduction = (101, 102, 103)`, `calibration = (201, 202)`, `held_out_evaluation = (301, 302, 303, 304, 305)`.
+- DAGMA and DCDI threshold triples and sparsity grids.
+- DAGMA and DCDI training budgets (`warm_iter`, `max_iter`, `dcdi_num_train_iter = 300000`).
+- Metric primitives (SHD, SID, MMD), wrapper APIs, the wrapper status taxonomy, and configuration-hash semantics.
+- The substance of the previous Section 4.3 (Criterion 2) and Section 4.4 (Criterion 3); only their numeric labels and inbound cross-reference numbers changed.
+
+### Forward note
+
+The policy will be implemented by Commit 9 (calibration runner) and Commit 10 (held-out evaluation runner). The configuration hashes of those runners will incorporate the intervention-set policy via canonical JSON serialisation of the calibration and held-out configuration objects.
+
+### Adjudications (b) and (c) remain open
+
+Two pre-Commit-9 adjudications recorded in `docs/08e` Section 8 remain open and must be frozen before Commit 9 begins:
+
+- Adjudication (b): DCDI fit-RNG convention beyond the reproduction_pass `seed_torch = seed_numpy = 42` value.
+- Adjudication (c): selected-configuration artefact path produced by Phase B and consumed by held-out evaluation.
