@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import tempfile
 from dataclasses import dataclass, replace
@@ -751,29 +752,424 @@ def _default_now_fn() -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
-def _default_fit_runner(job: "CalibrationFitJob") -> dict[str, Any]:
-    """Lazy-import production default fit runner.
+# ---------------------------------------------------------------------------
+# Production fit-result adapter and default fit runner
+# ---------------------------------------------------------------------------
 
-    The real fit path is imported here, not at module top, so
-    importing ``experiments.selection_study.calibration`` never
-    triggers DAGMA, DCDI, or any wrapper code. The production
-    adapter that drives ``pipeline.run_single_fit`` and reshapes
-    the resulting ``run.json`` into the calibration-ranker input
-    shape is not wired up by this module; callers that need real
-    calibration execution must pass an explicit ``fit_runner`` to
-    ``run_calibration`` for now.
+
+class _CalibrationInfrastructureError(Exception):
+    """Raised when the production fit result cannot be structurally adapted.
+
+    The orchestrator distinguishes this error class from generic
+    fit exceptions: a generic ``Exception`` raised during a fit
+    becomes a degenerate calibration record (the run continues), but
+    a ``_CalibrationInfrastructureError`` is fatal and aborts the
+    run before any further records are persisted. The class is
+    private because the only producer of these errors is the default
+    fit_runner factory inside this module; external test code does
+    not need to catch it directly.
     """
-    # Lazy import to keep this module wrapper-free at import time.
-    from experiments.selection_study import pipeline as _pipeline  # noqa: F401
 
-    raise NotImplementedError(
-        "the default production fit runner is not wired up; pass an "
-        "explicit fit_runner to run_calibration to drive real or "
-        "synthetic fits. The lazy import of "
-        "experiments.selection_study.pipeline is performed inside "
-        "this default so the calibration module does not pull in "
-        "wrapper code at import time."
+
+# Fields the adapter reads from the production fit result. Each one
+# is required; missing fields are reported by name as infrastructure
+# failure.
+_REQUIRED_PRODUCTION_FIT_RESULT_FIELDS: tuple[str, ...] = (
+    "run_id",
+    "model",
+    "condition",
+    "seed_population",
+    "seed_replicate_index",
+    "configuration_hash",
+    "training_status",
+    "graph_status",
+    "sampler_status",
+    "shd",
+    "sid",
+    "mmd_primary",
+    "runtime_seconds",
+    "n_iterations",
+    "interventions",
+)
+
+
+def _sanitise_numeric_value(value: Any) -> Any:
+    """Return ``value`` unless it is a non-finite float, in which case None.
+
+    Used at every output boundary of the adapter so the persisted
+    calibration record never carries a raw ``NaN``, ``+inf``, or
+    ``-inf`` float. Booleans pass through unchanged; integers and
+    ``None`` pass through unchanged.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    return value
+
+
+def _adapt_mmd_by_intervention(
+    interventions: Any,
+    *,
+    where: str,
+) -> list[dict[str, Any]]:
+    """Map the production ``interventions`` list to the ranker shape."""
+    if not isinstance(interventions, list):
+        raise ValueError(
+            f"{where} must be a JSON array (list); got "
+            f"{type(interventions).__name__}"
+        )
+    adapted: list[dict[str, Any]] = []
+    for index, item in enumerate(interventions):
+        if not isinstance(item, Mapping):
+            raise ValueError(
+                f"{where}[{index}] must be a mapping; got "
+                f"{type(item).__name__}"
+            )
+        for required in ("target_node", "value_raw", "mmd_value"):
+            if required not in item:
+                raise ValueError(
+                    f"{where}[{index}] is missing required field "
+                    f"{required!r}"
+                )
+        adapted.append(
+            {
+                "intervention_target": int(item["target_node"]),
+                "intervention_value": float(item["value_raw"]),
+                "mmd_primary": _sanitise_numeric_value(item["mmd_value"]),
+            }
+        )
+    return adapted
+
+
+def _adapt_threshold_metrics(
+    threshold_records: Any,
+    *,
+    where: str,
+) -> list[dict[str, Any]]:
+    """Map a threshold-robustness records list to the ranker shape.
+
+    Per-threshold MMD is not produced by the project's threshold-
+    robustness recomputation (only graph metrics are recomputed at
+    neighbouring thresholds). The adapter records ``mmd_primary``
+    as ``None`` for every threshold row so the ranker's per-seed
+    schema is satisfied without inventing values.
+    """
+    if threshold_records is None:
+        return []
+    if not isinstance(threshold_records, list):
+        raise ValueError(
+            f"{where} must be a JSON array (list) or None; got "
+            f"{type(threshold_records).__name__}"
+        )
+    adapted: list[dict[str, Any]] = []
+    for index, item in enumerate(threshold_records):
+        if not isinstance(item, Mapping):
+            raise ValueError(
+                f"{where}[{index}] must be a mapping; got "
+                f"{type(item).__name__}"
+            )
+        for required in ("threshold", "shd", "sid"):
+            if required not in item:
+                raise ValueError(
+                    f"{where}[{index}] is missing required field "
+                    f"{required!r}"
+                )
+        adapted.append(
+            {
+                "threshold": float(item["threshold"]),
+                "shd": _sanitise_numeric_value(item["shd"]),
+                "sid": _sanitise_numeric_value(item["sid"]),
+                "mmd_primary": None,
+            }
+        )
+    return adapted
+
+
+def _adapt_bandwidth_summaries(value: Any) -> dict[str, Any]:
+    """Return the bandwidth-summaries mapping as a plain dict (or ``{}``)."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(
+            "fit_result.mmd_bandwidth_used_value must be a mapping "
+            f"or null; got {type(value).__name__}"
+        )
+    return {str(key): item for key, item in value.items()}
+
+
+def _adapt_fit_result_to_calibration_record(
+    job: "CalibrationFitJob",
+    fit_result: Mapping[str, Any],
+    *,
+    threshold_robustness_records: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Adapt a production fit-result mapping to the ranker input shape.
+
+    The function consumes the loaded ``run.json`` dict produced by
+    the project's pipeline plus, optionally, the ``records`` list
+    from the sibling ``threshold_robustness.json``. It validates
+    every identity field against the job and reshapes the metric,
+    status, and intervention fields into the dict shape that
+    ``rank_calibration_records`` accepts. Non-finite floats are
+    converted to ``None`` so the persisted calibration record is
+    JSON-safe.
+
+    Identity invariants checked against the job:
+
+    - ``model``, ``condition``, ``configuration_hash``, and
+      ``seed_replicate_index`` must equal the corresponding job
+      identity fields;
+    - ``seed_population`` must equal ``"calibration"`` (the runner
+      enforces this upstream but the adapter re-checks defensively);
+    - ``run_id`` must equal the canonical run_id derived from the
+      job's identity tuple.
+
+    Any mismatch is treated as infrastructure failure and raises
+    ``ValueError`` with a self-contained message naming the field.
+
+    Parameters
+    ----------
+    job : CalibrationFitJob
+        The job that produced ``fit_result``.
+    fit_result : Mapping[str, Any]
+        Parsed ``run.json`` content from the pipeline. The
+        adapter does not write back to ``fit_result``.
+    threshold_robustness_records : sequence of Mapping or None, optional
+        The ``records`` list from the sibling
+        ``threshold_robustness.json`` produced by
+        ``threshold_robustness.recompute_at_thresholds``. When
+        ``None`` the adapted record carries an empty
+        ``threshold_metrics`` list rather than fabricating values.
+
+    Returns
+    -------
+    dict[str, Any]
+        Ranker-input dict carrying the 18 required fields plus
+        identity fields, ready for ``rank_calibration_records``.
+    """
+    if not isinstance(fit_result, Mapping):
+        raise ValueError(
+            "production fit_result must be a mapping; got "
+            f"{type(fit_result).__name__}"
+        )
+
+    candidate = job.candidate
+    missing = [
+        name
+        for name in _REQUIRED_PRODUCTION_FIT_RESULT_FIELDS
+        if name not in fit_result
+    ]
+    if missing:
+        raise ValueError(
+            "production fit_result for job "
+            f"(model={candidate.model!r}, "
+            f"condition={candidate.condition!r}, "
+            f"hash_prefix={candidate.configuration_hash_prefix!r}, "
+            f"seed={int(job.seed_value)}) is missing required "
+            f"field(s): {missing}"
+        )
+
+    expected_run_id = _expected_run_id_for_job(job)
+    identity_checks = (
+        ("model", candidate.model),
+        ("condition", candidate.condition),
+        ("configuration_hash", candidate.configuration_hash_full),
+        ("seed_replicate_index", int(job.seed_replicate_index)),
+        ("seed_population", _CALIBRATION_SEED_POPULATION),
+        ("run_id", expected_run_id),
     )
+    for field_name, expected in identity_checks:
+        observed = fit_result[field_name]
+        if observed != expected:
+            raise ValueError(
+                "production fit_result identity mismatch for job "
+                f"(model={candidate.model!r}, "
+                f"condition={candidate.condition!r}, "
+                f"hash_prefix="
+                f"{candidate.configuration_hash_prefix!r}, "
+                f"seed={int(job.seed_value)}): field "
+                f"{field_name!r} should be {expected!r}; got "
+                f"{observed!r}"
+            )
+
+    n_iterations_raw = fit_result["n_iterations"]
+    if n_iterations_raw is not None:
+        if isinstance(n_iterations_raw, bool) or not isinstance(
+            n_iterations_raw, int
+        ):
+            raise ValueError(
+                "production fit_result.n_iterations must be int or "
+                f"null; got {type(n_iterations_raw).__name__}"
+            )
+
+    runtime_seconds_raw = fit_result["runtime_seconds"]
+    if isinstance(runtime_seconds_raw, bool) or not isinstance(
+        runtime_seconds_raw, (int, float)
+    ):
+        raise ValueError(
+            "production fit_result.runtime_seconds must be a number; "
+            f"got {type(runtime_seconds_raw).__name__}"
+        )
+    runtime_seconds_value = float(runtime_seconds_raw)
+    if not math.isfinite(runtime_seconds_value) or runtime_seconds_value < 0.0:
+        raise ValueError(
+            "production fit_result.runtime_seconds must be a finite "
+            f"non-negative number; got {runtime_seconds_raw!r}"
+        )
+
+    mmd_by_intervention = _adapt_mmd_by_intervention(
+        fit_result["interventions"],
+        where="production fit_result.interventions",
+    )
+
+    threshold_metrics = _adapt_threshold_metrics(
+        threshold_robustness_records,
+        where="production threshold_robustness_records",
+    )
+
+    bandwidth_summaries = _adapt_bandwidth_summaries(
+        fit_result.get("mmd_bandwidth_used_value")
+    )
+
+    return {
+        "model": candidate.model,
+        "condition": candidate.condition,
+        "configuration_hash_full": candidate.configuration_hash_full,
+        "configuration_hash_prefix": candidate.configuration_hash_prefix,
+        "hyperparameters": dict(candidate.grid_point_hyperparameter),
+        "seed_value": int(job.seed_value),
+        "shd": _sanitise_numeric_value(fit_result["shd"]),
+        "sid": _sanitise_numeric_value(fit_result["sid"]),
+        "mmd_primary": _sanitise_numeric_value(fit_result["mmd_primary"]),
+        "graph_status": str(fit_result["graph_status"]),
+        "sampler_status": str(fit_result["sampler_status"]),
+        "training_status": str(fit_result["training_status"]),
+        "runtime_seconds": runtime_seconds_value,
+        "n_iterations": (
+            None if n_iterations_raw is None else int(n_iterations_raw)
+        ),
+        "threshold_metrics": threshold_metrics,
+        "mmd_by_intervention": mmd_by_intervention,
+        "bandwidth_summaries": bandwidth_summaries,
+        "run_id": str(fit_result["run_id"]),
+    }
+
+
+def _build_default_fit_runner(
+    *, results_root: Path
+) -> Callable[["CalibrationFitJob"], dict[str, Any]]:
+    """Build the production default fit runner bound to ``results_root``.
+
+    The returned callable drives ``pipeline.run_single_fit`` for one
+    job, recomputes threshold robustness, loads the resulting
+    ``run.json``, and reshapes the loaded record into the ranker
+    input dict via ``_adapt_fit_result_to_calibration_record``. The
+    pipeline, preflight, loader, and threshold-robustness modules
+    are imported lazily inside the factory so importing
+    ``calibration`` at module load does not pull in DAGMA, DCDI, or
+    any wrapper code. Per-fit ``run.json`` and
+    ``threshold_robustness.json`` artefacts land under
+    ``<results_root>/model_selection/<model>/<condition>/calibration/...``
+    via the existing per-run directory convention.
+    """
+    from experiments.selection_study.loader import load_run
+    from experiments.selection_study.pipeline import run_single_fit
+    from experiments.selection_study.preflight import enumerate_manifest
+    from experiments.selection_study.threshold_robustness import (
+        recompute_at_thresholds,
+    )
+
+    base_dir = Path(results_root) / "model_selection"
+
+    def runner(job: "CalibrationFitJob") -> dict[str, Any]:
+        candidate = job.candidate
+        manifest = enumerate_manifest(
+            candidate.configuration, base_dir=base_dir
+        )
+        target_index: int | None = None
+        for entry_index, entry in enumerate(manifest.entries):
+            if (
+                entry.seed_population == _CALIBRATION_SEED_POPULATION
+                and int(entry.seed_replicate_index)
+                == int(job.seed_replicate_index)
+            ):
+                target_index = entry_index
+                break
+        if target_index is None:
+            # The manifest enumeration always emits one entry per
+            # calibration seed in normal operation, so reaching this
+            # branch indicates a broken assumption about the
+            # manifest produced by ``enumerate_manifest``. Treat as
+            # infrastructure failure so the orchestrator aborts the
+            # run rather than masking the broken assumption with a
+            # degenerate record.
+            raise _CalibrationInfrastructureError(
+                "default fit runner could not locate calibration "
+                "manifest entry for job "
+                f"(model={candidate.model!r}, "
+                f"condition={candidate.condition!r}, "
+                f"hash_prefix="
+                f"{candidate.configuration_hash_prefix!r}, "
+                f"seed_replicate_index={int(job.seed_replicate_index)}, "
+                f"seed_value={int(job.seed_value)})"
+            )
+
+        # A failure inside ``run_single_fit`` (wrapper raising, DCDI
+        # convergence failure, schema-gate refusal, etc.) is treated
+        # by the caller as a model-fit failure: the exception
+        # propagates out of the runner and the orchestrator
+        # constructs a degenerate calibration record, then continues
+        # the run.
+        run_json_path = run_single_fit(
+            manifest, target_index, run_root=base_dir
+        )
+
+        # Failures after a successful fit are infrastructure failures:
+        # the recompute, the loader, and the adapter together check
+        # that the on-disk artefact is structurally trustworthy.
+        # Anything they raise is wrapped in the dedicated
+        # infrastructure-error class so the orchestrator aborts
+        # rather than silently masking the broken assumption with a
+        # degenerate record.
+        try:
+            threshold_payload = recompute_at_thresholds(
+                run_json_path.parent, write_sibling=False
+            )
+            threshold_records = threshold_payload.get("records", [])
+            fit_result = dict(load_run(run_json_path).data)
+            return _adapt_fit_result_to_calibration_record(
+                job,
+                fit_result,
+                threshold_robustness_records=threshold_records,
+            )
+        except _CalibrationInfrastructureError:
+            raise
+        except Exception as exc:
+            raise _CalibrationInfrastructureError(
+                "post-fit adaptation failed for job "
+                f"(model={candidate.model!r}, "
+                f"condition={candidate.condition!r}, "
+                f"hash_prefix="
+                f"{candidate.configuration_hash_prefix!r}, "
+                f"seed_value={int(job.seed_value)}): "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+
+    return runner
+
+
+def _default_fit_runner(job: "CalibrationFitJob") -> dict[str, Any]:
+    """Legacy module-level default fit runner.
+
+    Preserved as a public-name fallback for any caller that imports
+    the symbol directly. Internally builds the production default
+    against the project's standard ``results`` root. New code should
+    prefer the explicit ``run_calibration(..., fit_runner=None)``
+    code path which builds a results-root-bound default through the
+    factory above.
+    """
+    return _build_default_fit_runner(results_root=Path("results"))(job)
 
 
 class _CalibrationProgressLogger:
@@ -1000,11 +1396,14 @@ def run_calibration(
     resolved_now_fn: Callable[[], datetime] = (
         now_fn if now_fn is not None else _default_now_fn
     )
-    resolved_fit_runner: Callable[
-        ["CalibrationFitJob"], Mapping[str, Any]
-    ] = (
-        fit_runner if fit_runner is not None else _default_fit_runner
-    )
+    if fit_runner is not None:
+        resolved_fit_runner: Callable[
+            ["CalibrationFitJob"], Mapping[str, Any]
+        ] = fit_runner
+    else:
+        resolved_fit_runner = _build_default_fit_runner(
+            results_root=results_root_path
+        )
 
     sorted_jobs = _sorted_fit_jobs(workload)
     total_jobs = len(sorted_jobs)
@@ -1044,6 +1443,14 @@ def run_calibration(
             raw_result: Any = None
             try:
                 raw_result = resolved_fit_runner(job)
+            except _CalibrationInfrastructureError:
+                # Structurally broken fit-runner output is an
+                # infrastructure failure: re-raise unchanged so the
+                # orchestrator aborts the run rather than silently
+                # masking the broken assumption with a degenerate
+                # record. Previously persisted records remain on
+                # disk for inspection.
+                raise
             except Exception as exc:
                 failed_with_exception = True
                 failure_type = type(exc).__name__
