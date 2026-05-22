@@ -3312,3 +3312,173 @@ No existing Section 4 subsection is renumbered. No cross-reference outside Secti
 - Commit 9.3 may add the three candidate-level diagnostic fields (`has_degenerate_metric`, `degenerate_metric_names`, `ranking_warning`) to the artefact-validator's accepted per-candidate fields. This is a candidate-level schema additive change that does not require a top-level schema bump and is not a base-model decision.
 - Commit 9.3 must keep the no-leakage gate: the ranker reads only `seed_population == "calibration"` records.
 - Commit 9.3 must not store any of the six forbidden winner field names. The Commit 9.2 writer's recursive forbidden-field-name check enforces this independently of the ranker.
+
+---
+
+22/05/2026 — Commit 9.4 calibration orchestration contract frozen before implementation
+
+### Context
+
+Commits 9.1 (workload enumeration), 9.2 (selected-configurations artefact writer), and 9.3 (within-model calibration ranking) are complete. Commit 9.4 implements the calibration runner that glues those three layers together with real-or-mocked model fits, persists each per-fit calibration record to disk, drives the ranker, and writes the selected-configurations handoff artefact. This entry freezes the orchestration contract before any 9.4 code is written so the runner does not silently choose failure-handling, record-persistence, logging, or fit-runner-injection behaviour at code-writing time.
+
+The four pre-Commit-9 protocol decisions (adjudications (a), (b), (c), and the within-model ranking rule with its v1.12 edge-case clarifications) remain unchanged. Commit 9.4 is purely an orchestration layer; it does not reopen any protocol decision and does not change the artefact schema.
+
+### Decision 1: Fit-runner injection
+
+Commit 9.4 implements `run_calibration` with an injectable fit-runner dependency. The function signature takes an optional `fit_runner` callable (or equivalent) that performs one calibration fit and returns the structured fit result.
+
+- **Production behaviour**: when `fit_runner=None`, `run_calibration` falls back to the project's real production fit path (the same single-fit entry that the reproduction-pass runner uses). The production fit function is imported lazily inside `run_calibration` (or inside a thin default-factory helper), not at module import time, so importing the calibration module never triggers DAGMA/DCDI imports.
+- **Test behaviour**: tests pass a fake `fit_runner` directly into `run_calibration`. The fake is the primary mechanism by which tests prevent accidental real fits. Monkeypatching `pipeline.run_single_fit` continues to serve as a backstop in tests that do not exercise `run_calibration` directly, but it must not be the primary safety net for the calibration runner.
+- **Rationale**: dependency injection makes the real-fit dependency explicit at the function-signature level. Forgetting to monkeypatch in a new test would currently risk a real 40-fit calibration; passing the fake explicitly makes that path impossible. The lazy import also keeps the calibration module fast to import in unrelated tests.
+
+### Decision 2: Failure handling - model-fit vs infrastructure
+
+Commit 9.4 distinguishes two failure categories with opposite policies.
+
+#### Model-fit failure
+
+A model-fit failure occurs when `fit_runner` raises during a fit attempt or returns fit-level failure information while preserving enough job identity to form a structurally valid calibration record. The runner converts the failure into a **degenerate calibration record**:
+
+- the record carries the correct `model`, `condition`, `configuration_hash_full`, `configuration_hash_prefix`, `hyperparameters`, `seed_value`, and `run_id`;
+- the ranking metrics `shd`, `sid`, `mmd_primary` (and any nested per-intervention/threshold metric) are recorded as non-finite (preferably `None` for the runner-facing values; the ranker's `_sanitise_for_json` step converts any residual `NaN`/`inf`/`-inf` to `None` at output time);
+- `graph_status`, `sampler_status`, and `training_status` carry a status that indicates failure (drawn from the existing wrapper status taxonomy, for example `wrapper_error`, `unavailable_*`, or `diverged`);
+- the run **continues** with the remaining fits, so completed expensive fits are not lost.
+
+The ranker's within-model lexicographic rule will rank the degenerate candidate strictly below finite-metric candidates and surface it through the candidate's `has_non_finite_seed_metric`, `degenerate_metric_names`, and `ranking_warning` fields; the rank-1 selection's `degeneracy_flag` will be `True` if the rank-1 candidate ends up degenerate.
+
+#### Infrastructure failure
+
+Any condition that would make the calibration artefact structurally untrustworthy is an **infrastructure failure** and **must fail fast**. The runner stops, surfaces a self-contained error message identifying the offending field or record, and writes no partial selected-configurations artefact. Infrastructure failures include:
+
+- malformed calibration parent configuration JSON, missing required Configuration fields, or a Configuration that fails `assert_real_study_constants(stage="calibration")`;
+- a fit-result record whose `model`, `condition`, `seed_value`, or `configuration_hash_*` does not match the job that produced it;
+- a fit-result record with a hash-prefix / hash-full mismatch;
+- a record missing one of the structural fields the ranker requires;
+- the writer's atomic-replace failing (filesystem I/O error, no-overwrite-by-default refusal, or read-back validation failure);
+- any other condition that breaks the integrity of the on-disk record set or the final artefact.
+
+#### Rationale
+
+Model-fit failures are *experimental evidence*: a candidate that genuinely fails to converge or produces an invalid graph is a result worth preserving and ranking explicitly worse, not a reason to abort the calibration. Infrastructure failures are *broken assumptions*: silently coercing them into degenerate records would hide bugs and produce an artefact that downstream code would treat as truthful. The two-policy split is the same shape used by the reproduction-pass runner.
+
+### Decision 3: Immediate record persistence
+
+Commit 9.4 persists each per-fit calibration record to disk immediately after the fit attempt completes, before moving on to the next fit. This is true for both successful and degenerate records.
+
+#### Path layout
+
+Per-fit records live under the calibration run's directory:
+
+```
+results/model_selection/calibration/<calibration_run_hash12>/records/<record_id>.json
+```
+
+The records directory sits inside the same `<calibration_run_hash12>` leaf as the final `selected_configurations.json`. The 12-character calibration-run hash is the same prefix the Commit 9.2 writer uses for the handoff artefact path.
+
+#### record_id naming
+
+The `record_id` is deterministic and human-readable. The preferred pattern is:
+
+```
+<model>_<condition>_<configuration_hash_prefix>_seed<seed_value>.json
+```
+
+For example: `dagma_centred_only_501f38765f49_seed201.json`. The pattern derives from four identity components — `model`, `condition`, `configuration_hash_prefix` (the 12-char prefix used elsewhere in the project), and `seed_value` — so two reruns of the same job produce the same record filename, and the filename is unambiguous to any human auditor reading the directory listing.
+
+#### Per-record self-containment
+
+Each per-fit record is a self-contained JSON object matching the structural input contract that the calibration ranker accepts. The runner does not require any cross-record context to reconstruct a candidate's per-seed metrics; the records directory can be consumed in any order and the ranker will produce the same output.
+
+#### Rationale
+
+The real 40-fit calibration may take many hours. If `rank_calibration_records` or the selected-configurations writer fails after the fits complete, completed fits must remain recoverable on disk without rerunning. Deterministic filenames also preserve a clean future-resume path even though full resume semantics are not in scope for Commit 9.4.
+
+### Decision 4: Logging
+
+Commit 9.4 emits human-readable progress logs while the calibration runs.
+
+The runner logs at least the following per-fit fields:
+
+- UTC timestamp (start and end);
+- fit index out of the total (for example `fit 17/40`);
+- `model`;
+- `condition`;
+- the resolved hyperparameter (`lambda1` or `reg_coeff` value);
+- `seed_value`;
+- start and end markers;
+- runtime;
+- terminal status from the fit (drawn from the wrapper status taxonomy);
+- a rough ETA where practical (for example, mean runtime so far times remaining fits).
+
+Logs are written to a file under the calibration run directory:
+
+```
+results/model_selection/calibration/<calibration_run_hash12>/calibration_run.log
+```
+
+and may also be emitted to stdout/stderr. The log file format is **not** a stable machine-readable interface; downstream consumers should not parse it. Tests should not pin the exact log format.
+
+No log line, no stdout message, and no stderr message may declare a final DAGMA-vs-DCDI base-model winner.
+
+### Decision 5: Stable policy identifiers
+
+Commit 9.4 carries stable policy identifiers in the selected-configurations artefact metadata rather than hardcoded document-section references in code. The identifiers used by the runner are:
+
+- `selection_rule_id = "within_model_sid_band_mmd_shd_hash_v1"`
+- `selection_rule_ref = "within_model_calibration_ranking_rule"`
+- `intervention_policy_ref = "all_nodes_plus_minus_2_v1"`
+- `fit_rng_policy_ref = "dcdi_fixed_fit_rng_42_v1"`
+
+These constants live in one source-of-truth module. The preferred home is `experiments/selection_study/selection_artefact.py` alongside the existing artefact constants (`MODELS`, `CONDITIONS`, `CALIBRATION_SEEDS`, `SCHEMA_VERSION`, etc.), unless implementation discovers a cleaner existing home. The constants are imported into `calibration.py` and used to populate the artefact and the calibration-run identity payload.
+
+Code comments, docstrings, log messages, and error messages must not reference `docs/02`, `docs/03`, `docs/08`, any section number, or any decision-log entry by date. Behaviour is described directly; protocol provenance is recorded via the stable identifiers above.
+
+### Decision 6: Scope boundary
+
+Commit 9.4 may implement, with mocked or synthetic fits in tests:
+
+- loading the four calibration parent configs (one per `(model, condition)` pair);
+- enumerating the 20 executable candidates and 40 fit jobs via the existing Commit 9.1 helpers;
+- calling the injected `fit_runner` for each job and collecting structured results;
+- persisting each per-fit calibration record immediately under the records directory;
+- collecting the in-memory record set after all fits complete;
+- calling `rank_calibration_records` from Commit 9.3 on the record set;
+- computing `calibration_run_hash_full` / `calibration_run_hash12` via the Commit 9.2 identity helpers;
+- assembling the selected-configurations artefact envelope;
+- writing `selected_configurations.json` via the existing Commit 9.2 atomic writer.
+
+Commit 9.4 **must not**:
+
+- run the real 40-fit DAGMA/DCDI calibration in tests (tests use the injected fit runner with synthetic results);
+- run held-out evaluation;
+- implement prior-loss experiments;
+- implement dry-run CLI polish if that is reserved for a later orchestration slice;
+- declare a final DAGMA-vs-DCDI base-model winner;
+- print, log, or store any of the six forbidden field names: `winner`, `model_winner`, `base_model_winner`, `recommended_model`, `final_decision`, `decision`.
+
+The artefact writer's recursive forbidden-field-name scan continues to enforce the last item independently of any runner-level discipline.
+
+### Decision 7: 9.4 size control
+
+Commit 9.4 may remain a single slice provided the implementation stays tightly scoped to orchestration, record persistence, logging, stable-identifier wiring, and mocked tests. If implementation begins to expand into:
+
+- a dry-run CLI mode or other CLI polish;
+- resume semantics that go beyond deterministic record-filename re-use;
+- readout plots, summary CSVs, or notebook artefacts;
+- real calibration execution against DAGMA/DCDI;
+
+the implementation must stop and report rather than widen scope. The orchestration layer is already larger than previous Commit-9 slices; scope creep here is the dominant risk.
+
+### What does NOT change
+
+- The four-step within-model ranking chain (mean SID, then MMD inside the SID band, then mean SHD, then full `configuration_hash`).
+- The Commit 9.2 selected-configurations artefact schema, writer, and forbidden-field-name policy.
+- The Commit 9.1 workload enumeration shape (20 executable candidates, 40 fit jobs, calibration seeds `[201, 202]`).
+- Adjudications (a), (b), and (c), and the v1.12 SID-band / non-finite edge-case rules.
+- The selection rule for the base-model decision (held-out evidence only).
+- Seed pools, threshold triples, sparsity grids, training budgets, metric primitives, wrapper APIs, and the wrapper status taxonomy.
+- The no-leakage requirement: calibration ranking reads only calibration records.
+
+### Forward note
+
+Commit 9.4 implementation may begin once this entry is committed. The implementation prompt should cite this entry for the seven orchestration decisions above and should cite the Commit 9.1 / 9.2 / 9.3 implementation entries for the underlying layers. No source code, no test, no configuration JSON, no schema file, and no result artefact is created or modified by this entry; the change is documentation-only.
