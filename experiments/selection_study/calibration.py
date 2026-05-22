@@ -56,9 +56,11 @@ from experiments.selection_study.real_study import (
 )
 from experiments.selection_study.selection_artefact import (
     CALIBRATION_SEEDS,
+    CONDITIONS,
     DECISION_SCOPE,
     FIT_RNG_POLICY_REF,
     INTERVENTION_POLICY_REF,
+    MODELS,
     SCHEMA_VERSION,
     SEED_POPULATION_LABEL,
     SELECTED_CONFIGURATIONS_ARTEFACT_TYPE,
@@ -1265,6 +1267,247 @@ def _elapsed_seconds(start: datetime, end: datetime) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Shared setup helper used by both run_calibration and preflight_calibration
+# ---------------------------------------------------------------------------
+
+
+_DRY_RUN_REPORT_ARTEFACT_TYPE = "calibration_dry_run_report"
+_DRY_RUN_REPORT_SCHEMA_VERSION = 1
+_STATUS_WOULD_BE_CREATED = "would_be_created"
+_STATUS_ALREADY_EXISTS = "already_exists"
+
+
+@dataclass(frozen=True)
+class _CalibrationSetup:
+    """Side-effect-free description of a planned calibration run.
+
+    Holds the loaded parent configurations, the validated workload,
+    the executable-candidate identity payload used to compute the
+    calibration_run_hash, the calibration_run_hash itself, and the
+    canonical on-disk paths the run would write to. Constructing
+    this object does not create any directory or write any file:
+    consumers (``run_calibration`` and ``preflight_calibration``)
+    decide whether and when to materialise the run directory.
+    """
+
+    config_dir: Path
+    results_root: Path
+    parent_configs: tuple[Configuration, ...]
+    workload: "CalibrationWorkload"
+    executable_identities: list[dict[str, Any]]
+    calibration_run_hash_full: str
+    calibration_run_hash12: str
+    artefact_path: Path
+    run_dir: Path
+    records_dir: Path
+    log_path: Path
+
+
+def _prepare_calibration_setup(
+    config_dir: Path | str,
+    results_root: Path | str,
+) -> _CalibrationSetup:
+    """Load and validate calibration parents, enumerate the workload, hash it.
+
+    Performs every check the calibration runner needs before it
+    starts a fit: parent-file presence; calibration-stage real-study
+    constants; workload-cardinality invariants (20 candidates and 40
+    fit jobs); calibration_run_hash and on-disk path resolution. The
+    function is side-effect free: it reads parent JSON files but
+    creates no directory, opens no log, and writes no artefact.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``config_dir`` does not exist or is missing one of the
+        four expected parent config filenames.
+    ValueError
+        If any parent config fails the calibration-stage real-study
+        guard, or if the enumerated workload is not exactly 20
+        candidates and 40 fit jobs.
+    """
+    config_dir_path = Path(config_dir)
+    results_root_path = Path(results_root)
+
+    parent_configs = _load_parent_configs(config_dir_path)
+    for index, parent in enumerate(parent_configs):
+        try:
+            assert_real_study_constants(
+                parent, stage=_CALIBRATION_STAGE_LABEL
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "calibration parent configuration at "
+                f"{config_dir_path / _PARENT_CONFIG_FILENAMES[index]} "
+                f"failed the calibration-stage guard: {exc}"
+            ) from exc
+
+    workload = enumerate_calibration_workload(parent_configs)
+    if len(workload.candidates) != _EXPECTED_CANDIDATE_COUNT:
+        raise ValueError(
+            "calibration workload contains "
+            f"{len(workload.candidates)} executable candidates; "
+            f"expected exactly {_EXPECTED_CANDIDATE_COUNT}"
+        )
+    if len(workload.fit_jobs) != _EXPECTED_FIT_JOB_COUNT:
+        raise ValueError(
+            "calibration workload contains "
+            f"{len(workload.fit_jobs)} fit jobs; expected exactly "
+            f"{_EXPECTED_FIT_JOB_COUNT}"
+        )
+
+    executable_identities = _build_executable_candidate_identities(workload)
+    hash_kwargs = {
+        "executable_candidate_identities": executable_identities,
+        "selection_rule_id": SELECTION_RULE_ID,
+        "selection_rule_ref": SELECTION_RULE_REF,
+        "intervention_policy_ref": INTERVENTION_POLICY_REF,
+        "fit_rng_policy_ref": FIT_RNG_POLICY_REF,
+    }
+    calibration_run_hash_full = compute_calibration_run_hash_full(**hash_kwargs)
+    calibration_run_hash12 = compute_calibration_run_hash12(**hash_kwargs)
+
+    artefact_path = selected_configurations_path(
+        calibration_run_hash12=calibration_run_hash12,
+        results_root=results_root_path,
+    )
+    run_dir = artefact_path.parent
+    records_dir = run_dir / _PER_FIT_RECORDS_SUBDIR
+    log_path = run_dir / _CALIBRATION_LOG_FILENAME
+
+    return _CalibrationSetup(
+        config_dir=config_dir_path,
+        results_root=results_root_path,
+        parent_configs=parent_configs,
+        workload=workload,
+        executable_identities=executable_identities,
+        calibration_run_hash_full=calibration_run_hash_full,
+        calibration_run_hash12=calibration_run_hash12,
+        artefact_path=artefact_path,
+        run_dir=run_dir,
+        records_dir=records_dir,
+        log_path=log_path,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public entry point: preflight_calibration
+# ---------------------------------------------------------------------------
+
+
+def preflight_calibration(
+    config_dir: Path | str,
+    results_root: Path | str,
+    *,
+    now_fn: Callable[[], datetime] | None = None,
+) -> dict[str, Any]:
+    """Validate the calibration setup and return a dry-run report dict.
+
+    This function performs every load / validate / enumerate / hash /
+    path-resolve step that ``run_calibration`` performs but stops
+    before any fit, directory creation, record write, log write,
+    ranking, or artefact write. It is side-effect free: no directory
+    is created, no file is opened for write, no model fit is invoked,
+    no wrapper module is imported.
+
+    The returned dict is JSON-safe (no ``Path`` or ``datetime``
+    objects, no non-finite floats) and carries the fields the
+    operator needs to confirm the planned run shape before
+    committing to a multi-hour real calibration: the
+    calibration_run_hash, the planned on-disk paths, the workload
+    arithmetic, the stable policy refs, and whether the planned
+    outputs already exist (in which case a real run would require
+    ``force=True``).
+
+    Parameters
+    ----------
+    config_dir : Path or str
+        Directory containing the four parent calibration JSON files.
+    results_root : Path or str
+        Root of the results tree. The artefact path is reported as
+        ``<results_root>/model_selection/calibration/<hash12>/selected_configurations.json``.
+    now_fn : callable or None, optional
+        Optional injection point for the wall-clock time source.
+        When omitted, the current UTC time is used. Tests pass a
+        fake ``now_fn`` for a deterministic ``generated_at_utc``.
+
+    Returns
+    -------
+    dict
+        A JSON-safe dry-run report. See the module-level top
+        docstring for the field set.
+
+    Raises
+    ------
+    FileNotFoundError
+        If ``config_dir`` does not exist or is missing one of the
+        four expected parent config filenames.
+    ValueError
+        If any parent config fails the calibration-stage real-study
+        guard or the workload cardinality is wrong.
+    """
+    setup = _prepare_calibration_setup(config_dir, results_root)
+    resolved_now_fn: Callable[[], datetime] = (
+        now_fn if now_fn is not None else _default_now_fn
+    )
+
+    candidates_per_cell: dict[str, dict[str, int]] = {}
+    for condition in CONDITIONS:
+        candidates_per_cell[condition] = {}
+        for model in MODELS:
+            count = sum(
+                1
+                for candidate in setup.workload.candidates
+                if candidate.model == model
+                and candidate.condition == condition
+            )
+            candidates_per_cell[condition][model] = count
+
+    workload_summary: dict[str, Any] = {
+        "total_candidates": len(setup.workload.candidates),
+        "total_fit_jobs": len(setup.workload.fit_jobs),
+        "candidates_per_cell": candidates_per_cell,
+        "seeds": [int(seed) for seed in setup.workload.calibration_seeds],
+        "models": list(MODELS),
+        "conditions": list(CONDITIONS),
+    }
+
+    policy_refs: dict[str, str] = {
+        "selection_rule_id": SELECTION_RULE_ID,
+        "selection_rule_ref": SELECTION_RULE_REF,
+        "intervention_policy_ref": INTERVENTION_POLICY_REF,
+        "fit_rng_policy_ref": FIT_RNG_POLICY_REF,
+    }
+
+    artefact_status = (
+        _STATUS_ALREADY_EXISTS
+        if setup.artefact_path.exists()
+        else _STATUS_WOULD_BE_CREATED
+    )
+    records_status = (
+        _STATUS_ALREADY_EXISTS
+        if setup.records_dir.exists()
+        else _STATUS_WOULD_BE_CREATED
+    )
+
+    return {
+        "artefact_type": _DRY_RUN_REPORT_ARTEFACT_TYPE,
+        "schema_version": _DRY_RUN_REPORT_SCHEMA_VERSION,
+        "calibration_run_hash_full": setup.calibration_run_hash_full,
+        "calibration_run_hash_prefix": setup.calibration_run_hash12,
+        "config_dir": setup.config_dir.as_posix(),
+        "results_root": setup.results_root.as_posix(),
+        "expected_artefact_path": setup.artefact_path.as_posix(),
+        "expected_records_dir": setup.records_dir.as_posix(),
+        "workload_summary": workload_summary,
+        "policy_refs": policy_refs,
+        "artefact_status": artefact_status,
+        "records_status": records_status,
+        "generated_at_utc": _format_utc(resolved_now_fn()),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Public entry point: run_calibration
 # ---------------------------------------------------------------------------
 
@@ -1335,63 +1578,17 @@ def run_calibration(
         If a per-fit record or the artefact already exists at the
         canonical path and ``force`` is ``False``.
     """
-    config_dir_path = Path(config_dir)
-    results_root_path = Path(results_root)
+    setup = _prepare_calibration_setup(config_dir, results_root)
 
-    parent_configs = _load_parent_configs(config_dir_path)
-    for index, parent in enumerate(parent_configs):
-        try:
-            assert_real_study_constants(
-                parent, stage=_CALIBRATION_STAGE_LABEL
-            )
-        except ValueError as exc:
-            raise ValueError(
-                "calibration parent configuration at "
-                f"{config_dir_path / _PARENT_CONFIG_FILENAMES[index]} "
-                f"failed the calibration-stage guard: {exc}"
-            ) from exc
-
-    workload = enumerate_calibration_workload(parent_configs)
-    if len(workload.candidates) != _EXPECTED_CANDIDATE_COUNT:
-        raise ValueError(
-            "calibration workload contains "
-            f"{len(workload.candidates)} executable candidates; "
-            f"expected exactly {_EXPECTED_CANDIDATE_COUNT}"
-        )
-    if len(workload.fit_jobs) != _EXPECTED_FIT_JOB_COUNT:
-        raise ValueError(
-            "calibration workload contains "
-            f"{len(workload.fit_jobs)} fit jobs; expected exactly "
-            f"{_EXPECTED_FIT_JOB_COUNT}"
-        )
-
-    executable_identities = _build_executable_candidate_identities(workload)
-    hash_kwargs = {
-        "executable_candidate_identities": executable_identities,
-        "selection_rule_id": SELECTION_RULE_ID,
-        "selection_rule_ref": SELECTION_RULE_REF,
-        "intervention_policy_ref": INTERVENTION_POLICY_REF,
-        "fit_rng_policy_ref": FIT_RNG_POLICY_REF,
-    }
-    calibration_run_hash_full = compute_calibration_run_hash_full(**hash_kwargs)
-    calibration_run_hash12 = compute_calibration_run_hash12(**hash_kwargs)
-
-    artefact_path = selected_configurations_path(
-        calibration_run_hash12=calibration_run_hash12,
-        results_root=results_root_path,
-    )
-    if artefact_path.exists() and not force:
+    if setup.artefact_path.exists() and not force:
         raise FileExistsError(
             "refusing to overwrite existing selected_configurations "
-            f"file at {artefact_path}; pass force=True to allow "
+            f"file at {setup.artefact_path}; pass force=True to allow "
             "overwrite. No fit_runner was invoked."
         )
 
-    run_dir = artefact_path.parent
-    records_dir = run_dir / _PER_FIT_RECORDS_SUBDIR
-    run_dir.mkdir(parents=True, exist_ok=True)
-    records_dir.mkdir(parents=True, exist_ok=True)
-    log_path = run_dir / _CALIBRATION_LOG_FILENAME
+    setup.run_dir.mkdir(parents=True, exist_ok=True)
+    setup.records_dir.mkdir(parents=True, exist_ok=True)
 
     resolved_now_fn: Callable[[], datetime] = (
         now_fn if now_fn is not None else _default_now_fn
@@ -1402,14 +1599,14 @@ def run_calibration(
         ] = fit_runner
     else:
         resolved_fit_runner = _build_default_fit_runner(
-            results_root=results_root_path
+            results_root=setup.results_root
         )
 
-    sorted_jobs = _sorted_fit_jobs(workload)
+    sorted_jobs = _sorted_fit_jobs(setup.workload)
     total_jobs = len(sorted_jobs)
     records: list[dict[str, Any]] = []
     past_runtimes_seconds: list[float] = []
-    progress_logger = _CalibrationProgressLogger(log_path)
+    progress_logger = _CalibrationProgressLogger(setup.log_path)
     try:
         for fit_index, job in enumerate(sorted_jobs, start=1):
             candidate = job.candidate
@@ -1419,7 +1616,7 @@ def run_calibration(
                 configuration_hash_prefix=candidate.configuration_hash_prefix,
                 seed_value=int(job.seed_value),
             )
-            record_path = records_dir / f"{record_id}.json"
+            record_path = setup.records_dir / f"{record_id}.json"
             if record_path.exists() and not force:
                 raise FileExistsError(
                     "refusing to overwrite existing per-fit record "
@@ -1499,8 +1696,8 @@ def run_calibration(
         "decision_scope": DECISION_SCOPE,
         "base_model_decision_made": False,
         "selected_configuration_semantics": SELECTED_CONFIGURATION_SEMANTICS,
-        "calibration_run_hash_prefix": calibration_run_hash12,
-        "calibration_run_hash_full": calibration_run_hash_full,
+        "calibration_run_hash_prefix": setup.calibration_run_hash12,
+        "calibration_run_hash_full": setup.calibration_run_hash_full,
         "selection_rule_id": SELECTION_RULE_ID,
         "selection_rule_ref": SELECTION_RULE_REF,
         "seed_population": SEED_POPULATION_LABEL,
@@ -1512,8 +1709,8 @@ def run_calibration(
         "generated_at_utc": _format_utc(resolved_now_fn()),
     }
 
-    write_selected_configurations(artefact, artefact_path, force=force)
-    return artefact_path
+    write_selected_configurations(artefact, setup.artefact_path, force=force)
+    return setup.artefact_path
 
 
 # ---------------------------------------------------------------------------
@@ -1556,5 +1753,6 @@ __all__ = [
     "calibration_ranking",
     "enumerate_calibration_workload",
     "expand_calibration_candidates",
+    "preflight_calibration",
     "run_calibration",
 ]

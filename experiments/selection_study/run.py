@@ -25,6 +25,7 @@ a message naming the unimplemented path.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Sequence
@@ -190,6 +191,43 @@ def _run_phase_calibration_enumeration(config_dir_arg: str) -> None:
         )
 
 
+_DEFAULT_RESULTS_ROOT = Path("results")
+
+
+def _run_phase_calibration_dry_run(
+    *,
+    config_dir_arg: str,
+    output_root_arg: str | None,
+) -> None:
+    """Drive the calibration dry-run code path.
+
+    Loads the four parent calibration configs from the supplied
+    directory, validates them via the calibration-stage real-study
+    guard and the workload-cardinality invariants inside
+    ``preflight_calibration``, and prints the resulting dry-run
+    report to ``stdout`` as JSON. No directory is created, no model
+    fit is invoked, and no on-disk artefact is written by this code
+    path.
+    """
+    from experiments.selection_study.calibration import (
+        preflight_calibration,
+    )
+
+    config_dir = Path(config_dir_arg)
+    results_root = (
+        Path(output_root_arg)
+        if output_root_arg is not None
+        else _DEFAULT_RESULTS_ROOT
+    )
+    report = preflight_calibration(config_dir, results_root)
+    sys.stdout.write(
+        json.dumps(
+            report, indent=2, sort_keys=True, ensure_ascii=True
+        )
+        + "\n"
+    )
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -232,6 +270,20 @@ def main(
             raise ValueError(
                 "--dry-run requires --config PATH; no configuration file "
                 "was supplied."
+            )
+        if args.phase == "calibration":
+            _run_phase_calibration_dry_run(
+                config_dir_arg=args.config,
+                output_root_arg=args.output_root,
+            )
+            return
+        if args.phase is not None:
+            raise ValueError(
+                f"--dry-run with --phase {args.phase!r} is not "
+                "supported. --dry-run accepts either --phase "
+                "calibration (which prints a calibration preflight "
+                "report to stdout) or no --phase (which runs the "
+                "manifest preflight on a single configuration file)."
             )
         from experiments.selection_study.preflight import (
             ManifestValidationError,
