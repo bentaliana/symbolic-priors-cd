@@ -3482,3 +3482,127 @@ the implementation must stop and report rather than widen scope. The orchestrati
 ### Forward note
 
 Commit 9.4 implementation may begin once this entry is committed. The implementation prompt should cite this entry for the seven orchestration decisions above and should cite the Commit 9.1 / 9.2 / 9.3 implementation entries for the underlying layers. No source code, no test, no configuration JSON, no schema file, and no result artefact is created or modified by this entry; the change is documentation-only.
+
+## 23/05/2026 -- Commit 10 held-out execution readiness before real run
+
+### Status
+
+Held-out execution infrastructure is complete and ready for the real
+run. The real 25-fit held-out evaluation has not yet been executed.
+This entry records the live preflight and the no-fit factory/adapter
+smoke check that ran immediately before the real run is launched.
+
+### Completed implementation
+
+Commit 10 now has, end to end:
+
+- held-out workload enumeration and preflight (`enumerate_heldout_workload`,
+  `preflight_heldout_evaluation`);
+- held-out artefact schema, validation, atomic writer, and per-cell
+  aggregation (`build_heldout_evaluation_artefact`,
+  `validate_heldout_evaluation_artefact`,
+  `write_heldout_evaluation_artefact`);
+- mocked held-out orchestration (`run_held_out_evaluation` with an
+  injected `fit_runner`);
+- production execution adapter (`_build_default_heldout_fit_runner`
+  with the DCDI fit-RNG seed convention applied via
+  `_apply_fit_rng_to_configuration`);
+- production configuration factory
+  (`build_heldout_configuration_factory(config_dir)`) which loads the
+  four parent calibration configs and returns an executable
+  Configuration per `HeldoutJob`.
+
+### Input artefact
+
+Held-out evaluation consumes the repaired calibration handoff:
+
+`results/model_selection/calibration/4a67117a10b1/selected_configurations.json`
+
+### Frozen workload
+
+- main held-out workload = 20 jobs;
+- 4 selected configurations x held-out seeds `[301, 302, 303, 304, 305]`;
+- DCDI fit-RNG sensitivity addendum = 5 jobs;
+- target: `dcdi` / `centred_only` / held-out seed `301` /
+  `fit_rng` in `[43, 44, 45, 46, 47]`;
+- total = 25 jobs;
+- the sensitivity addendum is a diagnostic; it stays structurally
+  separate from the main evidence and does not enter main aggregates.
+
+### Live preflight result
+
+`preflight_heldout_evaluation` on the live calibration handoff
+produced:
+
+- `calibration_run_hash_prefix = 4a67117a10b1`;
+- `heldout_run_hash_prefix = 88da382e8672`;
+- `main_job_count = 20`;
+- `sensitivity_job_count = 5`;
+- `total_job_count = 25`;
+- `existing_output_status` for `run_dir`, `records_dir`, and
+  `artefact_path` = `would_be_created` (no held-out output exists on
+  disk yet; the real run will create them).
+
+### Factory / adapter smoke check
+
+A no-fit smoke check using `build_heldout_configuration_factory`
+followed by `_apply_fit_rng_to_configuration` for every enumerated
+`HeldoutJob` confirmed:
+
+- `adapted_jobs_checked = 25`;
+- `main_jobs = 20`;
+- `sensitivity_jobs = 5`;
+- `unique_adapted_hashes = 9`;
+- the six `dcdi` / `centred_only` / seed-301 jobs at `fit_rng` 42, 43,
+  44, 45, 46, 47 produced six distinct adapted executable
+  configuration hashes.
+
+The earlier factory-only check that reported only four hashes
+inspected the pre-adapter configuration, before
+`_apply_fit_rng_to_configuration` had injected `seed_torch` /
+`seed_numpy`. The adapted-configuration count of nine is the one
+that governs actual on-disk path layout, and it is the relevant
+invariant for collision safety.
+
+### Collision-safety conclusion
+
+- DCDI `fit_rng` is injected through `seed_torch = seed_numpy`;
+- `seed_torch` and `seed_numpy` participate in the executable
+  Configuration hash;
+- therefore DCDI fit-RNG variants obtain distinct executable hashes
+  and distinct raw output directories under
+  `<results_root>/model_selection/<model>/<condition>/held_out_evaluation/seed<idx>/<hash_prefix>/`;
+- no adapter-level manual path disambiguation is required;
+- the existing `FileExistsError` infrastructure protection inside
+  `pipeline.run_single_fit` / `identity.create_run_directory` remains
+  intact.
+
+### Scope boundaries
+
+- No final DAGMA-vs-DCDI winner is encoded in code or artefacts. The
+  held-out artefact schema continues to reject the six forbidden
+  field names at every nesting depth.
+- No prior-loss experiment is started.
+- No held-out readout exists yet.
+- The real held-out run remains the next action; it has not been
+  executed by this entry.
+- Held-out readout and human-applied selection-study interpretation
+  come after the real run.
+
+### What does NOT change
+
+- The held-out artefact schema, validator, writer, or aggregator.
+- The held-out workload arithmetic (20 main + 5 sensitivity = 25).
+- The DCDI fit-RNG convention (`seed_torch = seed_numpy = 42` for
+  main; `seed_torch = seed_numpy = job.fit_rng` for sensitivity;
+  DAGMA seed fields remain null).
+- The repaired calibration handoff at hash prefix `4a67117a10b1`.
+- The selection rule for the base-model decision (held-out evidence
+  only, with the sensitivity addendum kept separate).
+
+### Forward note
+
+The real held-out evaluation may be launched against the live
+results tree using the wiring above. No source code, no test, no
+configuration JSON, no schema file, and no result artefact is
+created or modified by this entry; the change is documentation-only.
