@@ -63,6 +63,7 @@ HELDOUT_EVALUATION_FILENAME = "heldout_evaluation.json"
 RECORDS_DIRECTORY_NAME = "records"
 
 HELDOUT_SCM_SEEDS: tuple[int, ...] = (301, 302, 303, 304, 305)
+HELDOUT_SEED_POPULATION = "held_out_evaluation"
 MAIN_JOB_KIND = "main"
 SENSITIVITY_JOB_KIND = "fit_rng_sensitivity"
 
@@ -1133,6 +1134,231 @@ def _validate_heldout_fit_result(
     return dict(raw_result)
 
 
+# ---------------------------------------------------------------------------
+# Production-style fit-runner adapter (pipeline.run_single_fit wiring)
+# ---------------------------------------------------------------------------
+
+
+def _apply_fit_rng_to_configuration(
+    config: Any, job: HeldoutJob
+) -> Any:
+    """Apply the held-out fit_rng convention to a calibration-selected config.
+
+    For DCDI jobs the returned Configuration has ``seed_torch`` and
+    ``seed_numpy`` set to the held-out fit_rng value (``42`` for main
+    jobs, ``43..47`` for sensitivity jobs) and ``seed_dagma`` set to
+    ``None``. ``seed_torch`` and ``seed_numpy`` are part of the
+    canonical configuration payload that drives the configuration_hash,
+    so distinct fit_rng values produce distinct executable
+    configuration_hashes and therefore distinct on-disk per-run
+    directories. This is the path-disambiguation invariant the
+    held-out workload depends on.
+
+    For DAGMA jobs the returned Configuration is unchanged: the
+    DAGMA wrapper is deterministic by construction and the
+    Configuration validator requires DAGMA seed fields to be ``None``.
+
+    The function uses ``dataclasses.replace`` and never mutates the
+    supplied Configuration in place.
+    """
+    from dataclasses import replace as _dataclass_replace
+
+    if job.model == "dagma":
+        return config
+    if job.model != "dcdi":
+        raise _HeldoutInfrastructureError(
+            "held-out fit-rng override applies only to DCDI jobs; got "
+            f"job.model={job.model!r}"
+        )
+    if job.job_kind == MAIN_JOB_KIND:
+        target_fit_rng = int(DCDI_MAIN_FIT_RNG)
+    else:
+        if job.fit_rng is None or job.fit_rng not in SENSITIVITY_FIT_RNGS:
+            raise _HeldoutInfrastructureError(
+                "DCDI sensitivity job must carry fit_rng in "
+                f"{list(SENSITIVITY_FIT_RNGS)}; got "
+                f"job.fit_rng={job.fit_rng!r}"
+            )
+        target_fit_rng = int(job.fit_rng)
+    return _dataclass_replace(
+        config,
+        seed_torch=target_fit_rng,
+        seed_numpy=target_fit_rng,
+        seed_dagma=None,
+    )
+
+
+def _find_heldout_manifest_entry_index(
+    manifest: Any, job: HeldoutJob
+) -> int:
+    """Locate the held-out manifest entry that drives ``job``.
+
+    Held-out SCM seeds map deterministically to seed_replicate_index
+    by position in ``HELDOUT_SCM_SEEDS``: 301->0, 302->1, ..., 305->4.
+    The entry's ``seed_population`` must equal
+    ``HELDOUT_SEED_POPULATION``.
+    """
+    try:
+        seed_replicate_index = HELDOUT_SCM_SEEDS.index(int(job.scm_seed))
+    except ValueError as exc:
+        raise _HeldoutInfrastructureError(
+            "held-out job carries scm_seed "
+            f"{int(job.scm_seed)} which is not in "
+            f"{list(HELDOUT_SCM_SEEDS)}"
+        ) from exc
+    for entry_index, entry in enumerate(manifest.entries):
+        if (
+            entry.seed_population == HELDOUT_SEED_POPULATION
+            and int(entry.seed_replicate_index) == seed_replicate_index
+        ):
+            return entry_index
+    raise _HeldoutInfrastructureError(
+        "manifest does not contain a held-out evaluation entry for "
+        f"scm_seed={int(job.scm_seed)} "
+        f"(seed_replicate_index={seed_replicate_index}); the "
+        "configuration_factory must yield a Configuration whose "
+        f"seed_populations include {HELDOUT_SEED_POPULATION!r} with "
+        f"five SCM seeds {list(HELDOUT_SCM_SEEDS)}"
+    )
+
+
+def _adapt_pipeline_run_to_heldout_record(
+    *,
+    run_payload: Mapping[str, Any],
+    job: HeldoutJob,
+) -> dict[str, Any]:
+    """Translate a pipeline run.json payload into a held-out per-fit record.
+
+    Provenance: the held-out record carries the calibration-selected
+    ``configuration_hash_full`` / ``configuration_hash_prefix`` (from
+    the job), not the executable Configuration's hash. The pipeline's
+    own ``configuration_hash`` is preserved under
+    ``execution_configuration_hash_full`` so the audit trail keeps
+    both values without conflating them.
+    """
+    return {
+        "job_kind": job.job_kind,
+        "model": job.model,
+        "condition": job.condition,
+        "configuration_hash_full": job.configuration_hash_full,
+        "configuration_hash_prefix": job.configuration_hash_prefix,
+        "hyperparameters": dict(job.hyperparameters),
+        "scm_seed": int(job.scm_seed),
+        "fit_rng": job.fit_rng,
+        "calibration_run_hash_prefix": job.calibration_run_hash_prefix,
+        "sid": run_payload.get("sid"),
+        "shd": run_payload.get("shd"),
+        "mmd_primary": run_payload.get("mmd_primary"),
+        "runtime_seconds": run_payload.get("runtime_seconds"),
+        "graph_status": str(
+            run_payload.get("graph_status", "unknown")
+        ),
+        "sampler_status": str(
+            run_payload.get("sampler_status", "unknown")
+        ),
+        "training_status": str(
+            run_payload.get("training_status", "unknown")
+        ),
+        "n_iterations": run_payload.get("n_iterations"),
+        "run_id": run_payload.get("run_id"),
+        "execution_configuration_hash_full": run_payload.get(
+            "configuration_hash"
+        ),
+    }
+
+
+def _build_default_heldout_fit_runner(
+    *,
+    results_root: Path | str,
+    configuration_factory: Callable[[HeldoutJob], Any],
+) -> Callable[[HeldoutJob], dict[str, Any]]:
+    """Build the production-style held-out fit runner.
+
+    Parameters
+    ----------
+    results_root : Path or str
+        Root of the results tree. The held-out per-fit run directories
+        are created under
+        ``<results_root>/model_selection/<model>/<condition>/held_out_evaluation/seed<idx>/<hash_prefix>/``
+        by ``pipeline.run_single_fit``.
+    configuration_factory : callable
+        Required callable that returns the calibration-selected
+        ``Configuration`` for a given ``HeldoutJob``. The adapter
+        applies the held-out fit-rng seed convention on top of the
+        returned Configuration before constructing the Manifest.
+
+    Returns
+    -------
+    callable
+        A fit_runner that takes one ``HeldoutJob`` and returns the
+        per-fit record dict the held-out orchestrator persists.
+    """
+    if configuration_factory is None:
+        raise NotImplementedError(
+            "the default held-out production adapter requires a "
+            "configuration_factory that returns the calibration-"
+            "selected Configuration for each HeldoutJob; production "
+            "wiring of the held-out parent configurations is deferred "
+            "to a follow-up commit"
+        )
+
+    base_dir = Path(results_root) / "model_selection"
+
+    def _runner(job: HeldoutJob) -> dict[str, Any]:
+        # Lazy imports keep this module wrapper-free at import time;
+        # the wrapper code path activates only when the adapter is
+        # actually invoked.
+        from experiments.selection_study.loader import load_run
+        from experiments.selection_study.pipeline import run_single_fit
+        from experiments.selection_study.preflight import (
+            enumerate_manifest,
+        )
+
+        base_config = configuration_factory(job)
+        execution_config = _apply_fit_rng_to_configuration(
+            base_config, job
+        )
+        manifest = enumerate_manifest(
+            execution_config, base_dir=base_dir
+        )
+        entry_index = _find_heldout_manifest_entry_index(manifest, job)
+
+        try:
+            run_json_path = run_single_fit(
+                manifest, entry_index, run_root=base_dir
+            )
+        except FileExistsError as exc:
+            raise _HeldoutInfrastructureError(
+                "pipeline.run_single_fit refused to start because a "
+                "pre-existing raw run directory was detected for "
+                "held-out job "
+                f"(job_kind={job.job_kind!r}, model={job.model!r}, "
+                f"condition={job.condition!r}, "
+                f"scm_seed={int(job.scm_seed)}, "
+                f"fit_rng={job.fit_rng!r}): {exc}"
+            ) from exc
+
+        try:
+            run_payload = dict(load_run(run_json_path).data)
+        except _HeldoutInfrastructureError:
+            raise
+        except Exception as exc:
+            raise _HeldoutInfrastructureError(
+                "failed to load pipeline run.json for held-out job "
+                f"(job_kind={job.job_kind!r}, model={job.model!r}, "
+                f"condition={job.condition!r}, "
+                f"scm_seed={int(job.scm_seed)}, "
+                f"fit_rng={job.fit_rng!r}): "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+
+        return _adapt_pipeline_run_to_heldout_record(
+            run_payload=run_payload, job=job
+        )
+
+    return _runner
+
+
 def _atomic_write_json_record(
     record: Mapping[str, Any], output_path: Path
 ) -> None:
@@ -1172,6 +1398,7 @@ def run_held_out_evaluation(
     results_root: Path | str,
     *,
     fit_runner: Callable[[HeldoutJob], Mapping[str, Any]] | None = None,
+    configuration_factory: Callable[[HeldoutJob], Any] | None = None,
     now_fn: Callable[[], datetime] | None = None,
     force: bool = False,
 ) -> Path:
@@ -1256,14 +1483,21 @@ def run_held_out_evaluation(
         schema validation.
     """
     if fit_runner is None:
-        raise NotImplementedError(
-            "run_held_out_evaluation requires an explicit fit_runner "
-            "for now: production execution via pipeline.run_single_fit "
-            "is deferred because the existing pipeline does not accept "
-            "a fit_rng argument directly, and the DCDI fit-RNG "
-            "sensitivity probe requires distinct fit_rng values per "
-            "job. Supply a fit_runner callable that takes one "
-            "HeldoutJob and returns a per-fit record mapping."
+        if configuration_factory is None:
+            raise NotImplementedError(
+                "run_held_out_evaluation requires either an explicit "
+                "fit_runner or a configuration_factory. The default "
+                "production adapter calls pipeline.run_single_fit "
+                "after applying the held-out DCDI fit-RNG convention; "
+                "it needs a configuration_factory that returns the "
+                "calibration-selected Configuration for each "
+                "HeldoutJob. Wiring of the held-out parent "
+                "configurations is deferred to a follow-up commit; "
+                "until then, callers must supply either argument."
+            )
+        fit_runner = _build_default_heldout_fit_runner(
+            results_root=results_root,
+            configuration_factory=configuration_factory,
         )
 
     # Lazy import to avoid a circular import on package load between
@@ -1406,5 +1640,10 @@ __all__ = [
     "heldout_run_dir_path",
     "preflight_heldout_evaluation",
     "run_held_out_evaluation",
+    "HELDOUT_SEED_POPULATION",
     "_HeldoutInfrastructureError",
+    "_apply_fit_rng_to_configuration",
+    "_build_default_heldout_fit_runner",
+    "_find_heldout_manifest_entry_index",
+    "_adapt_pipeline_run_to_heldout_record",
 ]
