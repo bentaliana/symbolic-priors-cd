@@ -48,7 +48,7 @@ wandb/
 # Ignore experimental results by default.
 results/*
 
-# Keep curated calibration handoff artefacts for this repaired calibration run.
+# Keep curated calibration handoff artefacts.
 !results/model_selection/
 results/model_selection/*
 !results/model_selection/calibration/
@@ -60,3 +60,21 @@ results/model_selection/calibration/*
 !results/model_selection/calibration/4a67117a10b1/records/*.json
 !results/model_selection/calibration/4a67117a10b1/readout/
 !results/model_selection/calibration/4a67117a10b1/readout/**
+
+# Keep curated held-out evaluation artefacts.
+!results/model_selection/held_out/
+results/model_selection/held_out/*
+!results/model_selection/held_out/88da382e8672/
+!results/model_selection/held_out/88da382e8672/heldout_evaluation.json
+!results/model_selection/held_out/88da382e8672/records/
+!results/model_selection/held_out/88da382e8672/records/*.json
+!results/model_selection/held_out/88da382e8672/readout/
+!results/model_selection/held_out/88da382e8672/readout/**
+
+# Local execution/logging helpers.
+logs/
+run_calibration_once.py
+run_heldout_once.py
+run_heldout_preflight.py
+dry_run_report.json
+heldout_dry_run_report.json

@@ -1,0 +1,23 @@
+{
+  "calibration_run_hash_prefix": "4a67117a10b1",
+  "condition": "centred_only",
+  "configuration_hash_full": "dd39d6325e7d5184b24d60bcea9968064893d9131f63911758baa8b40142a1c3",
+  "configuration_hash_prefix": "dd39d6325e7d",
+  "execution_configuration_hash_full": "6ac2fa1b1402238ec412ed74087d47f9ed22f61d29a651d6c5e6af79e025b783",
+  "fit_rng": 42,
+  "graph_status": "valid_dag",
+  "hyperparameters": {
+    "reg_coeff": 0.1
+  },
+  "job_kind": "main",
+  "mmd_primary": 0.12001970322751579,
+  "model": "dcdi",
+  "n_iterations": 86600,
+  "run_id": "dcdi__centred_only__held_out_evaluation__seed2__cfg6ac2fa1b1402238ec412ed74087d47f9ed22f61d29a651d6c5e6af79e025b783",
+  "runtime_seconds": 960.2549001000007,
+  "sampler_status": "available",
+  "scm_seed": 303,
+  "shd": 23,
+  "sid": 71,
+  "training_status": "converged"
+}

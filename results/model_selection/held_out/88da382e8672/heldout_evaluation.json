@@ -1,0 +1,772 @@
+{
+  "artefact_type": "heldout_evaluation",
+  "fit_rng_sensitivity_addendum": {
+    "diagnostic_summary": {
+      "degenerate_metric_names": [],
+      "has_non_finite_seed_metric": false,
+      "main_evaluation_mmd_primary_at_seed_301": 0.12734844766889647,
+      "main_evaluation_shd_at_seed_301": 28.0,
+      "main_evaluation_sid_at_seed_301": 78.0,
+      "mmd_primary": {
+        "finite_count": 5,
+        "iqr": 0.060964657494684465,
+        "max": 0.20505995084606235,
+        "mean": 0.1468576398162918,
+        "median": 0.1320883235689646,
+        "min": 0.10261584885160957,
+        "non_finite_count": 0,
+        "q1": 0.11677970916006894,
+        "q3": 0.1777443666547534,
+        "std": 0.04307449821743907
+      },
+      "runtime_seconds": {
+        "finite_count": 5,
+        "iqr": 165.3748642000137,
+        "max": 1013.6139970999793,
+        "mean": 934.7553328799899,
+        "median": 1001.5132004999905,
+        "min": 811.9882216000115,
+        "non_finite_count": 0,
+        "q1": 840.6431904999772,
+        "q3": 1006.0180546999909,
+        "std": 99.6023798514772
+      },
+      "shd": {
+        "finite_count": 5,
+        "iqr": 2.0,
+        "max": 35.0,
+        "mean": 30.0,
+        "median": 31.0,
+        "min": 22.0,
+        "non_finite_count": 0,
+        "q1": 30.0,
+        "q3": 32.0,
+        "std": 4.847679857416329
+      },
+      "sid": {
+        "finite_count": 5,
+        "iqr": 13.0,
+        "max": 83.0,
+        "mean": 70.6,
+        "median": 68.0,
+        "min": 61.0,
+        "non_finite_count": 0,
+        "q1": 64.0,
+        "q3": 77.0,
+        "std": 9.181503144910424
+      }
+    },
+    "fit_rng_values": [
+      43,
+      44,
+      45,
+      46,
+      47
+    ],
+    "interpretation_note": "Diagnostic only. The fit-RNG sensitivity probe is a supplementary local sensitivity estimate at one selected DCDI configuration and one held-out SCM seed; it is not part of the main base-model decision evidence.",
+    "per_fit_records": [
+      {
+        "fit_rng": 43,
+        "graph_status": "valid_dag",
+        "mmd_primary": 0.1777443666547534,
+        "n_iterations": 94300,
+        "runtime_seconds": 1001.5132004999905,
+        "sampler_status": "available",
+        "shd": 31.0,
+        "sid": 64.0,
+        "training_status": "converged"
+      },
+      {
+        "fit_rng": 44,
+        "graph_status": "valid_dag",
+        "mmd_primary": 0.1320883235689646,
+        "n_iterations": 99900,
+        "runtime_seconds": 1013.6139970999793,
+        "sampler_status": "available",
+        "shd": 30.0,
+        "sid": 68.0,
+        "training_status": "converged"
+      },
+      {
+        "fit_rng": 45,
+        "graph_status": "valid_dag",
+        "mmd_primary": 0.11677970916006894,
+        "n_iterations": 80600,
+        "runtime_seconds": 811.9882216000115,
+        "sampler_status": "available",
+        "shd": 22.0,
+        "sid": 61.0,
+        "training_status": "converged"
+      },
+      {
+        "fit_rng": 46,
+        "graph_status": "valid_dag",
+        "mmd_primary": 0.20505995084606235,
+        "n_iterations": 105900,
+        "runtime_seconds": 1006.0180546999909,
+        "sampler_status": "available",
+        "shd": 35.0,
+        "sid": 83.0,
+        "training_status": "converged"
+      },
+      {
+        "fit_rng": 47,
+        "graph_status": "valid_dag",
+        "mmd_primary": 0.10261584885160957,
+        "n_iterations": 81700,
+        "runtime_seconds": 840.6431904999772,
+        "sampler_status": "available",
+        "shd": 32.0,
+        "sid": 77.0,
+        "training_status": "converged"
+      }
+    ],
+    "scm_seed": 301,
+    "target_cell": {
+      "condition": "centred_only",
+      "configuration_hash_full": "dd39d6325e7d5184b24d60bcea9968064893d9131f63911758baa8b40142a1c3",
+      "configuration_hash_prefix": "dd39d6325e7d",
+      "hyperparameters": {
+        "reg_coeff": 0.1
+      },
+      "model": "dcdi"
+    }
+  },
+  "generated_at_utc": "2026-05-23T14:09:25Z",
+  "heldout_run_hash_full": "88da382e8672650e44f44e675011dda1a81868c9075acb86faef6c6caf23fd17",
+  "heldout_run_hash_prefix": "88da382e8672",
+  "main_evaluation": {
+    "cells": {
+      "centred_only": {
+        "dagma": {
+          "aggregate_metrics": {
+            "degenerate_metric_names": [],
+            "has_non_finite_seed_metric": false,
+            "mmd_primary": {
+              "finite_count": 5,
+              "iqr": 0.002567281136905958,
+              "max": 0.0184491321541833,
+              "mean": 0.005814472573953375,
+              "median": 0.0032764204885345843,
+              "min": 0.00047128080441082856,
+              "non_finite_count": 0,
+              "q1": 0.002154124142866101,
+              "q3": 0.004721405279772059,
+              "std": 0.007232201879947656
+            },
+            "runtime_seconds": {
+              "finite_count": 5,
+              "iqr": 0.11215559998527169,
+              "max": 1.139799900003709,
+              "mean": 1.0513981799944303,
+              "median": 1.106677200004924,
+              "min": 0.845379599952139,
+              "non_finite_count": 0,
+              "q1": 1.0264893000130542,
+              "q3": 1.1386448999983259,
+              "std": 0.1240430690626508
+            },
+            "shd": {
+              "finite_count": 5,
+              "iqr": 2.0,
+              "max": 3.0,
+              "mean": 1.0,
+              "median": 0.0,
+              "min": 0.0,
+              "non_finite_count": 0,
+              "q1": 0.0,
+              "q3": 2.0,
+              "std": 1.4142135623730951
+            },
+            "sid": {
+              "finite_count": 5,
+              "iqr": 8.0,
+              "max": 13.0,
+              "mean": 4.2,
+              "median": 0.0,
+              "min": 0.0,
+              "non_finite_count": 0,
+              "q1": 0.0,
+              "q3": 8.0,
+              "std": 6.016643582596529
+            },
+            "status_counts": {
+              "graph_status": {
+                "valid_dag": 5
+              },
+              "sampler_status": {
+                "available": 5
+              },
+              "training_status": {
+                "converged": 5
+              }
+            }
+          },
+          "per_seed_records": [
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.0184491321541833,
+              "n_iterations": null,
+              "runtime_seconds": 1.139799900003709,
+              "sampler_status": "available",
+              "seed_value": 301,
+              "shd": 2.0,
+              "sid": 13.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.004721405279772059,
+              "n_iterations": null,
+              "runtime_seconds": 1.106677200004924,
+              "sampler_status": "available",
+              "seed_value": 302,
+              "shd": 0.0,
+              "sid": 0.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.0032764204885345843,
+              "n_iterations": null,
+              "runtime_seconds": 0.845379599952139,
+              "sampler_status": "available",
+              "seed_value": 303,
+              "shd": 3.0,
+              "sid": 8.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.00047128080441082856,
+              "n_iterations": null,
+              "runtime_seconds": 1.0264893000130542,
+              "sampler_status": "available",
+              "seed_value": 304,
+              "shd": 0.0,
+              "sid": 0.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.002154124142866101,
+              "n_iterations": null,
+              "runtime_seconds": 1.1386448999983259,
+              "sampler_status": "available",
+              "seed_value": 305,
+              "shd": 0.0,
+              "sid": 0.0,
+              "training_status": "converged"
+            }
+          ]
+        },
+        "dcdi": {
+          "aggregate_metrics": {
+            "degenerate_metric_names": [],
+            "has_non_finite_seed_metric": false,
+            "mmd_primary": {
+              "finite_count": 5,
+              "iqr": 0.021030291725186473,
+              "max": 0.12900258859841576,
+              "mean": 0.11588378616596792,
+              "median": 0.12001970322751579,
+              "min": 0.09673003539130162,
+              "non_finite_count": 0,
+              "q1": 0.10631815594371,
+              "q3": 0.12734844766889647,
+              "std": 0.013955417414621984
+            },
+            "runtime_seconds": {
+              "finite_count": 5,
+              "iqr": 79.67939319997095,
+              "max": 1071.737140799989,
+              "mean": 976.6540220399969,
+              "median": 970.2096392000094,
+              "min": 841.134136800014,
+              "non_finite_count": 0,
+              "q1": 960.2549001000007,
+              "q3": 1039.9342932999716,
+              "std": 89.05236208252997
+            },
+            "shd": {
+              "finite_count": 5,
+              "iqr": 4.0,
+              "max": 38.0,
+              "mean": 30.4,
+              "median": 31.0,
+              "min": 23.0,
+              "non_finite_count": 0,
+              "q1": 28.0,
+              "q3": 32.0,
+              "std": 5.504543577809154
+            },
+            "sid": {
+              "finite_count": 5,
+              "iqr": 20.0,
+              "max": 78.0,
+              "mean": 63.4,
+              "median": 69.0,
+              "min": 48.0,
+              "non_finite_count": 0,
+              "q1": 51.0,
+              "q3": 71.0,
+              "std": 13.164345787011218
+            },
+            "status_counts": {
+              "graph_status": {
+                "valid_dag": 5
+              },
+              "sampler_status": {
+                "available": 5
+              },
+              "training_status": {
+                "converged": 5
+              }
+            }
+          },
+          "per_seed_records": [
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.12734844766889647,
+              "n_iterations": 96300,
+              "runtime_seconds": 970.2096392000094,
+              "sampler_status": "available",
+              "seed_value": 301,
+              "shd": 28.0,
+              "sid": 78.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.10631815594371,
+              "n_iterations": 79900,
+              "runtime_seconds": 841.134136800014,
+              "sampler_status": "available",
+              "seed_value": 302,
+              "shd": 31.0,
+              "sid": 51.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.12001970322751579,
+              "n_iterations": 86600,
+              "runtime_seconds": 960.2549001000007,
+              "sampler_status": "available",
+              "seed_value": 303,
+              "shd": 23.0,
+              "sid": 71.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.12900258859841576,
+              "n_iterations": 96400,
+              "runtime_seconds": 1039.9342932999716,
+              "sampler_status": "available",
+              "seed_value": 304,
+              "shd": 38.0,
+              "sid": 69.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.09673003539130162,
+              "n_iterations": 91500,
+              "runtime_seconds": 1071.737140799989,
+              "sampler_status": "available",
+              "seed_value": 305,
+              "shd": 32.0,
+              "sid": 48.0,
+              "training_status": "converged"
+            }
+          ]
+        }
+      },
+      "standardised": {
+        "dagma": {
+          "aggregate_metrics": {
+            "degenerate_metric_names": [],
+            "has_non_finite_seed_metric": false,
+            "mmd_primary": {
+              "finite_count": 5,
+              "iqr": 0.01055605949169039,
+              "max": 0.21699211381008174,
+              "mean": 0.12135898121296962,
+              "median": 0.09721597837705162,
+              "min": 0.0930076138867018,
+              "non_finite_count": 0,
+              "q1": 0.09451157024966125,
+              "q3": 0.10506762974135164,
+              "std": 0.05366230584345379
+            },
+            "runtime_seconds": {
+              "finite_count": 5,
+              "iqr": 0.18360530002973974,
+              "max": 1.9856449000071734,
+              "mean": 1.4749967600102536,
+              "median": 1.4034049999900162,
+              "min": 1.084417800011579,
+              "non_finite_count": 0,
+              "q1": 1.35895540000638,
+              "q3": 1.5425607000361197,
+              "std": 0.3303291200462513
+            },
+            "shd": {
+              "finite_count": 5,
+              "iqr": 1.0,
+              "max": 29.0,
+              "mean": 25.8,
+              "median": 26.0,
+              "min": 23.0,
+              "non_finite_count": 0,
+              "q1": 25.0,
+              "q3": 26.0,
+              "std": 2.16794833886788
+            },
+            "sid": {
+              "finite_count": 5,
+              "iqr": 5.0,
+              "max": 71.0,
+              "mean": 66.6,
+              "median": 65.0,
+              "min": 64.0,
+              "non_finite_count": 0,
+              "q1": 64.0,
+              "q3": 69.0,
+              "std": 3.2093613071762426
+            },
+            "status_counts": {
+              "graph_status": {
+                "valid_dag": 5
+              },
+              "sampler_status": {
+                "available": 5
+              },
+              "training_status": {
+                "converged": 5
+              }
+            }
+          },
+          "per_seed_records": [
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.09721597837705162,
+              "n_iterations": null,
+              "runtime_seconds": 1.084417800011579,
+              "sampler_status": "available",
+              "seed_value": 301,
+              "shd": 29.0,
+              "sid": 64.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.0930076138867018,
+              "n_iterations": null,
+              "runtime_seconds": 1.5425607000361197,
+              "sampler_status": "available",
+              "seed_value": 302,
+              "shd": 26.0,
+              "sid": 64.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.09451157024966125,
+              "n_iterations": null,
+              "runtime_seconds": 1.4034049999900162,
+              "sampler_status": "available",
+              "seed_value": 303,
+              "shd": 23.0,
+              "sid": 65.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.21699211381008174,
+              "n_iterations": null,
+              "runtime_seconds": 1.9856449000071734,
+              "sampler_status": "available",
+              "seed_value": 304,
+              "shd": 26.0,
+              "sid": 71.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": null,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.10506762974135164,
+              "n_iterations": null,
+              "runtime_seconds": 1.35895540000638,
+              "sampler_status": "available",
+              "seed_value": 305,
+              "shd": 25.0,
+              "sid": 69.0,
+              "training_status": "converged"
+            }
+          ]
+        },
+        "dcdi": {
+          "aggregate_metrics": {
+            "degenerate_metric_names": [],
+            "has_non_finite_seed_metric": false,
+            "mmd_primary": {
+              "finite_count": 5,
+              "iqr": 0.01552959353340952,
+              "max": 0.1567517622046334,
+              "mean": 0.14197222340635784,
+              "median": 0.14520574250117319,
+              "min": 0.1263855457497403,
+              "non_finite_count": 0,
+              "q1": 0.13299423652141637,
+              "q3": 0.1485238300548259,
+              "std": 0.012200027985418724
+            },
+            "runtime_seconds": {
+              "finite_count": 5,
+              "iqr": 136.18889280001167,
+              "max": 978.4494090000517,
+              "mean": 902.6897642000113,
+              "median": 932.6196746000205,
+              "min": 787.3359335999703,
+              "non_finite_count": 0,
+              "q1": 839.4274555000011,
+              "q3": 975.6163483000128,
+              "std": 85.53104103399214
+            },
+            "shd": {
+              "finite_count": 5,
+              "iqr": 6.0,
+              "max": 33.0,
+              "mean": 29.6,
+              "median": 29.0,
+              "min": 26.0,
+              "non_finite_count": 0,
+              "q1": 27.0,
+              "q3": 33.0,
+              "std": 3.2863353450309964
+            },
+            "sid": {
+              "finite_count": 5,
+              "iqr": 21.0,
+              "max": 84.0,
+              "mean": 68.8,
+              "median": 76.0,
+              "min": 45.0,
+              "non_finite_count": 0,
+              "q1": 59.0,
+              "q3": 80.0,
+              "std": 16.361540269791227
+            },
+            "status_counts": {
+              "graph_status": {
+                "valid_dag": 5
+              },
+              "sampler_status": {
+                "available": 5
+              },
+              "training_status": {
+                "converged": 5
+              }
+            }
+          },
+          "per_seed_records": [
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.1263855457497403,
+              "n_iterations": 78200,
+              "runtime_seconds": 787.3359335999703,
+              "sampler_status": "available",
+              "seed_value": 301,
+              "shd": 29.0,
+              "sid": 76.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.14520574250117319,
+              "n_iterations": 90700,
+              "runtime_seconds": 932.6196746000205,
+              "sampler_status": "available",
+              "seed_value": 302,
+              "shd": 33.0,
+              "sid": 80.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.13299423652141637,
+              "n_iterations": 90700,
+              "runtime_seconds": 978.4494090000517,
+              "sampler_status": "available",
+              "seed_value": 303,
+              "shd": 33.0,
+              "sid": 45.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.1485238300548259,
+              "n_iterations": 92900,
+              "runtime_seconds": 975.6163483000128,
+              "sampler_status": "available",
+              "seed_value": 304,
+              "shd": 27.0,
+              "sid": 59.0,
+              "training_status": "converged"
+            },
+            {
+              "fit_rng": 42,
+              "graph_status": "valid_dag",
+              "mmd_primary": 0.1567517622046334,
+              "n_iterations": 78000,
+              "runtime_seconds": 839.4274555000011,
+              "sampler_status": "available",
+              "seed_value": 305,
+              "shd": 26.0,
+              "sid": 84.0,
+              "training_status": "converged"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "main_heldout_seeds": [
+    301,
+    302,
+    303,
+    304,
+    305
+  ],
+  "parent_calibration_run_hash_full": "4a67117a10b1e52ee247a11b28e43b03020ae3504d9008d7fa699b6d8e516598",
+  "parent_calibration_run_hash_prefix": "4a67117a10b1",
+  "policy_refs": {
+    "fit_rng_policy_ref": "dcdi_fixed_fit_rng_42_v1",
+    "heldout_fit_rng_sensitivity_ref": "dcdi_fit_rng_sensitivity_seeds_43_44_45_46_47_v1",
+    "intervention_policy_ref": "all_nodes_plus_minus_2_v1",
+    "selection_rule_id": "within_model_sid_band_mmd_shd_hash_v1",
+    "selection_rule_ref": "within_model_calibration_ranking_rule"
+  },
+  "schema_version": 1,
+  "selected_configurations_used": [
+    {
+      "condition": "centred_only",
+      "configuration_hash_full": "06ee98d1385204baaa4d9f12196a733e94ecd4d53d38ecef184afda1abef07c2",
+      "configuration_hash_prefix": "06ee98d13852",
+      "hyperparameters": {
+        "lambda1": 0.25
+      },
+      "model": "dagma",
+      "selection_metrics_summary": {
+        "degeneracy_flag": false,
+        "mean_mmd_primary": 0.0059540658211281626,
+        "mean_shd": 0.0,
+        "mean_sid": 0.0
+      }
+    },
+    {
+      "condition": "centred_only",
+      "configuration_hash_full": "dd39d6325e7d5184b24d60bcea9968064893d9131f63911758baa8b40142a1c3",
+      "configuration_hash_prefix": "dd39d6325e7d",
+      "hyperparameters": {
+        "reg_coeff": 0.1
+      },
+      "model": "dcdi",
+      "selection_metrics_summary": {
+        "degeneracy_flag": false,
+        "mean_mmd_primary": 0.08875084654991505,
+        "mean_shd": 30.5,
+        "mean_sid": 60.0
+      }
+    },
+    {
+      "condition": "standardised",
+      "configuration_hash_full": "7b345b1b2e85bf154eb822baa248f85a30afe8de3f8bec8b1a22b3c535633e9f",
+      "configuration_hash_prefix": "7b345b1b2e85",
+      "hyperparameters": {
+        "lambda1": 0.1
+      },
+      "model": "dagma",
+      "selection_metrics_summary": {
+        "degeneracy_flag": false,
+        "mean_mmd_primary": 0.09699846001057562,
+        "mean_shd": 18.0,
+        "mean_sid": 46.0
+      }
+    },
+    {
+      "condition": "standardised",
+      "configuration_hash_full": "16f92df3d6af8c6abc5c9e503632c5c3c076186a09918eadaa8889bf5fb72b25",
+      "configuration_hash_prefix": "16f92df3d6af",
+      "hyperparameters": {
+        "reg_coeff": 0.3
+      },
+      "model": "dcdi",
+      "selection_metrics_summary": {
+        "degeneracy_flag": false,
+        "mean_mmd_primary": 0.1028451515945459,
+        "mean_shd": 25.0,
+        "mean_sid": 46.0
+      }
+    }
+  ],
+  "sensitivity_spec": {
+    "condition": "centred_only",
+    "fit_rngs": [
+      43,
+      44,
+      45,
+      46,
+      47
+    ],
+    "model": "dcdi",
+    "scm_seed": 301
+  },
+  "status_summary": {
+    "main_records_count": 20,
+    "main_status_counts": {
+      "graph_status": {
+        "valid_dag": 20
+      },
+      "sampler_status": {
+        "available": 20
+      },
+      "training_status": {
+        "converged": 20
+      }
+    },
+    "sensitivity_records_count": 5,
+    "sensitivity_status_counts": {
+      "graph_status": {
+        "valid_dag": 5
+      },
+      "sampler_status": {
+        "available": 5
+      },
+      "training_status": {
+        "converged": 5
+      }
+    },
+    "total_records": 25
+  }
+}
