@@ -767,10 +767,14 @@ def test_preflight_text_contains_no_forbidden_language(
     _assert_no_forbidden_language(serialised)
 
 
-def test_held_out_orchestration_remains_unimplemented() -> None:
+def test_held_out_orchestration_requires_explicit_fit_runner(
+    tmp_path: Path,
+) -> None:
+    """Production execution without an injected fit_runner is deferred."""
     from experiments.selection_study.held_out import (
         run_held_out_evaluation,
     )
 
-    with pytest.raises(NotImplementedError):
-        run_held_out_evaluation(None)
+    artefact_path = _write_synthetic_artefact(tmp_path)
+    with pytest.raises(NotImplementedError, match="fit_runner"):
+        run_held_out_evaluation(artefact_path, tmp_path / "results")

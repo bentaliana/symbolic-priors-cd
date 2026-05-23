@@ -31,10 +31,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, NoReturn, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from experiments.selection_study.selection_artefact import (
     CALIBRATION_SEEDS,
@@ -942,30 +944,434 @@ def preflight_heldout_evaluation(
 
 
 # ---------------------------------------------------------------------------
-# Held-out orchestration entry point (not implemented in this commit)
+# Held-out orchestration entry point
 # ---------------------------------------------------------------------------
 
 
-def run_held_out_evaluation(config: Any) -> NoReturn:
-    """Run the held-out evaluation runs.
+class _HeldoutInfrastructureError(Exception):
+    """Held-out infrastructure failure that aborts the run.
+
+    Raised when the orchestrator cannot continue safely: a fit_runner
+    raised a ``FileExistsError`` indicating a pre-existing per-fit
+    output directory, or the fit_runner returned a structurally
+    broken result that cannot be translated into a degenerate record.
+    Records already persisted before the failure remain on disk for
+    inspection.
+    """
+
+
+_FAILED_STATUS_VALUE = "failed"
+
+# Fields that every fit_runner return value must carry; the
+# orchestrator cross-checks the identity-bearing subset against the
+# requesting ``HeldoutJob`` and translates a mismatch into a fatal
+# infrastructure error. Metric fields may be ``None`` / non-finite on
+# a failed fit; the artefact aggregator handles non-finite values.
+_REQUIRED_FIT_RESULT_FIELDS: tuple[str, ...] = (
+    "job_kind",
+    "model",
+    "condition",
+    "configuration_hash_full",
+    "configuration_hash_prefix",
+    "hyperparameters",
+    "scm_seed",
+    "fit_rng",
+    "sid",
+    "shd",
+    "mmd_primary",
+    "runtime_seconds",
+    "graph_status",
+    "sampler_status",
+    "training_status",
+)
+
+
+def _record_filename_for_job(job: HeldoutJob) -> str:
+    """Build the deterministic on-disk filename for a held-out job record.
+
+    Main jobs use ``<model>_<condition>_<hash_prefix>_seed<scm_seed>.json``.
+    Sensitivity jobs append ``_fitrng<fit_rng>`` so the DCDI seed-301
+    fit_rng=42 main record does not collide with the fit_rng=43..47
+    sensitivity records that share the same model, condition,
+    configuration_hash_prefix, and scm_seed.
+    """
+    base = (
+        f"{job.model}_{job.condition}_"
+        f"{job.configuration_hash_prefix}_seed{int(job.scm_seed)}"
+    )
+    if job.job_kind == SENSITIVITY_JOB_KIND:
+        return f"{base}_fitrng{int(job.fit_rng)}.json"
+    return f"{base}.json"
+
+
+def _expected_run_id_for_job(job: HeldoutJob) -> str:
+    """Build a deterministic ``run_id`` for a held-out job."""
+    fit_rng_label = (
+        "none" if job.fit_rng is None else str(int(job.fit_rng))
+    )
+    return (
+        f"{job.model}__{job.condition}__held_out__"
+        f"scm{int(job.scm_seed)}__"
+        f"fitrng{fit_rng_label}__"
+        f"cfg{job.configuration_hash_full}"
+    )
+
+
+def _elapsed_seconds(start: datetime, end: datetime) -> float:
+    """Return the wall-clock interval ``(end - start)`` in seconds."""
+    return float((end - start).total_seconds())
+
+
+def _build_degenerate_heldout_record(
+    *,
+    job: HeldoutJob,
+    runtime_seconds: float,
+    failure_type: str,
+    failure_message: str,
+) -> dict[str, Any]:
+    """Build a structurally valid degenerate record for a failed fit.
+
+    The record carries the job's identity verbatim, marks every
+    metric as ``None`` (the artefact aggregator treats ``None`` as
+    non-finite), and records ``training_status="failed"`` /
+    ``graph_status="failed"`` / ``sampler_status="failed"`` so the
+    cell's status counts surface the failure honestly. The
+    ``failure_type`` and ``failure_message`` fields preserve the
+    underlying exception type and message for offline auditing.
+    """
+    return {
+        "job_kind": job.job_kind,
+        "model": job.model,
+        "condition": job.condition,
+        "configuration_hash_full": job.configuration_hash_full,
+        "configuration_hash_prefix": job.configuration_hash_prefix,
+        "hyperparameters": dict(job.hyperparameters),
+        "scm_seed": int(job.scm_seed),
+        "fit_rng": job.fit_rng,
+        "calibration_run_hash_prefix": job.calibration_run_hash_prefix,
+        "sid": None,
+        "shd": None,
+        "mmd_primary": None,
+        "runtime_seconds": float(runtime_seconds),
+        "graph_status": _FAILED_STATUS_VALUE,
+        "sampler_status": _FAILED_STATUS_VALUE,
+        "training_status": _FAILED_STATUS_VALUE,
+        "n_iterations": None,
+        "run_id": _expected_run_id_for_job(job),
+        "failure_type": str(failure_type),
+        "failure_message": str(failure_message),
+    }
+
+
+def _validate_heldout_fit_result(
+    raw_result: Any, *, job: HeldoutJob
+) -> dict[str, Any]:
+    """Cross-check a fit_runner return value against the job identity.
+
+    A structurally broken return value or an identity mismatch is an
+    infrastructure failure: the orchestrator aborts the run rather
+    than masking the broken assumption with a degenerate record.
+    """
+    if not isinstance(raw_result, Mapping):
+        raise _HeldoutInfrastructureError(
+            "fit_runner result for held-out job "
+            f"(job_kind={job.job_kind!r}, model={job.model!r}, "
+            f"condition={job.condition!r}, "
+            f"scm_seed={int(job.scm_seed)}, "
+            f"fit_rng={job.fit_rng!r}) is not a mapping; got "
+            f"{type(raw_result).__name__}"
+        )
+    missing = [
+        name
+        for name in _REQUIRED_FIT_RESULT_FIELDS
+        if name not in raw_result
+    ]
+    if missing:
+        raise _HeldoutInfrastructureError(
+            "fit_runner result for held-out job "
+            f"(job_kind={job.job_kind!r}, model={job.model!r}, "
+            f"condition={job.condition!r}, "
+            f"scm_seed={int(job.scm_seed)}, "
+            f"fit_rng={job.fit_rng!r}) is missing required "
+            f"field(s): {missing}"
+        )
+    identity_checks: tuple[tuple[str, Any], ...] = (
+        ("job_kind", job.job_kind),
+        ("model", job.model),
+        ("condition", job.condition),
+        ("configuration_hash_full", job.configuration_hash_full),
+        ("configuration_hash_prefix", job.configuration_hash_prefix),
+        ("scm_seed", int(job.scm_seed)),
+        ("fit_rng", job.fit_rng),
+    )
+    for field_name, expected in identity_checks:
+        actual = raw_result.get(field_name)
+        if actual != expected:
+            raise _HeldoutInfrastructureError(
+                "fit_runner result for held-out job "
+                f"(job_kind={job.job_kind!r}, "
+                f"model={job.model!r}, condition={job.condition!r}, "
+                f"scm_seed={int(job.scm_seed)}, "
+                f"fit_rng={job.fit_rng!r}) has mismatching "
+                f"{field_name}: expected {expected!r}, got {actual!r}"
+            )
+    if (
+        "calibration_run_hash_prefix" in raw_result
+        and raw_result["calibration_run_hash_prefix"]
+        != job.calibration_run_hash_prefix
+    ):
+        raise _HeldoutInfrastructureError(
+            "fit_runner result for held-out job "
+            f"(job_kind={job.job_kind!r}, model={job.model!r}, "
+            f"condition={job.condition!r}, "
+            f"scm_seed={int(job.scm_seed)}, "
+            f"fit_rng={job.fit_rng!r}) has mismatching "
+            "calibration_run_hash_prefix: expected "
+            f"{job.calibration_run_hash_prefix!r}, got "
+            f"{raw_result['calibration_run_hash_prefix']!r}"
+        )
+    return dict(raw_result)
+
+
+def _atomic_write_json_record(
+    record: Mapping[str, Any], output_path: Path
+) -> None:
+    """Write a per-fit record JSON file atomically into its parent directory."""
+    parent = output_path.parent
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f"{output_path.name}.",
+        suffix=".tmp",
+        dir=str(parent),
+    )
+    tmp_path = Path(tmp_name)
+    moved = False
+    try:
+        with os.fdopen(
+            fd, "w", encoding="utf-8", newline="\n"
+        ) as handle:
+            json.dump(
+                record,
+                handle,
+                sort_keys=True,
+                indent=2,
+                ensure_ascii=True,
+            )
+            handle.write("\n")
+        os.replace(tmp_path, output_path)
+        moved = True
+    finally:
+        if not moved:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
+def run_held_out_evaluation(
+    selected_configurations_path: Path | str,
+    results_root: Path | str,
+    *,
+    fit_runner: Callable[[HeldoutJob], Mapping[str, Any]] | None = None,
+    now_fn: Callable[[], datetime] | None = None,
+    force: bool = False,
+) -> Path:
+    """Drive the held-out evaluation workload through an injected fit_runner.
+
+    The orchestrator loads the calibration handoff artefact, enumerates
+    the 25 held-out jobs (20 main + 5 fit-RNG sensitivity), creates
+    the canonical held-out run directory and records directory, drives
+    every job through ``fit_runner`` one at a time, persists each
+    per-fit record immediately as JSON, and finally builds, validates,
+    and writes ``heldout_evaluation.json``.
+
+    The orchestrator never invokes any model fit directly: it does
+    not import any wrapper module and does not call
+    ``pipeline.run_single_fit``. ``fit_runner`` is the only execution
+    path; supplying ``None`` raises ``NotImplementedError`` because a
+    production execution adapter requires translating the held-out
+    DCDI fit-RNG variation into the lower-level
+    ``seed_torch`` / ``seed_numpy`` fields of an executable
+    configuration, which is the responsibility of a later commit.
+
+    Failure handling
+    ----------------
+    - ``fit_runner`` raising ``FileExistsError`` is treated as a
+      pre-existing per-run directory observed by the runner: the
+      orchestrator translates the exception into
+      ``_HeldoutInfrastructureError`` and aborts the run without
+      writing the final artefact. Records already persisted to disk
+      are not removed.
+    - ``fit_runner`` raising any other exception is treated as a
+      model-fit failure: a structurally valid degenerate record is
+      persisted in the failed job's slot and orchestration continues
+      with the remaining jobs.
+    - The final ``heldout_evaluation.json`` is written only after
+      every one of the 25 jobs has a record on disk.
 
     Parameters
     ----------
-    config : Any
-        The resolved runner configuration. The concrete type is not
-        fixed in the current state.
+    selected_configurations_path : Path or str
+        Path to a written ``selected_configurations.json`` artefact
+        from the calibration handoff.
+    results_root : Path or str
+        Root of the results tree. The held-out run directory is
+        created at
+        ``<results_root>/model_selection/held_out/<heldout_run_hash12>/``.
+    fit_runner : callable or None, optional
+        Required injection point for the per-job runner. Must accept
+        a single ``HeldoutJob`` and return a JSON-safe mapping
+        carrying the documented per-fit record fields plus identity
+        fields matching the job.
+    now_fn : callable or None, optional
+        Optional injection point for the wall-clock time source.
+        When omitted, ``datetime.now(tz=timezone.utc)`` is used.
+    force : bool, optional
+        When ``False`` (the default), the orchestrator refuses to
+        overwrite an existing ``heldout_evaluation.json`` or any
+        pre-existing per-fit record file before any fit is run. When
+        ``True``, existing files are replaced atomically.
+
+    Returns
+    -------
+    Path
+        The on-disk path to the written ``heldout_evaluation.json``.
 
     Raises
     ------
     NotImplementedError
-        Always. Held-out orchestration is intentionally out of scope
-        for the preflight commit; this entry point remains a stub
-        until a later commit implements end-to-end execution.
+        When ``fit_runner`` is ``None``.
+    FileNotFoundError
+        When the input ``selected_configurations.json`` does not
+        exist.
+    FileExistsError
+        When ``heldout_evaluation.json`` or any per-fit record
+        already exists and ``force`` is ``False``.
+    _HeldoutInfrastructureError
+        When ``fit_runner`` raises ``FileExistsError`` or returns a
+        structurally broken or identity-mismatching mapping. The
+        final artefact is not written in either case.
+    ValueError
+        When the input artefact fails validation, when the workload
+        invariants are violated, or when the final artefact fails
+        schema validation.
     """
-    raise NotImplementedError(
-        "experiments.selection_study.held_out.run_held_out_evaluation "
-        "is not implemented yet."
+    if fit_runner is None:
+        raise NotImplementedError(
+            "run_held_out_evaluation requires an explicit fit_runner "
+            "for now: production execution via pipeline.run_single_fit "
+            "is deferred because the existing pipeline does not accept "
+            "a fit_rng argument directly, and the DCDI fit-RNG "
+            "sensitivity probe requires distinct fit_rng values per "
+            "job. Supply a fit_runner callable that takes one "
+            "HeldoutJob and returns a per-fit record mapping."
+        )
+
+    # Lazy import to avoid a circular import on package load between
+    # held_out.py and held_out_artefact.py.
+    from experiments.selection_study.held_out_artefact import (
+        build_heldout_evaluation_artefact,
+        write_heldout_evaluation_artefact,
     )
+
+    workload = enumerate_heldout_workload(selected_configurations_path)
+    resolved_now_fn: Callable[[], datetime] = (
+        now_fn if now_fn is not None else _default_now_fn
+    )
+
+    hash_inputs = _heldout_run_hash_inputs_from_workload(workload)
+    heldout_run_hash_full = compute_heldout_run_hash_full(**hash_inputs)
+    heldout_run_hash12 = heldout_run_hash_full[:HASH_PREFIX_LENGTH]
+
+    run_dir = heldout_run_dir_path(
+        heldout_run_hash12=heldout_run_hash12,
+        results_root=results_root,
+    )
+    records_dir = heldout_records_dir_path(
+        heldout_run_hash12=heldout_run_hash12,
+        results_root=results_root,
+    )
+    artefact_path = heldout_evaluation_path(
+        heldout_run_hash12=heldout_run_hash12,
+        results_root=results_root,
+    )
+
+    if artefact_path.exists() and not force:
+        raise FileExistsError(
+            "refusing to overwrite existing held-out evaluation "
+            f"artefact at {artefact_path}; pass force=True to allow "
+            "overwrite"
+        )
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    records_dir.mkdir(parents=True, exist_ok=True)
+
+    jobs: list[HeldoutJob] = list(workload.main_jobs) + list(
+        workload.sensitivity_jobs
+    )
+    records: list[dict[str, Any]] = []
+
+    for job in jobs:
+        record_path = records_dir / _record_filename_for_job(job)
+        if record_path.exists() and not force:
+            raise FileExistsError(
+                "refusing to overwrite existing held-out per-fit "
+                f"record at {record_path}; pass force=True to allow "
+                "overwrite"
+            )
+
+        start_dt = resolved_now_fn()
+        failure_type: str | None = None
+        failure_message: str | None = None
+        raw_result: Any = None
+        try:
+            raw_result = fit_runner(job)
+        except FileExistsError as exc:
+            raise _HeldoutInfrastructureError(
+                "fit_runner raised FileExistsError on held-out job "
+                f"(job_kind={job.job_kind!r}, model={job.model!r}, "
+                f"condition={job.condition!r}, "
+                f"scm_seed={int(job.scm_seed)}, "
+                f"fit_rng={job.fit_rng!r}); aborting the held-out run "
+                "without writing the final artefact: "
+                f"{exc}"
+            ) from exc
+        except _HeldoutInfrastructureError:
+            # Re-raise unchanged: a structurally broken fit_runner
+            # return value already aborted the run via the
+            # orchestrator's own validation path.
+            raise
+        except Exception as exc:
+            failure_type = type(exc).__name__
+            failure_message = str(exc)
+
+        end_dt = resolved_now_fn()
+        runtime_seconds = _elapsed_seconds(start_dt, end_dt)
+
+        if failure_type is not None:
+            record = _build_degenerate_heldout_record(
+                job=job,
+                runtime_seconds=runtime_seconds,
+                failure_type=failure_type,
+                failure_message=failure_message or "",
+            )
+        else:
+            record = _validate_heldout_fit_result(raw_result, job=job)
+            if "runtime_seconds" not in record:
+                record["runtime_seconds"] = runtime_seconds
+
+        _atomic_write_json_record(record, record_path)
+        records.append(record)
+
+    generated_at_utc = _format_utc(resolved_now_fn())
+    artefact = build_heldout_evaluation_artefact(
+        workload=workload,
+        records=records,
+        generated_at_utc=generated_at_utc,
+    )
+    write_heldout_evaluation_artefact(
+        artefact, artefact_path, force=force
+    )
+    return artefact_path
 
 
 __all__ = [
@@ -1000,4 +1406,5 @@ __all__ = [
     "heldout_run_dir_path",
     "preflight_heldout_evaluation",
     "run_held_out_evaluation",
+    "_HeldoutInfrastructureError",
 ]
