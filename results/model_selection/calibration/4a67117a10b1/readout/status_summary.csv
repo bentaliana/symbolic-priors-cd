@@ -1,0 +1,5 @@
+model,condition,training_status,graph_status,sampler_status,count
+dagma,centred_only,converged,valid_dag,available,10
+dagma,standardised,converged,valid_dag,available,10
+dcdi,centred_only,converged,valid_dag,available,10
+dcdi,standardised,converged,valid_dag,available,10

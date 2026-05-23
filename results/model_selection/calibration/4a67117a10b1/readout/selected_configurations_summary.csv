@@ -1,0 +1,5 @@
+condition,model,selected_hash,hyperparameters_json,mean_sid,std_sid,mean_mmd_primary,std_mmd_primary,mean_shd,std_shd,degeneracy_flag,has_non_finite_seed_metric,ranking_warning
+centred_only,dagma,06ee98d13852,"{""lambda1"":0.25}",0.0,0.0,0.0059540658211281626,0.0023664434870217348,0.0,0.0,false,false,
+centred_only,dcdi,dd39d6325e7d,"{""reg_coeff"":0.1}",60.0,28.284271247461902,0.08875084654991505,0.03767885533630593,30.5,10.606601717798213,false,false,
+standardised,dagma,7b345b1b2e85,"{""lambda1"":0.1}",46.0,7.0710678118654755,0.09699846001057562,0.0047286119316429145,18.0,2.8284271247461903,false,false,
+standardised,dcdi,16f92df3d6af,"{""reg_coeff"":0.3}",46.0,28.284271247461902,0.1028451515945459,0.0632934030837692,25.0,8.48528137423857,false,false,
