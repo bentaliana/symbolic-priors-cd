@@ -40,8 +40,23 @@ htmlcov/
 .tox/
 
 # Project-specific
-results/
 wandb/
 *.pkl
 *.pt
 *.pth
+
+# Ignore experimental results by default.
+results/*
+
+# Keep curated calibration handoff artefacts for this repaired calibration run.
+!results/model_selection/
+results/model_selection/*
+!results/model_selection/calibration/
+results/model_selection/calibration/*
+!results/model_selection/calibration/4a67117a10b1/
+!results/model_selection/calibration/4a67117a10b1/selected_configurations.json
+!results/model_selection/calibration/4a67117a10b1/calibration_run.log
+!results/model_selection/calibration/4a67117a10b1/records/
+!results/model_selection/calibration/4a67117a10b1/records/*.json
+!results/model_selection/calibration/4a67117a10b1/readout/
+!results/model_selection/calibration/4a67117a10b1/readout/**

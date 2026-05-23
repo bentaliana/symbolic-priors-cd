@@ -1,0 +1,163 @@
+{
+  "bandwidth_summaries": {
+    "do_X0_neg2": 190.22578465520883,
+    "do_X0_pos2": 185.6928606385478,
+    "do_X1_neg2": 229.54891192890568,
+    "do_X1_pos2": 231.68596832615788,
+    "do_X2_neg2": 193.25575010367544,
+    "do_X2_pos2": 185.72474607717479,
+    "do_X3_neg2": 52.204805290578506,
+    "do_X3_pos2": 53.222715161624635,
+    "do_X4_neg2": 175.45720153423298,
+    "do_X4_pos2": 169.30475914943605,
+    "do_X5_neg2": 174.2577679816922,
+    "do_X5_pos2": 169.77870340445486,
+    "do_X6_neg2": 230.73162984648752,
+    "do_X6_pos2": 216.29220315577612,
+    "do_X7_neg2": 91.17897502869283,
+    "do_X7_pos2": 94.4842961565349,
+    "do_X8_neg2": 199.49326581332835,
+    "do_X8_pos2": 184.0198979313264,
+    "do_X9_neg2": 132.07426796902894,
+    "do_X9_pos2": 135.96304648877754
+  },
+  "condition": "standardised",
+  "configuration_hash_full": "2c17153a69e9acd3f74cdb934125614a41e8b1851bf2c7a1cf3f573d1205e86f",
+  "configuration_hash_prefix": "2c17153a69e9",
+  "graph_status": "valid_dag",
+  "hyperparameters": {
+    "lambda1": 0.01
+  },
+  "mmd_by_intervention": [
+    {
+      "intervention_target": 0,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.028097886728659094
+    },
+    {
+      "intervention_target": 0,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.02240816582169991
+    },
+    {
+      "intervention_target": 1,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.5059757555154101
+    },
+    {
+      "intervention_target": 1,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.5211714967551144
+    },
+    {
+      "intervention_target": 2,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.002347871859299522
+    },
+    {
+      "intervention_target": 2,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.0030620993444716027
+    },
+    {
+      "intervention_target": 3,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.13235735145251243
+    },
+    {
+      "intervention_target": 3,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.14497528367898554
+    },
+    {
+      "intervention_target": 4,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.051384108936542994
+    },
+    {
+      "intervention_target": 4,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.044444697578015724
+    },
+    {
+      "intervention_target": 5,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.008500076102948229
+    },
+    {
+      "intervention_target": 5,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.009492025152023853
+    },
+    {
+      "intervention_target": 6,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.1684059489935928
+    },
+    {
+      "intervention_target": 6,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.17019303348784726
+    },
+    {
+      "intervention_target": 7,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.11965317535353442
+    },
+    {
+      "intervention_target": 7,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.13559668596155977
+    },
+    {
+      "intervention_target": 8,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.1366317681600639
+    },
+    {
+      "intervention_target": 8,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.10868208215298719
+    },
+    {
+      "intervention_target": 9,
+      "intervention_value": -2.0,
+      "mmd_primary": 0.10075621821828579
+    },
+    {
+      "intervention_target": 9,
+      "intervention_value": 2.0,
+      "mmd_primary": 0.11866456672335024
+    }
+  ],
+  "mmd_primary": 0.12664001489884524,
+  "model": "dagma",
+  "n_iterations": null,
+  "run_id": "dagma__standardised__calibration__seed1__cfg2c17153a69e9acd3f74cdb934125614a41e8b1851bf2c7a1cf3f573d1205e86f",
+  "runtime_seconds": 1.0929206000000704,
+  "sampler_status": "available",
+  "seed_value": 202,
+  "shd": 27,
+  "sid": 72,
+  "threshold_metrics": [
+    {
+      "mmd_primary": null,
+      "shd": 28,
+      "sid": 71,
+      "threshold": 0.2
+    },
+    {
+      "mmd_primary": null,
+      "shd": 27,
+      "sid": 72,
+      "threshold": 0.3
+    },
+    {
+      "mmd_primary": null,
+      "shd": 26,
+      "sid": 77,
+      "threshold": 0.4
+    }
+  ],
+  "training_status": "converged"
+}

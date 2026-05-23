@@ -1,0 +1,80 @@
+[2026-05-22T14:08:36Z] fit 1/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.25) seed=201 hash_prefix=06ee98d13852
+[2026-05-22T14:08:36Z] fit 1/40 END model=dagma condition=centred_only seed=201 hash_prefix=06ee98d13852 status=failed runtime_seconds=0.000 eta_seconds=0.0
+[2026-05-22T14:08:36Z] fit 2/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.25) seed=202 hash_prefix=06ee98d13852
+[2026-05-22T14:08:50Z] fit 2/40 END model=dagma condition=centred_only seed=202 hash_prefix=06ee98d13852 status=converged runtime_seconds=13.377 eta_seconds=254.2
+[2026-05-22T14:08:50Z] fit 3/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.1) seed=201 hash_prefix=2d3c669afb1e
+[2026-05-22T14:09:01Z] fit 3/40 END model=dagma condition=centred_only seed=201 hash_prefix=2d3c669afb1e status=converged runtime_seconds=11.071 eta_seconds=301.5
+[2026-05-22T14:09:01Z] fit 4/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.1) seed=202 hash_prefix=2d3c669afb1e
+[2026-05-22T14:09:13Z] fit 4/40 END model=dagma condition=centred_only seed=202 hash_prefix=2d3c669afb1e status=converged runtime_seconds=12.380 eta_seconds=331.4
+[2026-05-22T14:09:13Z] fit 5/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.025) seed=201 hash_prefix=4e2dcb231c27
+[2026-05-22T14:09:24Z] fit 5/40 END model=dagma condition=centred_only seed=201 hash_prefix=4e2dcb231c27 status=converged runtime_seconds=10.965 eta_seconds=334.5
+[2026-05-22T14:09:24Z] fit 6/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.025) seed=202 hash_prefix=4e2dcb231c27
+[2026-05-22T14:09:37Z] fit 6/40 END model=dagma condition=centred_only seed=202 hash_prefix=4e2dcb231c27 status=converged runtime_seconds=12.781 eta_seconds=343.3
+[2026-05-22T14:09:37Z] fit 7/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.01) seed=201 hash_prefix=501f38765f49
+[2026-05-22T14:09:50Z] fit 7/40 END model=dagma condition=centred_only seed=201 hash_prefix=501f38765f49 status=converged runtime_seconds=12.815 eta_seconds=346.0
+[2026-05-22T14:09:50Z] fit 8/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.01) seed=202 hash_prefix=501f38765f49
+[2026-05-22T14:10:06Z] fit 8/40 END model=dagma condition=centred_only seed=202 hash_prefix=501f38765f49 status=converged runtime_seconds=16.302 eta_seconds=358.8
+[2026-05-22T14:10:06Z] fit 9/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.05) seed=201 hash_prefix=d8045d32dd87
+[2026-05-22T14:10:17Z] fit 9/40 END model=dagma condition=centred_only seed=201 hash_prefix=d8045d32dd87 status=converged runtime_seconds=11.187 eta_seconds=347.5
+[2026-05-22T14:10:17Z] fit 10/40 START model=dagma condition=centred_only hyperparameters=(lambda1=0.05) seed=202 hash_prefix=d8045d32dd87
+[2026-05-22T14:10:29Z] fit 10/40 END model=dagma condition=centred_only seed=202 hash_prefix=d8045d32dd87 status=converged runtime_seconds=11.526 eta_seconds=337.2
+[2026-05-22T14:10:29Z] fit 11/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.01) seed=201 hash_prefix=2c17153a69e9
+[2026-05-22T14:10:40Z] fit 11/40 END model=dagma condition=standardised seed=201 hash_prefix=2c17153a69e9 status=converged runtime_seconds=11.398 eta_seconds=326.4
+[2026-05-22T14:10:40Z] fit 12/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.01) seed=202 hash_prefix=2c17153a69e9
+[2026-05-22T14:10:55Z] fit 12/40 END model=dagma condition=standardised seed=202 hash_prefix=2c17153a69e9 status=converged runtime_seconds=14.753 eta_seconds=323.3
+[2026-05-22T14:10:55Z] fit 13/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.25) seed=201 hash_prefix=4fe8dc48eedd
+[2026-05-22T14:11:10Z] fit 13/40 END model=dagma condition=standardised seed=201 hash_prefix=4fe8dc48eedd status=converged runtime_seconds=15.165 eta_seconds=319.3
+[2026-05-22T14:11:10Z] fit 14/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.25) seed=202 hash_prefix=4fe8dc48eedd
+[2026-05-22T14:11:26Z] fit 14/40 END model=dagma condition=standardised seed=202 hash_prefix=4fe8dc48eedd status=converged runtime_seconds=15.615 eta_seconds=314.5
+[2026-05-22T14:11:26Z] fit 15/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.05) seed=201 hash_prefix=545be5dbcbbb
+[2026-05-22T14:11:42Z] fit 15/40 END model=dagma condition=standardised seed=201 hash_prefix=545be5dbcbbb status=converged runtime_seconds=15.752 eta_seconds=308.5
+[2026-05-22T14:11:42Z] fit 16/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.05) seed=202 hash_prefix=545be5dbcbbb
+[2026-05-22T14:11:57Z] fit 16/40 END model=dagma condition=standardised seed=202 hash_prefix=545be5dbcbbb status=converged runtime_seconds=15.544 eta_seconds=300.9
+[2026-05-22T14:11:57Z] fit 17/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.025) seed=201 hash_prefix=6ae2c1d1ec9a
+[2026-05-22T14:12:13Z] fit 17/40 END model=dagma condition=standardised seed=201 hash_prefix=6ae2c1d1ec9a status=converged runtime_seconds=15.535 eta_seconds=292.5
+[2026-05-22T14:12:13Z] fit 18/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.025) seed=202 hash_prefix=6ae2c1d1ec9a
+[2026-05-22T14:12:28Z] fit 18/40 END model=dagma condition=standardised seed=202 hash_prefix=6ae2c1d1ec9a status=converged runtime_seconds=15.551 eta_seconds=283.2
+[2026-05-22T14:12:28Z] fit 19/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.1) seed=201 hash_prefix=7b345b1b2e85
+[2026-05-22T14:12:44Z] fit 19/40 END model=dagma condition=standardised seed=201 hash_prefix=7b345b1b2e85 status=converged runtime_seconds=15.367 eta_seconds=273.1
+[2026-05-22T14:12:44Z] fit 20/40 START model=dagma condition=standardised hyperparameters=(lambda1=0.1) seed=202 hash_prefix=7b345b1b2e85
+[2026-05-22T14:13:00Z] fit 20/40 END model=dagma condition=standardised seed=202 hash_prefix=7b345b1b2e85 status=converged runtime_seconds=15.951 eta_seconds=263.0
+[2026-05-22T14:13:00Z] fit 21/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=0.01) seed=201 hash_prefix=0a151792af82
+[2026-05-22T14:23:59Z] fit 21/40 END model=dcdi condition=centred_only seed=201 hash_prefix=0a151792af82 status=converged runtime_seconds=659.188 eta_seconds=834.4
+[2026-05-22T14:23:59Z] fit 22/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=0.01) seed=202 hash_prefix=0a151792af82
+[2026-05-22T14:32:31Z] fit 22/40 END model=dcdi condition=centred_only seed=202 hash_prefix=0a151792af82 status=converged runtime_seconds=512.258 eta_seconds=1173.7
+[2026-05-22T14:32:31Z] fit 23/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=1.0) seed=201 hash_prefix=3aaff84947d2
+[2026-05-22T14:39:27Z] fit 23/40 END model=dcdi condition=centred_only seed=201 hash_prefix=3aaff84947d2 status=converged runtime_seconds=415.423 eta_seconds=1367.3
+[2026-05-22T14:39:27Z] fit 24/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=1.0) seed=202 hash_prefix=3aaff84947d2
+[2026-05-22T14:46:21Z] fit 24/40 END model=dcdi condition=centred_only seed=202 hash_prefix=3aaff84947d2 status=converged runtime_seconds=414.805 eta_seconds=1509.8
+[2026-05-22T14:46:21Z] fit 25/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=0.3) seed=201 hash_prefix=53fc88693ed5
+[2026-05-22T14:55:35Z] fit 25/40 END model=dcdi condition=centred_only seed=201 hash_prefix=53fc88693ed5 status=converged runtime_seconds=553.168 eta_seconds=1690.7
+[2026-05-22T14:55:35Z] fit 26/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=0.3) seed=202 hash_prefix=53fc88693ed5
+[2026-05-22T15:04:12Z] fit 26/40 END model=dcdi condition=centred_only seed=202 hash_prefix=53fc88693ed5 status=converged runtime_seconds=517.294 eta_seconds=1795.9
+[2026-05-22T15:04:12Z] fit 27/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=0.03) seed=201 hash_prefix=ba78e78a188c
+[2026-05-22T15:14:44Z] fit 27/40 END model=dcdi condition=centred_only seed=201 hash_prefix=ba78e78a188c status=converged runtime_seconds=632.459 eta_seconds=1910.3
+[2026-05-22T15:14:44Z] fit 28/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=0.03) seed=202 hash_prefix=ba78e78a188c
+[2026-05-22T15:22:43Z] fit 28/40 END model=dcdi condition=centred_only seed=202 hash_prefix=ba78e78a188c status=converged runtime_seconds=478.576 eta_seconds=1905.5
+[2026-05-22T15:22:43Z] fit 29/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=0.1) seed=201 hash_prefix=dd39d6325e7d
+[2026-05-22T15:30:50Z] fit 29/40 END model=dcdi condition=centred_only seed=201 hash_prefix=dd39d6325e7d status=converged runtime_seconds=487.416 eta_seconds=1871.4
+[2026-05-22T15:30:50Z] fit 30/40 START model=dcdi condition=centred_only hyperparameters=(reg_coeff=0.1) seed=202 hash_prefix=dd39d6325e7d
+[2026-05-22T15:38:58Z] fit 30/40 END model=dcdi condition=centred_only seed=202 hash_prefix=dd39d6325e7d status=converged runtime_seconds=487.697 eta_seconds=1807.1
+[2026-05-22T15:38:58Z] fit 31/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=0.3) seed=201 hash_prefix=16f92df3d6af
+[2026-05-22T15:47:26Z] fit 31/40 END model=dcdi condition=standardised seed=201 hash_prefix=16f92df3d6af status=converged runtime_seconds=508.186 eta_seconds=1721.5
+[2026-05-22T15:47:26Z] fit 32/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=0.3) seed=202 hash_prefix=16f92df3d6af
+[2026-05-22T15:55:13Z] fit 32/40 END model=dcdi condition=standardised seed=202 hash_prefix=16f92df3d6af status=converged runtime_seconds=467.117 eta_seconds=1599.2
+[2026-05-22T15:55:14Z] fit 33/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=0.03) seed=201 hash_prefix=5904acec44be
+[2026-05-22T16:02:29Z] fit 33/40 END model=dcdi condition=standardised seed=201 hash_prefix=5904acec44be status=converged runtime_seconds=435.020 eta_seconds=1449.1
+[2026-05-22T16:02:29Z] fit 34/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=0.03) seed=202 hash_prefix=5904acec44be
+[2026-05-22T16:09:33Z] fit 34/40 END model=dcdi condition=standardised seed=202 hash_prefix=5904acec44be status=converged runtime_seconds=424.353 eta_seconds=1280.5
+[2026-05-22T16:09:33Z] fit 35/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=0.1) seed=201 hash_prefix=6d74ecd1e072
+[2026-05-22T16:23:36Z] fit 35/40 END model=dcdi condition=standardised seed=201 hash_prefix=6d74ecd1e072 status=converged runtime_seconds=842.932 eta_seconds=1157.0
+[2026-05-22T16:23:36Z] fit 36/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=0.1) seed=202 hash_prefix=6d74ecd1e072
+[2026-05-22T16:33:54Z] fit 36/40 END model=dcdi condition=standardised seed=202 hash_prefix=6d74ecd1e072 status=converged runtime_seconds=618.391 eta_seconds=968.6
+[2026-05-22T16:33:54Z] fit 37/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=1.0) seed=201 hash_prefix=c1978a4c02bf
+[2026-05-22T16:49:22Z] fit 37/40 END model=dcdi condition=standardised seed=201 hash_prefix=c1978a4c02bf status=converged runtime_seconds=927.476 eta_seconds=782.0
+[2026-05-22T16:49:22Z] fit 38/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=1.0) seed=202 hash_prefix=c1978a4c02bf
+[2026-05-22T16:57:06Z] fit 38/40 END model=dcdi condition=standardised seed=202 hash_prefix=c1978a4c02bf status=converged runtime_seconds=464.457 eta_seconds=532.1
+[2026-05-22T16:57:06Z] fit 39/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=0.01) seed=201 hash_prefix=d064fb91dba6
+[2026-05-22T17:13:27Z] fit 39/40 END model=dcdi condition=standardised seed=201 hash_prefix=d064fb91dba6 status=converged runtime_seconds=980.350 eta_seconds=284.3
+[2026-05-22T17:13:27Z] fit 40/40 START model=dcdi condition=standardised hyperparameters=(reg_coeff=0.01) seed=202 hash_prefix=d064fb91dba6
+[2026-05-22T17:32:37Z] fit 40/40 END model=dcdi condition=standardised seed=202 hash_prefix=d064fb91dba6 status=converged runtime_seconds=1150.668 eta_seconds=0.0
