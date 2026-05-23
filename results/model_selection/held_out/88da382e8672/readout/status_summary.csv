@@ -1,0 +1,7 @@
+kind,status_field,status_value,count
+main,graph_status,valid_dag,20
+main,sampler_status,available,20
+main,training_status,converged,20
+sensitivity,graph_status,valid_dag,5
+sensitivity,sampler_status,available,5
+sensitivity,training_status,converged,5

@@ -1,0 +1,6 @@
+condition,model,scm_seed,fit_rng,sid,mmd_primary,shd,runtime_seconds,n_iterations,training_status,graph_status,sampler_status,main_evaluation_sid_at_seed_301,main_evaluation_mmd_primary_at_seed_301,main_evaluation_shd_at_seed_301
+centred_only,dcdi,301,43,64.0,0.1777443666547534,31.0,1001.5132004999905,94300,converged,valid_dag,available,78.0,0.12734844766889647,28.0
+centred_only,dcdi,301,44,68.0,0.1320883235689646,30.0,1013.6139970999793,99900,converged,valid_dag,available,78.0,0.12734844766889647,28.0
+centred_only,dcdi,301,45,61.0,0.11677970916006894,22.0,811.9882216000115,80600,converged,valid_dag,available,78.0,0.12734844766889647,28.0
+centred_only,dcdi,301,46,83.0,0.20505995084606235,35.0,1006.0180546999909,105900,converged,valid_dag,available,78.0,0.12734844766889647,28.0
+centred_only,dcdi,301,47,77.0,0.10261584885160957,32.0,840.6431904999772,81700,converged,valid_dag,available,78.0,0.12734844766889647,28.0
