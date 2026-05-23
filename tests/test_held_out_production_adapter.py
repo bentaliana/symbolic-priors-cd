@@ -18,6 +18,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import shutil
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
@@ -51,6 +52,9 @@ from experiments.selection_study.held_out import (
     _adapt_pipeline_run_to_heldout_record,
     _apply_fit_rng_to_configuration,
     _build_default_heldout_fit_runner,
+    _build_executable_heldout_configuration,
+    _find_matching_calibration_configuration,
+    build_heldout_configuration_factory,
     enumerate_heldout_workload,
     run_held_out_evaluation,
 )
@@ -964,6 +968,443 @@ def test_no_final_winner_language_in_default_adapter_output(
 # ---------------------------------------------------------------------------
 # Adapter unit pieces
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Production configuration_factory (Commit 10.2d)
+# ---------------------------------------------------------------------------
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_REAL_CALIBRATION_CONFIG_DIR = (
+    _PROJECT_ROOT
+    / "experiments"
+    / "selection_study"
+    / "configs"
+    / "calibration"
+)
+_PARENT_CONFIG_FILENAMES: tuple[str, ...] = (
+    "dagma_calibration_centred_only.json",
+    "dagma_calibration_standardised.json",
+    "dcdi_calibration_centred_only.json",
+    "dcdi_calibration_standardised.json",
+)
+
+
+def _copy_parent_calibration_configs(tmp_path: Path) -> Path:
+    """Copy the four real parent calibration JSON files into ``tmp_path``."""
+    target = tmp_path / "configs"
+    target.mkdir(parents=True, exist_ok=True)
+    for filename in _PARENT_CONFIG_FILENAMES:
+        shutil.copy(
+            _REAL_CALIBRATION_CONFIG_DIR / filename,
+            target / filename,
+        )
+    return target
+
+
+def _make_heldout_job(
+    *,
+    model: str,
+    condition: str,
+    hyperparameters: dict[str, float],
+    scm_seed: int = 301,
+    fit_rng: int | None = None,
+    job_kind: str = MAIN_JOB_KIND,
+) -> HeldoutJob:
+    """Build a HeldoutJob with synthetic but well-formed identity fields."""
+    cell_hash = hashlib.sha256(
+        f"production-factory-test|{model}|{condition}".encode("utf-8")
+    ).hexdigest()
+    return HeldoutJob(
+        job_kind=job_kind,
+        model=model,
+        condition=condition,
+        configuration_hash_full=cell_hash,
+        configuration_hash_prefix=cell_hash[:HASH_PREFIX_LENGTH],
+        hyperparameters=hyperparameters,
+        scm_seed=int(scm_seed),
+        fit_rng=fit_rng,
+        calibration_run_hash_prefix="c" * 12,
+    )
+
+
+def test_factory_loads_four_model_condition_parents(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    # The factory exposes a closure that holds the four loaded
+    # parents; we verify availability by asking for each cell.
+    expected_cells = (
+        ("dagma", "centred_only"),
+        ("dagma", "standardised"),
+        ("dcdi", "centred_only"),
+        ("dcdi", "standardised"),
+    )
+    for model, condition in expected_cells:
+        hyperparameters = (
+            {"lambda1": 0.05}
+            if model == "dagma"
+            else {"reg_coeff": 0.1}
+        )
+        job = _make_heldout_job(
+            model=model,
+            condition=condition,
+            hyperparameters=hyperparameters,
+        )
+        config = factory(job)
+        assert config.model == model
+        assert config.condition == condition
+
+
+def test_factory_rejects_missing_parent_config(tmp_path: Path) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    (config_dir / "dcdi_calibration_centred_only.json").unlink()
+    with pytest.raises(
+        FileNotFoundError,
+        match="dcdi_calibration_centred_only.json",
+    ):
+        build_heldout_configuration_factory(config_dir)
+
+
+def test_factory_rejects_duplicate_parent_config_for_same_cell(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    # Make dcdi_calibration_standardised.json declare the centred_only
+    # cell, so two files claim (dcdi, centred_only). The factory
+    # detects the conflict because the file's declared cell disagrees
+    # with the cell its filename implies.
+    bad_path = config_dir / "dcdi_calibration_standardised.json"
+    bad_payload = json.loads(bad_path.read_text(encoding="utf-8"))
+    bad_payload["condition"] = "centred_only"
+    bad_path.write_text(
+        json.dumps(bad_payload, indent=2), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="filename implies cell"):
+        build_heldout_configuration_factory(config_dir)
+
+
+def test_factory_rejects_missing_directory(tmp_path: Path) -> None:
+    bogus = tmp_path / "does-not-exist"
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        build_heldout_configuration_factory(bogus)
+
+
+def test_factory_rejects_directory_path_that_is_a_file(
+    tmp_path: Path,
+) -> None:
+    bogus = tmp_path / "not-a-dir.json"
+    bogus.write_text("[]", encoding="utf-8")
+    with pytest.raises(NotADirectoryError):
+        build_heldout_configuration_factory(bogus)
+
+
+def test_selected_hyperparameters_are_applied_correctly(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+
+    job = _make_heldout_job(
+        model="dcdi",
+        condition="centred_only",
+        hyperparameters={"reg_coeff": 0.3},
+    )
+    config = factory(job)
+    assert len(config.calibration_configurations) == 1
+    selected = config.calibration_configurations[0]
+    selected_pairs = {
+        name: float(value) for name, value in selected.hyperparameters
+    }
+    assert selected_pairs == {"reg_coeff": 0.3}
+
+
+def test_factory_rejects_hyperparameters_not_in_parent_grid(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    job = _make_heldout_job(
+        model="dcdi",
+        condition="centred_only",
+        # 0.5 is not in the DCDI reg_coeff grid {0.01, 0.03, 0.1, 0.3, 1.0}.
+        hyperparameters={"reg_coeff": 0.5},
+    )
+    with pytest.raises(
+        _HeldoutInfrastructureError,
+        match="no parent calibration_configuration matches",
+    ):
+        factory(job)
+
+
+def test_held_out_seed_population_is_heldout_seed_population(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+
+    job = _make_heldout_job(
+        model="dagma",
+        condition="centred_only",
+        hyperparameters={"lambda1": 0.05},
+    )
+    config = factory(job)
+    population_names = [name for name, _ in config.seed_populations]
+    assert population_names == [HELDOUT_SEED_POPULATION]
+
+
+def test_held_out_seeds_are_exactly_301_to_305(tmp_path: Path) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    job = _make_heldout_job(
+        model="dagma",
+        condition="centred_only",
+        hyperparameters={"lambda1": 0.05},
+    )
+    config = factory(job)
+    for name, seeds in config.seed_populations:
+        if name == HELDOUT_SEED_POPULATION:
+            assert tuple(int(s) for s in seeds) == tuple(
+                int(s) for s in HELDOUT_SCM_SEEDS
+            )
+            break
+    else:
+        pytest.fail("held-out seed population missing from configuration")
+
+
+def test_dcdi_main_uses_seed_torch_seed_numpy_42_after_factory_and_adapter(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    job = _make_heldout_job(
+        model="dcdi",
+        condition="centred_only",
+        hyperparameters={"reg_coeff": 0.1},
+        scm_seed=301,
+        fit_rng=42,
+        job_kind=MAIN_JOB_KIND,
+    )
+    config = factory(job)
+    # The parent already pins seed_torch=seed_numpy=42; the adapter
+    # confirms it.
+    assert config.seed_torch == 42
+    assert config.seed_numpy == 42
+    modified = _apply_fit_rng_to_configuration(config, job)
+    assert modified.seed_torch == DCDI_MAIN_FIT_RNG == 42
+    assert modified.seed_numpy == DCDI_MAIN_FIT_RNG == 42
+    assert modified.seed_dagma is None
+
+
+def test_dcdi_sensitivity_uses_seed_torch_seed_numpy_43_to_47_after_factory(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    for fit_rng in SENSITIVITY_FIT_RNGS:
+        job = _make_heldout_job(
+            model=SENSITIVITY_MODEL,
+            condition=SENSITIVITY_CONDITION,
+            hyperparameters={"reg_coeff": 0.1},
+            scm_seed=SENSITIVITY_SCM_SEED,
+            fit_rng=int(fit_rng),
+            job_kind=SENSITIVITY_JOB_KIND,
+        )
+        config = factory(job)
+        modified = _apply_fit_rng_to_configuration(config, job)
+        assert modified.seed_torch == int(fit_rng)
+        assert modified.seed_numpy == int(fit_rng)
+        assert modified.seed_dagma is None
+
+
+def test_dagma_keeps_seed_fields_as_none(tmp_path: Path) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    job = _make_heldout_job(
+        model="dagma",
+        condition="standardised",
+        hyperparameters={"lambda1": 0.05},
+        scm_seed=305,
+        fit_rng=None,
+        job_kind=MAIN_JOB_KIND,
+    )
+    config = factory(job)
+    assert config.seed_torch is None
+    assert config.seed_numpy is None
+    assert config.seed_dagma is None
+    modified = _apply_fit_rng_to_configuration(config, job)
+    assert modified.seed_torch is None
+    assert modified.seed_numpy is None
+    assert modified.seed_dagma is None
+
+
+def test_dcdi_sensitivity_configurations_have_distinct_hashes_from_main(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+
+    seen_hashes: set[str] = set()
+    # Main fit_rng=42 plus the five sensitivity fit_rng values.
+    for fit_rng in (42,) + tuple(SENSITIVITY_FIT_RNGS):
+        job_kind = (
+            MAIN_JOB_KIND
+            if fit_rng == DCDI_MAIN_FIT_RNG
+            else SENSITIVITY_JOB_KIND
+        )
+        job = _make_heldout_job(
+            model=SENSITIVITY_MODEL,
+            condition=SENSITIVITY_CONDITION,
+            hyperparameters={"reg_coeff": 0.1},
+            scm_seed=SENSITIVITY_SCM_SEED,
+            fit_rng=int(fit_rng),
+            job_kind=job_kind,
+        )
+        config = factory(job)
+        modified = _apply_fit_rng_to_configuration(config, job)
+        seen_hashes.add(compute_configuration_hash(modified))
+    assert len(seen_hashes) == 6
+
+
+def test_executable_configuration_loads_in_pipeline_via_enumerate_manifest(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    job = _make_heldout_job(
+        model="dcdi",
+        condition="centred_only",
+        hyperparameters={"reg_coeff": 0.1},
+    )
+    config = factory(job)
+    # Real preflight.enumerate_manifest must accept the resulting
+    # Configuration; this validates that the factory output passes
+    # downstream validators end-to-end.
+    from experiments.selection_study.preflight import enumerate_manifest
+
+    manifest = enumerate_manifest(
+        config, base_dir=tmp_path / "results" / "model_selection"
+    )
+    seed_populations_seen = {entry.seed_population for entry in manifest.entries}
+    assert seed_populations_seen == {HELDOUT_SEED_POPULATION}
+    seed_replicate_indices = sorted(
+        int(entry.seed_replicate_index) for entry in manifest.entries
+    )
+    assert seed_replicate_indices == [0, 1, 2, 3, 4]
+
+
+def test_run_held_out_evaluation_with_real_factory_writes_25_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_pipeline = _install_fake_pipeline(monkeypatch)
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+
+    artefact_path = _write_calibration_artefact(tmp_path)
+    artefact_out = run_held_out_evaluation(
+        artefact_path,
+        tmp_path / "results",
+        configuration_factory=factory,
+    )
+
+    assert len(fake_pipeline.calls) == 25
+    payload = json.loads(artefact_out.read_text(encoding="utf-8"))
+    validate_heldout_evaluation_artefact(payload)
+    assert payload["status_summary"]["total_records"] == 25
+
+
+def test_no_real_pipeline_or_wrapper_execution_in_factory_construction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import experiments.selection_study.pipeline as pipeline_mod
+
+    sentinel = {"called": False}
+
+    def _poison(*args: Any, **kwargs: Any) -> None:
+        sentinel["called"] = True
+        raise AssertionError(
+            "build_heldout_configuration_factory must not invoke "
+            "pipeline.run_single_fit"
+        )
+
+    monkeypatch.setattr(pipeline_mod, "run_single_fit", _poison)
+
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    job = _make_heldout_job(
+        model="dcdi",
+        condition="centred_only",
+        hyperparameters={"reg_coeff": 0.1},
+    )
+    factory(job)  # Should not call pipeline.run_single_fit either.
+
+    assert sentinel["called"] is False
+
+
+def test_no_final_winner_language_in_executable_configuration(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    for model, condition, hyperparameters in (
+        ("dagma", "centred_only", {"lambda1": 0.05}),
+        ("dagma", "standardised", {"lambda1": 0.05}),
+        ("dcdi", "centred_only", {"reg_coeff": 0.1}),
+        ("dcdi", "standardised", {"reg_coeff": 0.1}),
+    ):
+        job = _make_heldout_job(
+            model=model,
+            condition=condition,
+            hyperparameters=hyperparameters,
+        )
+        config = factory(job)
+        canonical_text = canonical_json(config)
+        _assert_no_forbidden_language(canonical_text)
+
+
+def test_find_matching_calibration_configuration_matches_by_value(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    job = _make_heldout_job(
+        model="dagma",
+        condition="centred_only",
+        hyperparameters={"lambda1": 0.1},
+    )
+    config = factory(job)
+    selected = _find_matching_calibration_configuration(
+        config.calibration_configurations,
+        job_hyperparameters={"lambda1": 0.1},
+        cell=("dagma", "centred_only"),
+    )
+    selected_pairs = {
+        name: float(value) for name, value in selected.hyperparameters
+    }
+    assert selected_pairs == {"lambda1": 0.1}
+
+
+def test_build_executable_heldout_configuration_preserves_other_fields(
+    tmp_path: Path,
+) -> None:
+    config_dir = _copy_parent_calibration_configs(tmp_path)
+    factory = build_heldout_configuration_factory(config_dir)
+    job = _make_heldout_job(
+        model="dcdi",
+        condition="centred_only",
+        hyperparameters={"reg_coeff": 0.1},
+    )
+    config = factory(job)
+    # Frozen tactical constants and SCM-generation fields must be
+    # carried over from the parent unchanged.
+    assert config.n_nodes == 10
+    assert config.expected_edges == 20
+    assert int(config.n_train) == 1000
+    assert int(config.mmd_n_samples) == 1000
+    # 20 interventions (all 10 nodes x {+/-2}) from the parent.
+    assert len(config.intervention_set) == 20
 
 
 def test_adapt_pipeline_run_preserves_provenance_fields() -> None:

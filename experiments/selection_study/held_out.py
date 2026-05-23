@@ -1139,6 +1139,251 @@ def _validate_heldout_fit_result(
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Production configuration factory
+# ---------------------------------------------------------------------------
+
+
+# The four parent calibration JSON files, keyed by the (model, condition)
+# cell each one declares. The held-out factory loads exactly these four
+# files, checks that each loaded Configuration's (model, condition)
+# matches the cell its filename implies, and rejects any conflict.
+_HELDOUT_PARENT_CONFIG_FILENAMES_BY_CELL: dict[
+    tuple[str, str], str
+] = {
+    ("dagma", "centred_only"): "dagma_calibration_centred_only.json",
+    ("dagma", "standardised"): "dagma_calibration_standardised.json",
+    ("dcdi", "centred_only"): "dcdi_calibration_centred_only.json",
+    ("dcdi", "standardised"): "dcdi_calibration_standardised.json",
+}
+
+
+def _load_heldout_parent_configurations(
+    config_dir: Path,
+) -> dict[tuple[str, str], Any]:
+    """Load the four parent calibration Configurations from ``config_dir``.
+
+    The returned mapping is keyed by ``(model, condition)``. Every
+    loaded Configuration must declare exactly the cell its filename
+    implies; a mismatch (which is how a duplicate parent for a single
+    cell manifests on disk) is rejected with ``ValueError``.
+    """
+    from experiments.selection_study.config import load_config
+
+    if not config_dir.exists():
+        raise FileNotFoundError(
+            "held-out parent config directory does not exist: "
+            f"{config_dir}"
+        )
+    if not config_dir.is_dir():
+        raise NotADirectoryError(
+            "held-out parent config directory must be a directory "
+            "containing the four parent calibration JSON files; got a "
+            f"path that is not a directory: {config_dir}"
+        )
+
+    missing = [
+        filename
+        for filename in _HELDOUT_PARENT_CONFIG_FILENAMES_BY_CELL.values()
+        if not (config_dir / filename).is_file()
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "held-out parent config directory is missing required "
+            f"parent config file(s): {missing}; "
+            f"directory={config_dir}"
+        )
+
+    loaded: dict[tuple[str, str], Any] = {}
+    seen_declarations: dict[tuple[str, str], str] = {}
+    for expected_cell, filename in (
+        _HELDOUT_PARENT_CONFIG_FILENAMES_BY_CELL.items()
+    ):
+        parent_path = config_dir / filename
+        parent_config = load_config(parent_path)
+        declared_cell = (parent_config.model, parent_config.condition)
+        if declared_cell != expected_cell:
+            raise ValueError(
+                "held-out parent config at "
+                f"{parent_path} declares "
+                f"(model={parent_config.model!r}, "
+                f"condition={parent_config.condition!r}) but the "
+                "filename implies cell "
+                f"(model={expected_cell[0]!r}, "
+                f"condition={expected_cell[1]!r}); the held-out "
+                "factory refuses to load a parent that disagrees "
+                "with its filename because that is the on-disk shape "
+                "of two parents claiming the same model/condition "
+                "cell"
+            )
+        if declared_cell in seen_declarations:
+            raise ValueError(
+                "held-out parent config directory contains two "
+                "parents declaring the same "
+                f"(model={declared_cell[0]!r}, "
+                f"condition={declared_cell[1]!r}) cell: "
+                f"{seen_declarations[declared_cell]} and "
+                f"{parent_path}"
+            )
+        seen_declarations[declared_cell] = str(parent_path)
+        loaded[declared_cell] = parent_config
+
+    return loaded
+
+
+def _find_matching_calibration_configuration(
+    parent_calibration_configurations: Sequence[Any],
+    *,
+    job_hyperparameters: Mapping[str, Any],
+    cell: tuple[str, str],
+) -> Any:
+    """Pick the parent calibration entry matching the job's hyperparameters.
+
+    Matching is exact on the sorted ``(name, float(value))`` tuple, so
+    two configurations that share the same canonical hyperparameter
+    set are treated as equal even if the parent stores them in a
+    different order.
+    """
+    job_pairs = tuple(
+        sorted(
+            (str(name), float(value))
+            for name, value in job_hyperparameters.items()
+        )
+    )
+    for calibration_configuration in parent_calibration_configurations:
+        parent_pairs = tuple(
+            sorted(
+                (str(name), float(value))
+                for name, value in calibration_configuration.hyperparameters
+            )
+        )
+        if parent_pairs == job_pairs:
+            return calibration_configuration
+    available_pairs = [
+        tuple(
+            sorted(
+                (str(name), float(value))
+                for name, value in calibration_configuration.hyperparameters
+            )
+        )
+        for calibration_configuration in parent_calibration_configurations
+    ]
+    raise _HeldoutInfrastructureError(
+        "no parent calibration_configuration matches job "
+        f"hyperparameters {dict(job_hyperparameters)!r} in cell "
+        f"(model={cell[0]!r}, condition={cell[1]!r}); available "
+        f"hyperparameter sets in this parent: {available_pairs}"
+    )
+
+
+def _build_executable_heldout_configuration(
+    *,
+    parent: Any,
+    selected_calibration_configuration: Any,
+) -> Any:
+    """Build the executable held-out Configuration from a parent.
+
+    The returned Configuration is the parent with two replacements:
+
+    - ``seed_populations`` is reduced to a single
+      ``(HELDOUT_SEED_POPULATION, HELDOUT_SCM_SEEDS)`` entry, so the
+      enumerate_manifest step emits one entry per held-out SCM seed
+      and nothing else;
+    - ``calibration_configurations`` is reduced to the single
+      calibration-selected entry, so the executable configuration
+      payload represents exactly the hyperparameter point being
+      evaluated.
+
+    Seed fields (``seed_torch``, ``seed_numpy``, ``seed_dagma``) and
+    every other Configuration field are carried through from the
+    parent unchanged. The per-job DCDI fit-RNG override is applied
+    later by ``_apply_fit_rng_to_configuration`` inside the runner.
+    """
+    from dataclasses import replace as _dataclass_replace
+
+    new_seed_populations = (
+        (
+            HELDOUT_SEED_POPULATION,
+            tuple(int(seed) for seed in HELDOUT_SCM_SEEDS),
+        ),
+    )
+    return _dataclass_replace(
+        parent,
+        seed_populations=new_seed_populations,
+        calibration_configurations=(selected_calibration_configuration,),
+    )
+
+
+def build_heldout_configuration_factory(
+    config_dir: Path | str,
+) -> Callable[[HeldoutJob], Any]:
+    """Build the production held-out ``configuration_factory``.
+
+    Parameters
+    ----------
+    config_dir : Path or str
+        Directory containing the four parent calibration JSON files
+        (``dagma_calibration_centred_only.json``,
+        ``dagma_calibration_standardised.json``,
+        ``dcdi_calibration_centred_only.json``,
+        ``dcdi_calibration_standardised.json``). The four files are
+        loaded once at factory-construction time. A missing file, an
+        unreadable file, or a parent whose declared
+        ``(model, condition)`` cell disagrees with its filename
+        causes ``build_heldout_configuration_factory`` itself to
+        raise; the returned factory does not perform I/O.
+
+    Returns
+    -------
+    callable
+        A callable that takes a ``HeldoutJob`` and returns the
+        executable held-out Configuration for that job. The returned
+        Configuration carries:
+
+        - the parent's full set of frozen tactical constants
+          (training budget, SCM-generation fields, intervention set,
+          threshold-robustness triple, wrapper API reference);
+        - exactly one ``calibration_configurations`` entry, the
+          calibration-selected hyperparameter point named by
+          ``job.hyperparameters``;
+        - ``seed_populations = ((HELDOUT_SEED_POPULATION,
+          HELDOUT_SCM_SEEDS),)``, so ``enumerate_manifest`` produces
+          one manifest entry per held-out SCM seed;
+        - the parent's ``seed_torch`` / ``seed_numpy`` values
+          unchanged (the held-out DCDI fit-RNG convention is applied
+          by ``_apply_fit_rng_to_configuration`` inside the runner).
+
+    The returned factory is suitable to pass directly to
+    ``run_held_out_evaluation`` as the ``configuration_factory``
+    keyword argument.
+    """
+    config_dir_path = Path(config_dir)
+    parents = _load_heldout_parent_configurations(config_dir_path)
+
+    def _factory(job: HeldoutJob) -> Any:
+        cell = (str(job.model), str(job.condition))
+        if cell not in parents:
+            raise _HeldoutInfrastructureError(
+                "held-out configuration factory has no parent "
+                f"calibration config for cell "
+                f"(model={cell[0]!r}, condition={cell[1]!r}); the "
+                "factory loaded "
+                f"{sorted(parents.keys())} from {config_dir_path}"
+            )
+        parent = parents[cell]
+        selected = _find_matching_calibration_configuration(
+            parent.calibration_configurations,
+            job_hyperparameters=job.hyperparameters,
+            cell=cell,
+        )
+        return _build_executable_heldout_configuration(
+            parent=parent,
+            selected_calibration_configuration=selected,
+        )
+
+    return _factory
+
+
 def _apply_fit_rng_to_configuration(
     config: Any, job: HeldoutJob
 ) -> Any:
@@ -1631,6 +1876,7 @@ __all__ = [
     "SENSITIVITY_JOB_KIND",
     "SENSITIVITY_MODEL",
     "SENSITIVITY_SCM_SEED",
+    "build_heldout_configuration_factory",
     "build_heldout_run_identity_payload",
     "compute_heldout_run_hash12",
     "compute_heldout_run_hash_full",
