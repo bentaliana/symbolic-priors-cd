@@ -844,15 +844,19 @@ def test_csv_std_values_are_unchanged_when_clipping_applies(
         # Sample std with ddof=1 of the values {0, 4} is sqrt(8) ~ 2.828.
         assert std_shd == pytest.approx(math.sqrt(8.0))
 
-    # The clip applies to the plot yerr only.
-    yerr = _metric_yerr(
-        "shd",
-        [float(row["mean_shd"]) for row in dagma_centred],
-        [float(row["std_shd"]) for row in dagma_centred],
-    )
+    # The clip applies to the plot yerr only. _metric_yerr returns
+    # error-bar magnitudes (distance below the data point), not
+    # whisker endpoints. For a nonnegative metric the lower magnitude
+    # is min(std, mean) so the whisker terminates at zero (mean - lower
+    # == 0). The upper magnitudes are preserved as the stored std.
+    means_list = [float(row["mean_shd"]) for row in dagma_centred]
+    stds_list = [float(row["std_shd"]) for row in dagma_centred]
+    yerr = _metric_yerr("shd", means_list, stds_list)
     lower, upper = yerr
-    assert all(lo == 0.0 for lo in lower), lower
-    assert upper == [float(row["std_shd"]) for row in dagma_centred]
+    for mean_value, std_value, lo in zip(means_list, stds_list, lower):
+        assert lo == min(std_value, mean_value)
+        assert mean_value - lo == pytest.approx(0.0)
+    assert upper == stds_list
 
 
 def test_readout_is_idempotent_on_rerun(tmp_path: Path) -> None:
