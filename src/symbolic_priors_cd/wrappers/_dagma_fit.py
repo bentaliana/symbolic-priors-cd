@@ -63,6 +63,8 @@ def run_dagma_fit(X_local: np.ndarray, cfg: "DAGMAConfig") -> _DagmaFitResult:
     ------
     Any exception raised by DagmaLinear.fit propagates unchanged.
     """
+    if cfg.exclude_edges is not None:
+        _validate_exclude_edges(cfg.exclude_edges, int(X_local.shape[1]))
     model = DagmaLinear(loss_type=cfg.loss_type)
     W = model.fit(
         X=X_local,
@@ -77,7 +79,7 @@ def run_dagma_fit(X_local: np.ndarray, cfg: "DAGMAConfig") -> _DagmaFitResult:
         lr=cfg.lr,
         beta_1=cfg.beta_1,
         beta_2=cfg.beta_2,
-        exclude_edges=None,
+        exclude_edges=cfg.exclude_edges,
         include_edges=None,
     )
     return _DagmaFitResult(
@@ -85,6 +87,79 @@ def run_dagma_fit(X_local: np.ndarray, cfg: "DAGMAConfig") -> _DagmaFitResult:
         h_final=float(model.h_final),
         score_final=float(model.score_final),
     )
+
+
+def _validate_exclude_edges(
+    exclude_edges: object, n_vars: int
+) -> None:
+    """Validate an exclude_edges tuple before passing it to DagmaLinear.
+
+    DagmaLinear's own validation creates a ``ValueError`` instance but
+    never raises it, so malformed input would silently produce an
+    empty mask. This helper raises a descriptive ``ValueError`` on
+    every malformed-input case the project supports.
+
+    Rules
+    -----
+    - ``exclude_edges`` must be an actual ``tuple`` (not ``list`` or
+      other sequence type).
+    - Each element must be a ``tuple`` of exactly two items.
+    - Each index must satisfy ``type(idx) is int``; booleans are
+      explicitly rejected even though ``bool`` is a subclass of ``int``.
+    - Each index must satisfy ``0 <= idx < n_vars``.
+    - No self-loops: ``i != j``.
+    - No duplicate edges.
+    """
+    if type(exclude_edges) is not tuple:
+        raise ValueError(
+            "exclude_edges must be a tuple; "
+            f"got {type(exclude_edges).__name__}."
+        )
+    seen: set[tuple[int, int]] = set()
+    for idx, item in enumerate(exclude_edges):
+        if type(item) is not tuple:
+            raise ValueError(
+                f"exclude_edges[{idx}] must be a tuple; "
+                f"got {type(item).__name__}: {item!r}."
+            )
+        if len(item) != 2:
+            raise ValueError(
+                f"exclude_edges[{idx}] must have length 2; "
+                f"got length {len(item)}: {item!r}."
+            )
+        i, j = item
+        if type(i) is not int:
+            raise ValueError(
+                f"exclude_edges[{idx}][0] must be a plain int "
+                f"(no bool, no float, no str); "
+                f"got {type(i).__name__}: {i!r}."
+            )
+        if type(j) is not int:
+            raise ValueError(
+                f"exclude_edges[{idx}][1] must be a plain int "
+                f"(no bool, no float, no str); "
+                f"got {type(j).__name__}: {j!r}."
+            )
+        if i < 0 or j < 0:
+            raise ValueError(
+                f"exclude_edges[{idx}] = ({i}, {j}) must have "
+                "non-negative indices."
+            )
+        if i >= n_vars or j >= n_vars:
+            raise ValueError(
+                f"exclude_edges[{idx}] = ({i}, {j}) is out of range "
+                f"for n_vars={n_vars}."
+            )
+        if i == j:
+            raise ValueError(
+                f"exclude_edges[{idx}] is a self-loop ({i}, {j})."
+            )
+        if (i, j) in seen:
+            raise ValueError(
+                f"exclude_edges contains duplicate edge ({i}, {j}) "
+                f"at index {idx}."
+            )
+        seen.add((i, j))
 
 
 def run_soft_prior_dagma_fit(

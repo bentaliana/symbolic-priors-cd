@@ -3768,3 +3768,53 @@ The value 2e-4 provides visible but non-degenerate soft suppression in the produ
 Consequence:
 - Main-study soft-prior runs must use lambda_prior = 2e-4 unless a future documented amendment is made before headline evaluation.
 - Matched-L1 selection may now proceed later using this frozen soft-prior setting.
+
+
+## 24/05/2026 — M-4 hard-exclusion verification and interpretation note
+
+### Decision / status
+
+M-4 hard-exclusion plumbing is accepted. The DAGMA wrapper now supports project-side validated `exclude_edges` through the DAGMA fit path, while `include_edges` remains unexposed and hardcoded as `None`.
+
+The hard-exclusion path is verified as a training-time/native-DAGMA exclusion mechanism rather than a post-hoc thresholding adjustment.
+
+### Evidence
+
+The M-4 regression test excluded a dynamically selected strong true-positive edge. In the prior-free fit, the selected edge `(3, 4)` had baseline magnitude:
+
+- `abs(W_baseline[3,4]) = 0.7470`
+
+After fitting DAGMA with `exclude_edges = ((3, 4),)`, the final native continuous edge value was:
+
+- `abs(W_excluded[3,4]) = 0.000e+00`
+
+This verifies that the excluded entry is zero in the continuous `W` matrix itself, not merely absent after thresholding.
+
+Wrapper-level validation now rejects malformed `exclude_edges` before calling DAGMA, including lists instead of tuples, tuple-of-lists, wrong-length pairs, out-of-range indices, negative indices, boolean indices, non-integer indices, self-loops, and duplicate edges.
+
+The soft-prior fit path was also checked for isolation: even when `cfg.exclude_edges` is set, `run_soft_prior_dagma_fit` with zero prior gradient remains bit-identical to the prior-free baseline across the full matrix. Thus, soft-prior and hard-exclusion mechanisms remain separated.
+
+### Interpretation to remember
+
+Hard exclusion can affect the fitted graph beyond the explicitly excluded edge because DAGMA jointly optimises the full weighted adjacency matrix under the acyclicity constraint. In the M-4 regression fixture, excluding `(3, 4)` also changed a non-excluded strong edge:
+
+- `abs(W_baseline[2,3]) = 0.6241`
+- `abs(W_excluded[2,3]) = 0.2643`
+
+This is not treated as a bug. It is an expected consequence of constrained joint optimisation. The observation should be remembered when interpreting the main-study hard-exclusion baseline: hard exclusion is not simply “soft prior with very large confidence”; it is a distinct optimisation intervention that may redistribute edge weights elsewhere in the graph.
+
+### Consequence for later stages
+
+For M-5/M-6:
+- main-study schema/config records must include `exclude_edges` or the hard-exclusion prior set where applicable;
+- persistent configuration hashes must include hard-exclusion edge sets using deterministic serialisation, not Python’s process-dependent built-in hash;
+- hard-exclusion records should preserve the native continuous `W`, thresholded adjacency, and excluded edge set for auditability.
+
+For M-9/readout:
+- compare soft-prior and hard-exclusion results carefully, especially under corruption;
+- interpret hard-exclusion degradation as the behaviour of a distinct constrained optimisation regime, not merely as an infinite-strength version of the Frobenius soft prior;
+- if broad edge redistribution appears in main-study results, report it as an interpretation note rather than as a separate formal hypothesis.
+
+### Scope note
+
+This entry records an implementation verification and interpretation reminder. It does not introduce a new hypothesis, change the main-study protocol, alter metrics, or reopen the baseline suite.

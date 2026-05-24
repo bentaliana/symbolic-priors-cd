@@ -109,6 +109,15 @@ class DAGMAConfig:
     project_threshold: float = 0.3
     h_diagnostic_threshold: float = 1e-5
 
+    # Hard-exclusion mask passed through to DagmaLinear.fit. When
+    # ``None``, no exclusion is applied and DagmaLinear behaves as in
+    # the prior-free baseline. When a tuple of (row, col) integer
+    # pairs, the wrapper validates the value before the fit call and
+    # forwards it as-is to DagmaLinear, which re-zeros the listed
+    # entries after every Adam step. The soft-prior fit path
+    # ignores this field.
+    exclude_edges: Optional[tuple[tuple[int, int], ...]] = None
+
 
 # ---------------------------------------------------------------------------
 # Wrapper
@@ -511,6 +520,11 @@ class DAGMAWrapper:
             "loss_type": cfg.loss_type,
             "project_threshold": cfg.project_threshold,
             "h_diagnostic_threshold": cfg.h_diagnostic_threshold,
+            "exclude_edges": (
+                None
+                if cfg.exclude_edges is None
+                else [list(edge) for edge in cfg.exclude_edges]
+            ),
         }
 
         loss_decomposition_final: dict[str, float] = {
