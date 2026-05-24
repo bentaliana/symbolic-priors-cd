@@ -51,7 +51,13 @@ from symbolic_priors_cd.wrappers.preprocessing import StandardisedTransform
 
 CALIBRATION_SEEDS: tuple[int, ...] = (401, 402)
 EVALUATION_SEEDS: tuple[int, ...] = (501, 502, 503, 504, 505, 506, 507)
-LAMBDA_PRIOR_CANDIDATES: tuple[float, ...] = (0.01, 0.05, 0.1, 0.5)
+LAMBDA_PRIOR_CANDIDATES: tuple[float, ...] = (
+    2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3,
+)
+
+# Self-describing probe-run label written into the JSON summary. The
+# initial probe used label "initial"; this run uses "lower_grid".
+PROBE_RUN_LABEL = "lower_grid"
 
 N_NODES = 10
 EXPECTED_EDGES = 20
@@ -105,7 +111,7 @@ DEFAULT_OUTPUT_DIR = (
     / "inspection"
     / "probes"
     / "output"
-    / "lambda_prior_calibration"
+    / "lambda_prior_calibration_lower_grid"
 )
 
 JSON_OUTPUT_NAME = "lambda_prior_calibration.json"
@@ -641,6 +647,7 @@ def run_lambda_prior_calibration(
     )
 
     summary: dict[str, Any] = {
+        "probe_run": PROBE_RUN_LABEL,
         "calibration_seeds": list(int(s) for s in CALIBRATION_SEEDS),
         "evaluation_seeds": list(int(s) for s in EVALUATION_SEEDS),
         "lambda_prior_candidates": list(
