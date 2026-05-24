@@ -3606,3 +3606,145 @@ The real held-out evaluation may be launched against the live
 results tree using the wiring above. No source code, no test, no
 configuration JSON, no schema file, and no result artefact is
 created or modified by this entry; the change is documentation-only.
+
+## 24/05/2026 -- Initial lambda_prior calibration probe outcome and grid revision
+
+### Status
+
+The initial lambda_prior smoke calibration probe was executed on
+main-calibration seeds 401 and 402 at the production-scale
+standardised 10-node ER2 setting. All four candidates in the
+initial grid `(0.01, 0.05, 0.1, 0.5)` failed the soft-suppression
+acceptance window with classification `too_strong` on both seeds.
+The probe therefore returned `recommended_lambda_prior = null` with
+`grid_review_reason = "all_too_strong"`. `lambda_prior` is not
+frozen. A follow-up lower-grid probe will be run on the same
+calibration seeds before any matched-L1 selection or headline
+evaluation begins.
+
+### Probe configuration
+
+- `condition = standardised`.
+- `n_nodes = 10`, `expected_edges = 20`, `n_train = 1000`.
+- `dagma_lambda1 = 0.1`, `dagma_threshold = 0.3`,
+  `w_threshold_internal = 0.0`.
+- `dagma_warm_iter = 20000`, `dagma_max_iter = 70000`,
+  `dagma_lr = 3e-4`, `dagma_betas = (0.99, 0.999)`.
+- `calibration_seeds = (401, 402)`; no evaluation seed (501-507)
+  was used at any point in this probe.
+- Candidate grid: `(0.01, 0.05, 0.1, 0.5)`.
+- Acceptance window: ratio in `[0.05, 0.5]` with
+  `soft_abs >= 0.01` and `soft_abs > 1e-6`.
+
+### Step A consistency
+
+Both Step A consistency checks (A-1 zero-mask gate, A-2 zero-lambda
+gate) passed on both calibration seeds at bit-exact precision:
+
+- seed 401: `step_a_zero_mask_delta = 0.0`,
+  `step_a_zero_lambda_delta = 0.0`.
+- seed 402: `step_a_zero_mask_delta = 0.0`,
+  `step_a_zero_lambda_delta = 0.0`.
+
+The soft-prior implementation reproduces the prior-free DAGMA fit
+exactly when the prior gradient is the zero matrix, at the
+production-scale standardised cell.
+
+### Step B per-seed outcomes
+
+True-positive target edge selection succeeded on both seeds at the
+strictest threshold `0.3`:
+
+- seed 401: target edge `(4, 3)`, `base_abs = 0.7549`,
+  `target_threshold_used = 0.3`.
+- seed 402: target edge `(5, 2)`, `base_abs = 0.8091`,
+  `target_threshold_used = 0.3`.
+
+Per-candidate suppression at the smallest grid value
+`lambda_prior = 0.01` (the most lenient candidate):
+
+- seed 401: `soft_abs = 0.003503`, `ratio = 0.004640`,
+  approximately `0.5%` of the prior-free magnitude.
+- seed 402: `soft_abs = 0.000968`, `ratio = 0.001197`,
+  approximately `0.1%` of the prior-free magnitude.
+
+All four candidates on both seeds collapse the targeted
+true-positive edge below the `soft_abs >= 0.01` floor and below
+the `ratio >= 0.05` lower bound. Classification is `too_strong`
+for every `(seed, lambda_prior)` pair in the initial grid.
+
+### Recommendation outcome
+
+- `recommended_lambda_prior = null`.
+- `grid_needs_review = true`.
+- `grid_review_reason = "all_too_strong"`.
+
+No candidate produced a ratio inside the acceptance window
+(0.05 to 0.5 with `soft_abs >= 0.01`). The implementation
+correctly classifies near-annihilation as `too_strong` rather than
+as soft suppression. The probe therefore stops short of freezing
+`lambda_prior` and surfaces the grid for downward revision.
+
+### lambda_prior remains TBD
+
+`lambda_prior` is not frozen by this entry. The previous TBD state
+recorded against `lambda_prior` is unchanged. A follow-up
+calibration probe will run with a lower-grid candidate set:
+
+- Lower-grid candidates:
+  `(2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3)`.
+
+The lower-grid probe must run and produce a passing recommendation
+before matched-L1 selection or any headline evaluation may begin.
+If the lower-grid probe also fails to recommend, a further
+revision will be required before `lambda_prior` can be closed out.
+
+### Artefact paths
+
+- Initial probe artefacts:
+  `inspection/probes/output/lambda_prior_calibration/`
+  (`lambda_prior_calibration.json` and
+  `lambda_prior_calibration.csv`).
+- Lower-grid probe artefacts will be written to:
+  `inspection/probes/output/lambda_prior_calibration_lower_grid/`.
+
+Neither path is under `results/`. The calibration probes are
+human-review probes; their recommended values are not auto-applied
+anywhere.
+
+### Scope boundaries
+
+- No headline evaluation was run by this probe.
+- No main-study run records were produced.
+- No SID, SHD, or MMD value was computed.
+- No interventional data was generated.
+- No evaluation seed (501-507) was used.
+- No source code or test was modified by this entry.
+- No selection-study artefact under `results/model_selection/`
+  was modified or read by this probe.
+
+### What does NOT change
+
+- The base-model selection adjudication (DAGMA, recorded in
+  `docs/08h`) is unchanged.
+- The frozen tactical constants for the main study
+  (`n_train = 1000`, `dagma_lambda1 = 0.1`,
+  `dagma_threshold_primary = 0.3`, `dagma_warm_iter = 20000`,
+  `dagma_max_iter = 70000`, `dagma_lr = 3e-4`,
+  `dagma_betas = (0.99, 0.999)`) are unchanged.
+- The soft-prior implementation (`SoftPriorDagmaLinear` and
+  `run_soft_prior_dagma_fit`) is unchanged; the probe demonstrates
+  that the implementation correctly preserves prior-free behaviour
+  when the prior gradient is zero.
+- The main-study seed pools remain disjoint:
+  `main_calibration = (401, 402)` and
+  `main_evaluation = (501, 502, 503, 504, 505, 506, 507)`.
+
+### Forward note
+
+The lower-grid lambda_prior calibration probe is the next action.
+After it produces a passing recommendation, a separate
+decision-log entry will record the recommended `lambda_prior` and
+close this TBD. No source code, no test, no configuration JSON,
+no schema file, and no result artefact is created or modified by
+this entry; the change is documentation-only.
