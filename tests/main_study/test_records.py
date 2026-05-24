@@ -29,6 +29,9 @@ from experiments.main_study.records import (
     METRIC_STATUSES,
     SAMPLER_STATUS_VALUES,
     MainStudyRunRecord,
+    derive_metric_status_for_failure,
+    diagnostics_to_canonical,
+    make_failure_record,
 )
 from experiments.main_study.schema import (
     FROZEN_LAMBDA_PRIOR,
@@ -853,6 +856,7 @@ _RECORDS_ALLOWED_PREFIXES: frozenset[str] = frozenset({
     "re",
     "typing",
     "datetime",
+    "numpy",
     "experiments.main_study.paths",
     "experiments.main_study.schema",
     "symbolic_priors_cd.wrappers.status",
@@ -895,3 +899,426 @@ def test_records_module_imports_are_allowlisted():
             f"records.py import {mod!r} is not in the allowlist "
             f"{sorted(_RECORDS_ALLOWED_PREFIXES)}."
         )
+
+
+# ===========================================================================
+# diagnostics_to_canonical
+# ===========================================================================
+
+
+def test_diagnostics_to_canonical_converts_ndarray_float():
+    diag = {"arr": np.array([1.5, 2.5, 3.5], dtype=np.float64)}
+    out = diagnostics_to_canonical(diag)
+    assert out["arr"] == [1.5, 2.5, 3.5]
+    assert all(type(v) is float for v in out["arr"])
+
+
+def test_diagnostics_to_canonical_converts_ndarray_bool_to_python_bool():
+    diag = {"m": np.array([[True, False], [False, True]], dtype=bool)}
+    out = diagnostics_to_canonical(diag)
+    assert out["m"] == [[True, False], [False, True]]
+    # Python bool, not int.
+    for row in out["m"]:
+        for v in row:
+            assert type(v) is bool, (
+                f"expected Python bool, got {type(v).__name__}"
+            )
+
+
+def test_diagnostics_to_canonical_converts_numpy_scalars():
+    diag = {
+        "n_iter": np.int64(1234),
+        "tol": np.float64(1e-7),
+        "flag": np.bool_(True),
+    }
+    out = diagnostics_to_canonical(diag)
+    assert out["n_iter"] == 1234
+    assert type(out["n_iter"]) is int
+    assert out["tol"] == pytest.approx(1e-7)
+    assert type(out["tol"]) is float
+    assert out["flag"] is True
+    assert type(out["flag"]) is bool
+
+
+def test_diagnostics_to_canonical_recurses_into_nested_structures():
+    diag = {
+        "outer": {
+            "loss_history": [
+                np.float64(0.5),
+                np.float64(0.3),
+                np.float64(0.1),
+            ],
+            "model_specific": {
+                "thresholded_adjacency": np.array(
+                    [[True, False], [False, True]]
+                ),
+                "n_iterations": np.int32(2500),
+            },
+        },
+        "training_status": "converged",
+        "loss_decomposition_final": (np.float64(0.01), np.float64(0.5)),
+    }
+    out = diagnostics_to_canonical(diag)
+    assert out["outer"]["loss_history"] == [0.5, 0.3, 0.1]
+    assert out["outer"]["model_specific"]["thresholded_adjacency"] == [
+        [True, False],
+        [False, True],
+    ]
+    assert out["outer"]["model_specific"]["n_iterations"] == 2500
+    assert out["training_status"] == "converged"
+    # Tuple gets converted to list.
+    assert out["loss_decomposition_final"] == [0.01, 0.5]
+
+
+def test_diagnostics_to_canonical_rejects_non_string_dict_key():
+    diag = {"nested": {1: "value"}}
+    with pytest.raises(TypeError, match="must be a string"):
+        diagnostics_to_canonical(diag)
+
+
+def test_diagnostics_to_canonical_rejects_unsupported_object_with_path():
+    class _Custom:
+        pass
+
+    diag = {"a": {"b": [1, 2, _Custom()]}}
+    with pytest.raises(TypeError) as exc:
+        diagnostics_to_canonical(diag)
+    msg = str(exc.value)
+    # Path-aware error must locate the offending position.
+    assert "diag" in msg
+    assert "'a'" in msg
+    assert "'b'" in msg
+    assert "[2]" in msg
+    assert "_Custom" in msg
+
+
+def test_diagnostics_to_canonical_rejects_top_level_non_dict():
+    with pytest.raises(TypeError, match="top level"):
+        diagnostics_to_canonical(["not", "a", "dict"])  # type: ignore[arg-type]
+
+
+def test_diagnostics_to_canonical_output_passes_canonicalize_for_json():
+    """Output of diagnostics_to_canonical must be canonicalisable."""
+    from experiments.main_study.schema import canonicalize_for_json
+
+    diag = {
+        "training_status": "converged",
+        "loss_history": [np.float64(0.5), np.float64(0.1)],
+        "thresholded_adjacency": np.array([[True]]),
+    }
+    out = diagnostics_to_canonical(diag)
+    # canonicalize_for_json raises if anything is unsupported.
+    canonicalize_for_json(out)
+
+
+def test_diagnostics_to_canonical_does_not_mutate_input():
+    arr = np.array([1.0, 2.0])
+    diag = {"a": arr, "b": [arr]}
+    snapshot_arr_data = arr.copy()
+    snapshot_keys = list(diag.keys())
+
+    _ = diagnostics_to_canonical(diag)
+
+    # Original ndarray is unchanged.
+    assert np.array_equal(arr, snapshot_arr_data)
+    # Original dict still has the same keys.
+    assert list(diag.keys()) == snapshot_keys
+    # Original dict still holds the same arr object.
+    assert diag["a"] is arr
+
+
+def test_diagnostics_to_canonical_returns_new_dict():
+    diag: dict = {}
+    out = diagnostics_to_canonical(diag)
+    assert out is not diag
+
+
+# ===========================================================================
+# derive_metric_status_for_failure
+# ===========================================================================
+
+
+@pytest.mark.parametrize(
+    "fit_status",
+    ["model_fit_failure", "infrastructure_failure_during_fit"],
+)
+def test_derive_metric_status_non_success_returns_not_computed(fit_status):
+    out = derive_metric_status_for_failure(
+        fit_status=fit_status,
+        graph_status=None,
+        sampler_status=None,
+    )
+    assert out == "not_computed_due_to_fit_failure"
+
+
+def test_derive_metric_status_non_success_takes_precedence_over_graph():
+    """Even if graph_status looks invalid, fit failure dominates."""
+    out = derive_metric_status_for_failure(
+        fit_status="model_fit_failure",
+        graph_status="cyclic",
+        sampler_status="unavailable_invalid_graph",
+    )
+    assert out == "not_computed_due_to_fit_failure"
+
+
+@pytest.mark.parametrize(
+    "graph_status",
+    ["cyclic", "bidirected", "self_loop", "invalid_shape"],
+)
+def test_derive_metric_status_success_plus_invalid_graph(graph_status):
+    out = derive_metric_status_for_failure(
+        fit_status="success",
+        graph_status=graph_status,
+        sampler_status=None,
+    )
+    assert out == "unavailable_graph_invalid"
+
+
+@pytest.mark.parametrize(
+    "sampler_status",
+    [
+        "unavailable_invalid_graph",
+        "unavailable_no_api",
+        "unavailable_unresolved_noise_policy",
+    ],
+)
+def test_derive_metric_status_success_valid_dag_sampler_unavailable(
+    sampler_status,
+):
+    out = derive_metric_status_for_failure(
+        fit_status="success",
+        graph_status="valid_dag",
+        sampler_status=sampler_status,
+    )
+    assert out == "unavailable_sampler_failure"
+
+
+def test_derive_metric_status_success_valid_dag_available_raises():
+    with pytest.raises(ValueError, match="success-with-available"):
+        derive_metric_status_for_failure(
+            fit_status="success",
+            graph_status="valid_dag",
+            sampler_status="available",
+        )
+
+
+def test_derive_metric_status_success_none_graph_none_sampler_raises():
+    with pytest.raises(ValueError, match="success-with-available"):
+        derive_metric_status_for_failure(
+            fit_status="success",
+            graph_status=None,
+            sampler_status=None,
+        )
+
+
+def test_derive_metric_status_rejects_invalid_fit_status_field():
+    with pytest.raises(ValueError, match="fit_status"):
+        derive_metric_status_for_failure(
+            fit_status="bogus_fit",
+            graph_status=None,
+            sampler_status=None,
+        )
+
+
+def test_derive_metric_status_rejects_invalid_graph_status_field():
+    with pytest.raises(ValueError, match="graph_status"):
+        derive_metric_status_for_failure(
+            fit_status="success",
+            graph_status="not_a_graph_status",
+            sampler_status=None,
+        )
+
+
+def test_derive_metric_status_rejects_invalid_sampler_status_field():
+    with pytest.raises(ValueError, match="sampler_status"):
+        derive_metric_status_for_failure(
+            fit_status="success",
+            graph_status="valid_dag",
+            sampler_status="not_a_sampler_status",
+        )
+
+
+# ===========================================================================
+# make_failure_record
+# ===========================================================================
+
+
+def _failure_kwargs(
+    *,
+    config: MainStudyConfig | None = None,
+) -> dict[str, Any]:
+    cfg = config if config is not None else _build_prior_free_config()
+    return dict(
+        config=cfg,
+        n_nodes=10,
+        fit_status="model_fit_failure",
+        failure_kind="non_convergence",
+        failure_message="DAGMA stage 1 diverged",
+        runtime_seconds=15.0,
+        fit_runtime_seconds=15.0,
+        wrapper_diagnostics={"training_status": "diverged"},
+        generated_at_utc=_VALID_GENERATED_AT,
+    )
+
+
+def test_make_failure_record_model_fit_failure_returns_valid_record():
+    cfg = _build_prior_free_config()
+    record = make_failure_record(**_failure_kwargs(config=cfg))
+    assert record.fit_status == "model_fit_failure"
+    assert record.metric_status == "not_computed_due_to_fit_failure"
+    assert record.sid is None
+    assert record.shd is None
+    assert record.mmd is None
+    assert record.metric_runtime_seconds is None
+
+
+def test_make_failure_record_derives_graph_invalid_downstream_metric_status():
+    cfg = _build_prior_free_config()
+    record = make_failure_record(
+        config=cfg,
+        n_nodes=10,
+        fit_status="success",
+        failure_kind=None,
+        failure_message="",
+        runtime_seconds=120.0,
+        fit_runtime_seconds=100.0,
+        wrapper_diagnostics={"training_status": "converged"},
+        generated_at_utc=_VALID_GENERATED_AT,
+        graph_status="cyclic",
+        sampler_status="unavailable_invalid_graph",
+        # interventions_mmd_path can be omitted because metric_status
+        # is derived to "unavailable_graph_invalid".
+        continuous_w_path="results/main_study/abcdef012345/artefacts/r/continuous_w.npz",
+        thresholded_adjacency_path="results/main_study/abcdef012345/artefacts/r/thresholded_adjacency.npz",
+        true_adjacency_path="results/main_study/abcdef012345/artefacts/r/true_adjacency.npz",
+    )
+    assert record.metric_status == "unavailable_graph_invalid"
+    assert record.fit_status == "success"
+    assert record.graph_status == "cyclic"
+    assert record.sampler_status == "unavailable_invalid_graph"
+    assert record.sid is None
+    assert record.shd is None
+    assert record.mmd is None
+
+
+def test_make_failure_record_success_equivalent_with_metric_status_none_raises():
+    cfg = _build_prior_free_config()
+    with pytest.raises(ValueError, match="noncomputed condition"):
+        make_failure_record(
+            config=cfg,
+            n_nodes=10,
+            fit_status="success",
+            failure_kind=None,
+            failure_message="",
+            runtime_seconds=1.0,
+            fit_runtime_seconds=1.0,
+            wrapper_diagnostics={},
+            generated_at_utc=_VALID_GENERATED_AT,
+            graph_status="valid_dag",
+            sampler_status="available",
+        )
+
+
+def test_make_failure_record_prior_free_with_prior_path_raises_through_record():
+    """prior_free record must reject prior artefact paths even on failure."""
+    cfg = _build_prior_free_config()
+    bad_path = "results/main_study/abcdef012345/artefacts/r/prior_edge_set_clean.json"
+    with pytest.raises(ValueError, match="prior_edge_set_clean_path"):
+        make_failure_record(
+            **_failure_kwargs(config=cfg),
+            prior_edge_set_clean_path=bad_path,
+        )
+
+
+def test_make_failure_record_soft_frobenius_failure_may_omit_prior_paths():
+    """soft_frobenius failure records do not require prior paths."""
+    cfg = _build_soft_frobenius_config()
+    kwargs = _failure_kwargs(config=cfg)
+    # No prior paths supplied; the record must still validate.
+    record = make_failure_record(**kwargs)
+    assert record.config.method_family == "soft_frobenius"
+    assert record.fit_status == "model_fit_failure"
+    assert record.confidence_mask_path is None
+    assert record.prior_edge_set_clean_path is None
+    assert record.prior_edge_set_corrupted_path is None
+    assert record.per_edge_labels_path is None
+
+
+def test_make_failure_record_derives_hashes_and_run_id_from_config():
+    cfg = _build_soft_frobenius_config()
+    record = make_failure_record(**_failure_kwargs(config=cfg))
+    assert record.configuration_hash_full == compute_configuration_hash(cfg)
+    assert record.configuration_hash_prefix == configuration_hash_prefix(cfg)
+    assert record.run_id == make_run_id(cfg)
+    assert (
+        record.parent_heldout_run_hash_full
+        == cfg.parent_heldout_run_hash_full
+    )
+
+
+def test_make_failure_record_canonicalises_and_deep_copies_diagnostics():
+    """Diagnostics with numpy arrays must be canonicalised, and the
+    caller's input must not survive into the record after the helper
+    completes."""
+    cfg = _build_prior_free_config()
+    payload = {
+        "training_status": "diverged",
+        "loss_history": np.array([0.5, 0.3, 0.1]),
+        "model_specific": {
+            "n_iterations": np.int32(2500),
+        },
+    }
+    record = make_failure_record(
+        config=cfg,
+        n_nodes=10,
+        fit_status="model_fit_failure",
+        failure_kind="non_convergence",
+        failure_message="diverged",
+        runtime_seconds=1.0,
+        fit_runtime_seconds=1.0,
+        wrapper_diagnostics=payload,
+        generated_at_utc=_VALID_GENERATED_AT,
+    )
+    # Canonicalised: ndarray -> list, np.int32 -> int.
+    assert record.wrapper_diagnostics["loss_history"] == [0.5, 0.3, 0.1]
+    assert isinstance(
+        record.wrapper_diagnostics["loss_history"], list
+    )
+    assert record.wrapper_diagnostics["model_specific"]["n_iterations"] == 2500
+    assert type(
+        record.wrapper_diagnostics["model_specific"]["n_iterations"]
+    ) is int
+
+    # Mutating the caller's input does not change the record.
+    payload["new_top_key"] = "should_not_appear"
+    payload["model_specific"]["n_iterations"] = 999999
+    assert "new_top_key" not in record.wrapper_diagnostics
+    assert (
+        record.wrapper_diagnostics["model_specific"]["n_iterations"] == 2500
+    )
+
+
+def test_make_failure_record_same_inputs_produce_equal_records():
+    cfg = _build_prior_free_config()
+    kwargs = _failure_kwargs(config=cfg)
+    a = make_failure_record(**copy.deepcopy(kwargs))
+    b = make_failure_record(**copy.deepcopy(kwargs))
+    assert a == b
+
+
+def test_make_failure_record_infrastructure_failure_path():
+    cfg = _build_prior_free_config()
+    record = make_failure_record(
+        config=cfg,
+        n_nodes=10,
+        fit_status="infrastructure_failure_during_fit",
+        failure_kind="infrastructure",
+        failure_message="disk write failed",
+        runtime_seconds=0.5,
+        fit_runtime_seconds=0.5,
+        wrapper_diagnostics={},
+        generated_at_utc=_VALID_GENERATED_AT,
+    )
+    assert record.fit_status == "infrastructure_failure_during_fit"
+    assert record.metric_status == "not_computed_due_to_fit_failure"
+    assert record.failure_kind == "infrastructure"

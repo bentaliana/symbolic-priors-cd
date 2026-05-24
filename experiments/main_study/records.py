@@ -21,6 +21,8 @@ import re
 from datetime import datetime
 from typing import Any, Optional, get_args
 
+import numpy as np
+
 from experiments.main_study.paths import validate_relative_posix_path
 from experiments.main_study.schema import (
     SCHEMA_VERSION,
@@ -539,6 +541,232 @@ class MainStudyRunRecord:
                 )
 
 
+# ---------------------------------------------------------------------------
+# Diagnostics canonicalisation
+# ---------------------------------------------------------------------------
+
+
+def _convert_diag(value: Any, path: str) -> Any:
+    """Recursively convert one diagnostic value to JSON-friendly form.
+
+    The ``path`` string is included in any error message so callers
+    can locate the offending position inside the original
+    diagnostics structure.
+    """
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float, str)):
+        return value
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, sub in value.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    f"diagnostics dict key at {path} must be a string; "
+                    f"got {type(key).__name__}: {key!r}."
+                )
+            out[key] = _convert_diag(sub, f"{path}[{key!r}]")
+        return out
+    if isinstance(value, (list, tuple)):
+        return [
+            _convert_diag(item, f"{path}[{idx}]")
+            for idx, item in enumerate(value)
+        ]
+    raise TypeError(
+        f"diagnostics value at {path} has unsupported type "
+        f"{type(value).__name__}: {value!r}."
+    )
+
+
+def diagnostics_to_canonical(diag: dict) -> dict:
+    """Return a JSON-friendly canonical copy of ``diag``.
+
+    Converts NumPy arrays via ``.tolist()`` and NumPy scalars via
+    ``.item()``; recurses into dicts, lists, and tuples; preserves
+    primitives unchanged. Rejects non-string dict keys and
+    unsupported value types with a path-aware ``TypeError`` message.
+    The input dict is never mutated; a new dict (and new nested
+    containers) are constructed. The returned value is passed
+    through :func:`canonicalize_for_json` as a final safety check.
+    """
+    if type(diag) is not dict:
+        raise TypeError(
+            "diagnostics_to_canonical requires a dict at the top "
+            f"level; got {type(diag).__name__}."
+        )
+    converted = _convert_diag(diag, "diag")
+    # Final safety net: the canonicaliser raises TypeError on any
+    # nested value that slipped past _convert_diag.
+    canonicalize_for_json(converted)
+    return converted
+
+
+# ---------------------------------------------------------------------------
+# Metric-status derivation for failure/noncomputed records
+# ---------------------------------------------------------------------------
+
+
+def derive_metric_status_for_failure(
+    *,
+    fit_status: str,
+    graph_status: Optional[str],
+    sampler_status: Optional[str],
+) -> str:
+    """Derive the metric_status for a fit failure or downstream noncomputed case.
+
+    Precedence (first matching branch returns):
+
+    1. ``fit_status != "success"`` -> ``"not_computed_due_to_fit_failure"``.
+    2. ``graph_status not in (None, "valid_dag")`` ->
+       ``"unavailable_graph_invalid"``.
+    3. ``sampler_status not in (None, "available")`` ->
+       ``"unavailable_sampler_failure"``.
+
+    Any combination not matching the above is treated as a
+    success-with-available-sampler condition and rejected with
+    ``ValueError``; this helper is for failure/noncomputed paths only.
+
+    Validates each input against the allowed status values.
+    """
+    if fit_status not in FIT_STATUSES:
+        raise ValueError(
+            f"derive_metric_status_for_failure: fit_status must be one "
+            f"of {FIT_STATUSES}; got {fit_status!r}."
+        )
+    if graph_status is not None and graph_status not in GRAPH_STATUS_VALUES:
+        raise ValueError(
+            "derive_metric_status_for_failure: graph_status must be "
+            f"None or in {GRAPH_STATUS_VALUES}; got {graph_status!r}."
+        )
+    if (
+        sampler_status is not None
+        and sampler_status not in SAMPLER_STATUS_VALUES
+    ):
+        raise ValueError(
+            "derive_metric_status_for_failure: sampler_status must be "
+            f"None or in {SAMPLER_STATUS_VALUES}; got "
+            f"{sampler_status!r}."
+        )
+
+    if fit_status != "success":
+        return "not_computed_due_to_fit_failure"
+    if graph_status is not None and graph_status != "valid_dag":
+        return "unavailable_graph_invalid"
+    if sampler_status is not None and sampler_status != "available":
+        return "unavailable_sampler_failure"
+    raise ValueError(
+        "derive_metric_status_for_failure requires a fit failure or a "
+        "downstream noncomputed condition; got fit_status="
+        f"{fit_status!r}, graph_status={graph_status!r}, "
+        f"sampler_status={sampler_status!r} (these describe a "
+        "success-with-available-sampler state)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Failure-record factory
+# ---------------------------------------------------------------------------
+
+
+def make_failure_record(
+    *,
+    config: MainStudyConfig,
+    n_nodes: int,
+    fit_status: str,
+    failure_kind: Optional[str],
+    failure_message: str,
+    runtime_seconds: float,
+    fit_runtime_seconds: float,
+    wrapper_diagnostics: dict,
+    generated_at_utc: str,
+    metric_status: Optional[str] = None,
+    graph_status: Optional[str] = None,
+    sampler_status: Optional[str] = None,
+    code_version: Optional[str] = None,
+    continuous_w_path: Optional[str] = None,
+    thresholded_adjacency_path: Optional[str] = None,
+    confidence_mask_path: Optional[str] = None,
+    interventions_mmd_path: Optional[str] = None,
+    prior_edge_set_clean_path: Optional[str] = None,
+    prior_edge_set_corrupted_path: Optional[str] = None,
+    per_edge_labels_path: Optional[str] = None,
+    true_adjacency_path: Optional[str] = None,
+) -> "MainStudyRunRecord":
+    """Construct a :class:`MainStudyRunRecord` for a fit-failure or
+    downstream noncomputed case.
+
+    Sets ``sid``, ``shd``, ``mmd``, and ``metric_runtime_seconds`` to
+    ``None`` unconditionally. Derives ``configuration_hash_full``,
+    ``configuration_hash_prefix``, ``run_id``, and
+    ``parent_heldout_run_hash_full`` from ``config``. When
+    ``metric_status`` is ``None``, it is derived via
+    :func:`derive_metric_status_for_failure`; if derivation rejects
+    the inputs, the error is re-raised with an explanatory message.
+    ``wrapper_diagnostics`` is canonicalised via
+    :func:`diagnostics_to_canonical` before construction; the
+    resulting record validation runs the usual rules.
+
+    The factory never infers or fabricates ``graph_status`` or
+    ``sampler_status``: callers supply whatever the wrapper reported,
+    including ``None``.
+    """
+    if metric_status is None:
+        try:
+            metric_status = derive_metric_status_for_failure(
+                fit_status=fit_status,
+                graph_status=graph_status,
+                sampler_status=sampler_status,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "make_failure_record requires a fit failure or "
+                "downstream noncomputed condition when metric_status "
+                "is not supplied. The derivation helper rejected the "
+                f"inputs: {exc}"
+            ) from exc
+
+    canonical_diag = diagnostics_to_canonical(wrapper_diagnostics)
+
+    return MainStudyRunRecord(
+        schema_version=SCHEMA_VERSION,
+        config=config,
+        configuration_hash_full=compute_configuration_hash(config),
+        configuration_hash_prefix=configuration_hash_prefix(config),
+        run_id=make_run_id(config),
+        n_nodes=n_nodes,
+        fit_status=fit_status,
+        graph_status=graph_status,
+        sampler_status=sampler_status,
+        metric_status=metric_status,
+        failure_kind=failure_kind,
+        failure_message=failure_message,
+        sid=None,
+        shd=None,
+        mmd=None,
+        runtime_seconds=runtime_seconds,
+        fit_runtime_seconds=fit_runtime_seconds,
+        metric_runtime_seconds=None,
+        wrapper_diagnostics=canonical_diag,
+        continuous_w_path=continuous_w_path,
+        thresholded_adjacency_path=thresholded_adjacency_path,
+        confidence_mask_path=confidence_mask_path,
+        interventions_mmd_path=interventions_mmd_path,
+        prior_edge_set_clean_path=prior_edge_set_clean_path,
+        prior_edge_set_corrupted_path=prior_edge_set_corrupted_path,
+        per_edge_labels_path=per_edge_labels_path,
+        true_adjacency_path=true_adjacency_path,
+        parent_heldout_run_hash_full=config.parent_heldout_run_hash_full,
+        generated_at_utc=generated_at_utc,
+        code_version=code_version,
+    )
+
+
 __all__ = [
     "FIT_STATUSES",
     "METRIC_STATUSES",
@@ -546,4 +774,7 @@ __all__ = [
     "GRAPH_STATUS_VALUES",
     "SAMPLER_STATUS_VALUES",
     "MainStudyRunRecord",
+    "diagnostics_to_canonical",
+    "derive_metric_status_for_failure",
+    "make_failure_record",
 ]
