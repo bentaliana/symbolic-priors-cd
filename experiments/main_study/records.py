@@ -1,0 +1,549 @@
+"""Core post-run record schema for the main-study pipeline.
+
+Defines :class:`MainStudyRunRecord` (the immutable per-run record
+emitted after fitting and scoring a single experimental condition)
+together with the status-value tuples used for validation. The
+record is frozen, keyword-only, and validates every field at
+construction time.
+
+Serialisation helpers (``record_to_dict`` / ``record_from_dict`` /
+``record_to_json`` / ``record_from_json``) and the convenience
+``make_failure_record`` factory are deliberately not implemented
+here; they will be added in a follow-up commit.
+"""
+
+from __future__ import annotations
+
+import copy
+import dataclasses
+import math
+import re
+from datetime import datetime
+from typing import Any, Optional, get_args
+
+from experiments.main_study.paths import validate_relative_posix_path
+from experiments.main_study.schema import (
+    SCHEMA_VERSION,
+    MainStudyConfig,
+    canonicalize_for_json,
+    compute_configuration_hash,
+    configuration_hash_prefix,
+    make_run_id,
+)
+from symbolic_priors_cd.wrappers.status import GraphStatus, SamplerStatus
+
+
+# ---------------------------------------------------------------------------
+# Status taxonomy
+# ---------------------------------------------------------------------------
+
+
+FIT_STATUSES: tuple[str, ...] = (
+    "success",
+    "model_fit_failure",
+    "infrastructure_failure_during_fit",
+)
+
+
+METRIC_STATUSES: tuple[str, ...] = (
+    "computed",
+    "unavailable_graph_invalid",
+    "unavailable_sampler_failure",
+    "unavailable_dependency_missing",
+    "not_computed_due_to_fit_failure",
+)
+
+
+FAILURE_KINDS: tuple[Optional[str], ...] = (
+    None,
+    "non_convergence",
+    "invalid_graph",
+    "sampler_unavailable",
+    "metric_unavailable",
+    "infrastructure",
+)
+
+
+# Graph and sampler status sets are derived from the wrapper module's
+# Literal type aliases rather than redefined here, so any future
+# extension in the wrapper layer flows through automatically.
+GRAPH_STATUS_VALUES: tuple[str, ...] = tuple(get_args(GraphStatus))
+SAMPLER_STATUS_VALUES: tuple[str, ...] = tuple(get_args(SamplerStatus))
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+_HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+_ARTEFACT_PATH_FIELDS: tuple[str, ...] = (
+    "continuous_w_path",
+    "thresholded_adjacency_path",
+    "confidence_mask_path",
+    "interventions_mmd_path",
+    "prior_edge_set_clean_path",
+    "prior_edge_set_corrupted_path",
+    "per_edge_labels_path",
+    "true_adjacency_path",
+)
+
+
+_SUCCESS_REQUIRED_PATHS: tuple[str, ...] = (
+    "continuous_w_path",
+    "thresholded_adjacency_path",
+    "true_adjacency_path",
+)
+
+
+_PRIOR_BACKED_PATHS: tuple[str, ...] = (
+    "prior_edge_set_clean_path",
+    "prior_edge_set_corrupted_path",
+    "per_edge_labels_path",
+)
+
+
+def _is_plain_int(value: Any) -> bool:
+    """True when ``value`` is an ``int`` and not a ``bool``."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _validate_iso8601_with_timezone(value: str) -> None:
+    """Validate ``value`` is a timezone-aware ISO-8601 string.
+
+    Accepts the ``Z`` suffix (UTC) and explicit numeric offsets such
+    as ``+00:00`` or ``-05:00``. Rejects naive timestamps and
+    anything that does not parse via ``datetime.fromisoformat``.
+    """
+    if not isinstance(value, str) or value == "":
+        raise ValueError(
+            "generated_at_utc must be a non-empty string; "
+            f"got {value!r}."
+        )
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            "generated_at_utc must be a valid ISO-8601 string; "
+            f"got {value!r}: {exc}"
+        ) from exc
+    if parsed.tzinfo is None:
+        raise ValueError(
+            "generated_at_utc must include a timezone "
+            "(e.g. 'Z' or '+00:00'); got naive timestamp "
+            f"{value!r}."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Post-run record dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class MainStudyRunRecord:
+    """Immutable post-run record for a single main-study condition.
+
+    The record carries the full :class:`MainStudyConfig`, the
+    re-derivable configuration hash and run identifier, the
+    structured status taxonomy, the three primary metrics (or
+    ``None`` when not computed), the runtime breakdown, the
+    JSON-canonicalisable wrapper diagnostics, and the relative POSIX
+    paths to per-run artefacts.
+
+    Validation runs in :meth:`__post_init__`; constructing a record
+    is the canonical correctness gate.
+    """
+
+    schema_version: int
+    config: MainStudyConfig
+    configuration_hash_full: str
+    configuration_hash_prefix: str
+    run_id: str
+    n_nodes: int
+
+    fit_status: str
+    graph_status: Optional[str]
+    sampler_status: Optional[str]
+    metric_status: str
+    failure_kind: Optional[str]
+    failure_message: str
+
+    runtime_seconds: float
+    fit_runtime_seconds: float
+
+    wrapper_diagnostics: dict[str, Any]
+
+    parent_heldout_run_hash_full: str
+    generated_at_utc: str
+
+    sid: Optional[float] = None
+    shd: Optional[float] = None
+    mmd: Optional[float] = None
+
+    metric_runtime_seconds: Optional[float] = None
+
+    continuous_w_path: Optional[str] = None
+    thresholded_adjacency_path: Optional[str] = None
+    confidence_mask_path: Optional[str] = None
+    interventions_mmd_path: Optional[str] = None
+    prior_edge_set_clean_path: Optional[str] = None
+    prior_edge_set_corrupted_path: Optional[str] = None
+    per_edge_labels_path: Optional[str] = None
+    true_adjacency_path: Optional[str] = None
+
+    code_version: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        self._validate_schema_and_config_identity()
+        self._validate_status_values()
+        self._validate_n_nodes()
+        self._validate_timings()
+        _validate_iso8601_with_timezone(self.generated_at_utc)
+        self._validate_code_version()
+        self._validate_and_copy_wrapper_diagnostics()
+        self._validate_failure_and_metric_semantics()
+        self._validate_artefact_paths()
+
+    # -- Identity ----------------------------------------------------
+
+    def _validate_schema_and_config_identity(self) -> None:
+        if self.schema_version != SCHEMA_VERSION:
+            raise ValueError(
+                "schema_version must equal "
+                f"{SCHEMA_VERSION}; got {self.schema_version!r}."
+            )
+        if not isinstance(self.config, MainStudyConfig):
+            raise TypeError(
+                "config must be a MainStudyConfig; got "
+                f"{type(self.config).__name__}."
+            )
+
+        if not isinstance(self.configuration_hash_full, str):
+            raise ValueError(
+                "configuration_hash_full must be a string; got "
+                f"{type(self.configuration_hash_full).__name__}."
+            )
+        if not _HEX_64_RE.fullmatch(self.configuration_hash_full):
+            raise ValueError(
+                "configuration_hash_full must be 64 lowercase hex "
+                f"characters; got {self.configuration_hash_full!r}."
+            )
+
+        recomputed_full = compute_configuration_hash(self.config)
+        if self.configuration_hash_full != recomputed_full:
+            raise ValueError(
+                "configuration_hash_full does not match "
+                "compute_configuration_hash(config). "
+                f"got {self.configuration_hash_full!r}, "
+                f"expected {recomputed_full!r}."
+            )
+
+        recomputed_prefix = configuration_hash_prefix(self.config)
+        if self.configuration_hash_prefix != recomputed_prefix:
+            raise ValueError(
+                "configuration_hash_prefix does not match "
+                "configuration_hash_prefix(config). "
+                f"got {self.configuration_hash_prefix!r}, "
+                f"expected {recomputed_prefix!r}."
+            )
+        if self.configuration_hash_prefix != self.configuration_hash_full[:12]:
+            raise ValueError(
+                "configuration_hash_prefix must equal the first 12 "
+                "characters of configuration_hash_full. "
+                f"got prefix {self.configuration_hash_prefix!r}, "
+                f"full {self.configuration_hash_full!r}."
+            )
+
+        expected_run_id = make_run_id(self.config)
+        if self.run_id != expected_run_id:
+            raise ValueError(
+                "run_id does not match make_run_id(config). "
+                f"got {self.run_id!r}, expected {expected_run_id!r}."
+            )
+
+        if (
+            self.parent_heldout_run_hash_full
+            != self.config.parent_heldout_run_hash_full
+        ):
+            raise ValueError(
+                "parent_heldout_run_hash_full does not match "
+                "config.parent_heldout_run_hash_full. "
+                f"got {self.parent_heldout_run_hash_full!r}, "
+                f"expected {self.config.parent_heldout_run_hash_full!r}."
+            )
+
+    # -- Status / enums ---------------------------------------------
+
+    def _validate_status_values(self) -> None:
+        if self.fit_status not in FIT_STATUSES:
+            raise ValueError(
+                f"fit_status must be one of {FIT_STATUSES}; "
+                f"got {self.fit_status!r}."
+            )
+        if self.metric_status not in METRIC_STATUSES:
+            raise ValueError(
+                f"metric_status must be one of {METRIC_STATUSES}; "
+                f"got {self.metric_status!r}."
+            )
+        if self.failure_kind not in FAILURE_KINDS:
+            raise ValueError(
+                f"failure_kind must be one of {FAILURE_KINDS}; "
+                f"got {self.failure_kind!r}."
+            )
+        if self.graph_status is not None and (
+            self.graph_status not in GRAPH_STATUS_VALUES
+        ):
+            raise ValueError(
+                "graph_status must be None or in "
+                f"{GRAPH_STATUS_VALUES}; got {self.graph_status!r}."
+            )
+        if self.sampler_status is not None and (
+            self.sampler_status not in SAMPLER_STATUS_VALUES
+        ):
+            raise ValueError(
+                "sampler_status must be None or in "
+                f"{SAMPLER_STATUS_VALUES}; got {self.sampler_status!r}."
+            )
+
+    # -- Dimensions / timings --------------------------------------
+
+    def _validate_n_nodes(self) -> None:
+        if type(self.n_nodes) is not int:
+            raise ValueError(
+                "n_nodes must be a plain int (no bool, no float); "
+                f"got {type(self.n_nodes).__name__}: {self.n_nodes!r}."
+            )
+        if self.n_nodes <= 0:
+            raise ValueError(
+                f"n_nodes must be positive; got {self.n_nodes}."
+            )
+
+    def _validate_timings(self) -> None:
+        for label, value in (
+            ("runtime_seconds", self.runtime_seconds),
+            ("fit_runtime_seconds", self.fit_runtime_seconds),
+        ):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(
+                    f"{label} must be a finite non-negative number; "
+                    f"got {value!r}."
+                )
+            v = float(value)
+            if not math.isfinite(v) or v < 0.0:
+                raise ValueError(
+                    f"{label} must be finite and >= 0; got {value!r}."
+                )
+        if self.metric_runtime_seconds is not None:
+            value = self.metric_runtime_seconds
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(
+                    "metric_runtime_seconds must be None or a finite "
+                    f"non-negative number; got {value!r}."
+                )
+            v = float(value)
+            if not math.isfinite(v) or v < 0.0:
+                raise ValueError(
+                    "metric_runtime_seconds must be None or finite and "
+                    f">= 0; got {value!r}."
+                )
+
+    def _validate_code_version(self) -> None:
+        if self.code_version is None:
+            return
+        if not isinstance(self.code_version, str) or self.code_version == "":
+            raise ValueError(
+                "code_version must be None or a non-empty string; "
+                f"got {self.code_version!r}."
+            )
+
+    # -- wrapper_diagnostics ----------------------------------------
+
+    def _validate_and_copy_wrapper_diagnostics(self) -> None:
+        if type(self.wrapper_diagnostics) is not dict:
+            raise TypeError(
+                "wrapper_diagnostics must be exactly dict; got "
+                f"{type(self.wrapper_diagnostics).__name__}."
+            )
+        # Verify canonicalisability before deep-copying; raises
+        # TypeError on unsupported nested types via canonicalize_for_json.
+        canonicalize_for_json(self.wrapper_diagnostics)
+        object.__setattr__(
+            self,
+            "wrapper_diagnostics",
+            copy.deepcopy(self.wrapper_diagnostics),
+        )
+
+    # -- Failure / metrics semantics --------------------------------
+
+    def _validate_failure_and_metric_semantics(self) -> None:
+        if not isinstance(self.failure_message, str):
+            raise ValueError(
+                "failure_message must be a string; got "
+                f"{type(self.failure_message).__name__}."
+            )
+
+        if self.fit_status == "success":
+            if self.failure_kind is not None:
+                raise ValueError(
+                    "success record requires failure_kind=None; "
+                    f"got {self.failure_kind!r}."
+                )
+            if self.failure_message != "":
+                raise ValueError(
+                    "success record requires failure_message=''; "
+                    f"got {self.failure_message!r}."
+                )
+            if self.graph_status is None:
+                raise ValueError(
+                    "success record requires graph_status; got None."
+                )
+            if self.sampler_status is None:
+                raise ValueError(
+                    "success record requires sampler_status; got None."
+                )
+        else:
+            if self.metric_status == "computed":
+                raise ValueError(
+                    "non-success record must not have "
+                    f"metric_status='computed'; got fit_status="
+                    f"{self.fit_status!r}, metric_status="
+                    f"{self.metric_status!r}."
+                )
+            if self.failure_kind is None and self.failure_message == "":
+                raise ValueError(
+                    "non-success record requires either a "
+                    "failure_kind or a non-empty failure_message."
+                )
+
+        if self.metric_status == "computed":
+            if self.fit_status != "success":
+                raise ValueError(
+                    "metric_status='computed' requires "
+                    f"fit_status='success'; got {self.fit_status!r}."
+                )
+            for label, value in (
+                ("sid", self.sid),
+                ("shd", self.shd),
+                ("mmd", self.mmd),
+            ):
+                if value is None or not isinstance(
+                    value, (int, float)
+                ) or isinstance(value, bool):
+                    raise ValueError(
+                        f"metric_status='computed' requires finite "
+                        f"non-negative {label}; got {value!r}."
+                    )
+                v = float(value)
+                if not math.isfinite(v) or v < 0.0:
+                    raise ValueError(
+                        f"metric_status='computed' requires finite "
+                        f"non-negative {label}; got {value!r}."
+                    )
+            if self.metric_runtime_seconds is None:
+                raise ValueError(
+                    "metric_status='computed' requires "
+                    "metric_runtime_seconds (finite, >= 0)."
+                )
+            if self.interventions_mmd_path is None:
+                raise ValueError(
+                    "metric_status='computed' requires "
+                    "interventions_mmd_path to be set."
+                )
+        else:
+            for label, value in (
+                ("sid", self.sid),
+                ("shd", self.shd),
+                ("mmd", self.mmd),
+            ):
+                if value is not None:
+                    raise ValueError(
+                        f"metric_status={self.metric_status!r} "
+                        f"requires {label}=None; got {value!r}."
+                    )
+
+    # -- Artefact paths ---------------------------------------------
+
+    def _validate_artefact_paths(self) -> None:
+        # Validate format of every non-None path.
+        for field_name in _ARTEFACT_PATH_FIELDS:
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            try:
+                validate_relative_posix_path(value)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{field_name}={value!r} is not a valid relative "
+                    f"POSIX path: {exc}"
+                ) from exc
+
+        family = self.config.method_family
+
+        # Success-only required paths.
+        if self.fit_status == "success":
+            for required in _SUCCESS_REQUIRED_PATHS:
+                if getattr(self, required) is None:
+                    raise ValueError(
+                        f"success record requires {required}."
+                    )
+
+        # Prior-backed paths required for soft_frobenius and
+        # hard_exclusion success records.
+        if (
+            self.fit_status == "success"
+            and family in ("soft_frobenius", "hard_exclusion")
+        ):
+            for required in _PRIOR_BACKED_PATHS:
+                if getattr(self, required) is None:
+                    raise ValueError(
+                        f"{family} success record requires {required}."
+                    )
+
+        # confidence_mask_path required for soft_frobenius success.
+        if (
+            self.fit_status == "success"
+            and family == "soft_frobenius"
+        ):
+            if self.confidence_mask_path is None:
+                raise ValueError(
+                    "soft_frobenius success record requires "
+                    "confidence_mask_path."
+                )
+
+        # prior_free and matched_l1: confidence_mask + prior paths
+        # must always be None.
+        if family in ("prior_free", "matched_l1"):
+            for not_allowed in (
+                "confidence_mask_path",
+                "prior_edge_set_clean_path",
+                "prior_edge_set_corrupted_path",
+                "per_edge_labels_path",
+            ):
+                if getattr(self, not_allowed) is not None:
+                    raise ValueError(
+                        f"{family} record must have "
+                        f"{not_allowed}=None; got "
+                        f"{getattr(self, not_allowed)!r}."
+                    )
+
+        # hard_exclusion: confidence_mask_path must always be None.
+        if family == "hard_exclusion":
+            if self.confidence_mask_path is not None:
+                raise ValueError(
+                    "hard_exclusion record must have "
+                    f"confidence_mask_path=None; got "
+                    f"{self.confidence_mask_path!r}."
+                )
+
+
+__all__ = [
+    "FIT_STATUSES",
+    "METRIC_STATUSES",
+    "FAILURE_KINDS",
+    "GRAPH_STATUS_VALUES",
+    "SAMPLER_STATUS_VALUES",
+    "MainStudyRunRecord",
+]
