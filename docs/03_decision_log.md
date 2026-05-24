@@ -3748,3 +3748,23 @@ decision-log entry will record the recommended `lambda_prior` and
 close this TBD. No source code, no test, no configuration JSON,
 no schema file, and no result artefact is created or modified by
 this entry; the change is documentation-only.
+
+
+24/05/2026 — Main-study lambda_prior calibrated and frozen
+
+Decision:
+- The main-study soft-prior Frobenius penalty uses lambda_prior = 2e-4.
+- This value is frozen before matched-L1 selection and before any headline evaluation-seed runs.
+
+Evidence:
+- The initial calibration grid (0.01, 0.05, 0.1, 0.5) on main-calibration seeds 401 and 402 was rejected because all candidates produced practical near-annihilation of the deliberately penalised true-positive target edge.
+- A lower-grid follow-up (2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3) selected 2e-4 as the smallest value passing the pre-specified non-degenerate shrinkage criterion on both calibration seeds.
+- The supporting readout is recorded in docs/09a_lambda_prior_calibration_readout.md.
+- No evaluation seeds 501-507 were used.
+
+Reason:
+The value 2e-4 provides visible but non-degenerate soft suppression in the production DAGMA setting. It is a calibrated protocol value, not an optimised performance-tuned hyperparameter.
+
+Consequence:
+- Main-study soft-prior runs must use lambda_prior = 2e-4 unless a future documented amendment is made before headline evaluation.
+- Matched-L1 selection may now proceed later using this frozen soft-prior setting.
