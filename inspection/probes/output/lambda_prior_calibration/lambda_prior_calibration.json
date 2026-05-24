@@ -1,0 +1,227 @@
+{
+  "calibration_seeds": [
+    401,
+    402
+  ],
+  "evaluation_seeds": [
+    501,
+    502,
+    503,
+    504,
+    505,
+    506,
+    507
+  ],
+  "lambda_prior_candidates": [
+    0.01,
+    0.05,
+    0.1,
+    0.5
+  ],
+  "constants": {
+    "n_nodes": 10,
+    "expected_edges": 20,
+    "n_train": 1000,
+    "condition": "standardised",
+    "dagma_lambda1": 0.1,
+    "dagma_threshold": 0.3,
+    "dagma_warm_iter": 20000,
+    "dagma_max_iter": 70000,
+    "dagma_lr": 0.0003,
+    "dagma_betas": [
+      0.99,
+      0.999
+    ],
+    "w_threshold_internal": 0.0,
+    "dagma_T": 4,
+    "dagma_s": [
+      1.0,
+      0.9,
+      0.8,
+      0.7
+    ],
+    "dagma_mu_init": 1.0,
+    "dagma_mu_factor": 0.1,
+    "dagma_loss_type": "l2",
+    "ratio_min_pass": 0.05,
+    "ratio_max_pass": 0.5,
+    "soft_abs_floor": 0.01,
+    "soft_abs_hard_floor": 1e-06,
+    "step_a_delta_tol": 1e-10,
+    "target_thresholds": [
+      0.3,
+      0.2,
+      0.1
+    ]
+  },
+  "data_seed_derivation": "graph_seed = train_data_seed = calibration_seed; independent np.random.default_rng(int) per call",
+  "selection_rule": "For each calibration seed, take the minimum lambda_prior that passes the soft-suppression acceptance window. The recommended lambda_prior is the larger of the two per-seed minima. If any calibration seed has no passing candidate, the recommendation is null and grid_needs_review is true.",
+  "recommended_lambda_prior": null,
+  "grid_needs_review": true,
+  "grid_review_reason": "all_too_strong",
+  "per_seed_summary": [
+    {
+      "seed": 401,
+      "train_data_seed": 401,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0,
+      "step_a_zero_lambda_entry": [
+        1,
+        7
+      ],
+      "step_a_zero_lambda_entry_delta": 0.0,
+      "step_a2_used_fallback_threshold": false,
+      "target_i": 4,
+      "target_j": 3,
+      "target_threshold_used": 0.3,
+      "base_abs": 0.7549146335235175
+    },
+    {
+      "seed": 402,
+      "train_data_seed": 402,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0,
+      "step_a_zero_lambda_entry": [
+        3,
+        6
+      ],
+      "step_a_zero_lambda_entry_delta": 0.0,
+      "step_a2_used_fallback_threshold": false,
+      "target_i": 5,
+      "target_j": 2,
+      "target_threshold_used": 0.3,
+      "base_abs": 0.809072893593143
+    }
+  ],
+  "candidate_rows": [
+    {
+      "seed": 401,
+      "train_data_seed": 401,
+      "target_i": 4,
+      "target_j": 3,
+      "target_threshold_used": 0.3,
+      "lambda_prior": 0.01,
+      "base_abs": 0.7549146335235175,
+      "soft_abs": 0.0035027042737476016,
+      "ratio": 0.004639868030374435,
+      "reduction_percent": 99.53601319696256,
+      "candidate_status": "too_strong",
+      "passes": false,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0
+    },
+    {
+      "seed": 401,
+      "train_data_seed": 401,
+      "target_i": 4,
+      "target_j": 3,
+      "target_threshold_used": 0.3,
+      "lambda_prior": 0.05,
+      "base_abs": 0.7549146335235175,
+      "soft_abs": 0.00019839022961197378,
+      "ratio": 0.00026279823016014356,
+      "reduction_percent": 99.97372017698399,
+      "candidate_status": "too_strong",
+      "passes": false,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0
+    },
+    {
+      "seed": 401,
+      "train_data_seed": 401,
+      "target_i": 4,
+      "target_j": 3,
+      "target_threshold_used": 0.3,
+      "lambda_prior": 0.1,
+      "base_abs": 0.7549146335235175,
+      "soft_abs": 0.00016910375240414445,
+      "ratio": 0.00022400380770851283,
+      "reduction_percent": 99.97759961922915,
+      "candidate_status": "too_strong",
+      "passes": false,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0
+    },
+    {
+      "seed": 401,
+      "train_data_seed": 401,
+      "target_i": 4,
+      "target_j": 3,
+      "target_threshold_used": 0.3,
+      "lambda_prior": 0.5,
+      "base_abs": 0.7549146335235175,
+      "soft_abs": 7.55213957025224e-05,
+      "ratio": 0.00010003964998006587,
+      "reduction_percent": 99.989996035002,
+      "candidate_status": "too_strong",
+      "passes": false,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0
+    },
+    {
+      "seed": 402,
+      "train_data_seed": 402,
+      "target_i": 5,
+      "target_j": 2,
+      "target_threshold_used": 0.3,
+      "lambda_prior": 0.01,
+      "base_abs": 0.809072893593143,
+      "soft_abs": 0.0009681822400723134,
+      "ratio": 0.0011966563800853045,
+      "reduction_percent": 99.88033436199147,
+      "candidate_status": "too_strong",
+      "passes": false,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0
+    },
+    {
+      "seed": 402,
+      "train_data_seed": 402,
+      "target_i": 5,
+      "target_j": 2,
+      "target_threshold_used": 0.3,
+      "lambda_prior": 0.05,
+      "base_abs": 0.809072893593143,
+      "soft_abs": 0.00029183359915065674,
+      "ratio": 0.00036070124393193493,
+      "reduction_percent": 99.96392987560681,
+      "candidate_status": "too_strong",
+      "passes": false,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0
+    },
+    {
+      "seed": 402,
+      "train_data_seed": 402,
+      "target_i": 5,
+      "target_j": 2,
+      "target_threshold_used": 0.3,
+      "lambda_prior": 0.1,
+      "base_abs": 0.809072893593143,
+      "soft_abs": 0.00028163847910579444,
+      "ratio": 0.00034810025318611336,
+      "reduction_percent": 99.9651899746814,
+      "candidate_status": "too_strong",
+      "passes": false,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0
+    },
+    {
+      "seed": 402,
+      "train_data_seed": 402,
+      "target_i": 5,
+      "target_j": 2,
+      "target_threshold_used": 0.3,
+      "lambda_prior": 0.5,
+      "base_abs": 0.809072893593143,
+      "soft_abs": 0.00022023311673834896,
+      "ratio": 0.00027220429516589044,
+      "reduction_percent": 99.97277957048341,
+      "candidate_status": "too_strong",
+      "passes": false,
+      "step_a_zero_mask_delta": 0.0,
+      "step_a_zero_lambda_delta": 0.0
+    }
+  ],
+  "no_evaluation_seeds_used_confirmation": "calibration_seeds=[401, 402] have empty intersection with evaluation_seeds=[501, 502, 503, 504, 505, 506, 507]."
+}
