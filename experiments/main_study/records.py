@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import json
 import math
 import re
 from datetime import datetime
@@ -24,6 +25,7 @@ from typing import Any, Optional, get_args
 import numpy as np
 
 from experiments.main_study.paths import validate_relative_posix_path
+from experiments.main_study.priors import CorruptedPriorSpec
 from experiments.main_study.schema import (
     SCHEMA_VERSION,
     MainStudyConfig,
@@ -32,6 +34,7 @@ from experiments.main_study.schema import (
     configuration_hash_prefix,
     make_run_id,
 )
+from symbolic_priors_cd.wrappers.dagma import DAGMAConfig
 from symbolic_priors_cd.wrappers.status import GraphStatus, SamplerStatus
 
 
@@ -767,6 +770,253 @@ def make_failure_record(
     )
 
 
+# ---------------------------------------------------------------------------
+# Serialisation / deserialisation
+# ---------------------------------------------------------------------------
+
+
+# DAGMAConfig fields whose runtime type is a plain ``tuple`` of
+# primitives. Reconstruction converts JSON list -> tuple.
+_DAGMA_CONFIG_TUPLE_FIELDS: tuple[str, ...] = ("s",)
+
+
+# DAGMAConfig fields whose runtime type is ``tuple[tuple[int, int], ...]``
+# or ``Optional[...]`` thereof. Reconstruction converts JSON
+# ``[[i, j], ...]`` back to ``((i, j), ...)``.
+_DAGMA_CONFIG_EDGE_FIELDS: tuple[str, ...] = ("exclude_edges",)
+
+
+# CorruptedPriorSpec fields whose runtime type is
+# ``tuple[tuple[int, int], ...]``. Reconstruction converts JSON
+# ``[[i, j], ...]`` back to ``((i, j), ...)``.
+_CORRUPTED_PRIOR_EDGE_FIELDS: tuple[str, ...] = (
+    "forbidden_edges",
+    "removed_clean_edges",
+    "added_true_positive_edges",
+)
+
+
+def _check_keys_strict(
+    d: object, dataclass_type: type, label: str
+) -> None:
+    """Strict key check for a nested-dict reconstruction.
+
+    Raises ``ValueError`` when ``d`` is not a dict, when it contains
+    keys not declared on ``dataclass_type``, or when it omits any
+    declared field. Persisted records use explicit-null storage for
+    every optional field, so missing keys are rejected even when the
+    target dataclass would otherwise have supplied a default.
+    """
+    if not isinstance(d, dict):
+        raise ValueError(
+            f"{label} must be a dict; got {type(d).__name__}."
+        )
+    expected = {f.name for f in dataclasses.fields(dataclass_type)}
+    actual = set(d.keys())
+    unknown = actual - expected
+    missing = expected - actual
+    if unknown:
+        raise ValueError(
+            f"unknown {label} fields: {sorted(unknown)} "
+            f"(allowed: {sorted(expected)})."
+        )
+    if missing:
+        raise ValueError(
+            f"missing {label} fields: {sorted(missing)}."
+        )
+
+
+def _normalise_edge_list(
+    value: object, field_label: str
+) -> tuple[tuple[int, int], ...]:
+    """Convert JSON ``[[i, j], ...]`` to ``((i, j), ...)``.
+
+    Raises ``ValueError`` if ``value`` is not a list of length-2
+    sublists. Does not validate index values or types beyond
+    structure; downstream dataclass validators apply value-level
+    rules.
+    """
+    if not isinstance(value, list):
+        raise ValueError(
+            f"{field_label} must be a list of [i, j] pairs; got "
+            f"{type(value).__name__}: {value!r}."
+        )
+    normalised: list[tuple[int, int]] = []
+    for entry in value:
+        if not isinstance(entry, list) or len(entry) != 2:
+            raise ValueError(
+                f"{field_label} edge must be a length-2 list; got "
+                f"{entry!r}."
+            )
+        normalised.append((entry[0], entry[1]))
+    return tuple(normalised)
+
+
+def _reconstruct_dagma_config(d: object) -> DAGMAConfig:
+    """Reconstruct :class:`DAGMAConfig` from a JSON-decoded dict."""
+    _check_keys_strict(d, DAGMAConfig, "dagma_config")
+    kwargs: dict[str, Any] = {}
+    for f in dataclasses.fields(DAGMAConfig):
+        value = d[f.name]
+        if f.name in _DAGMA_CONFIG_TUPLE_FIELDS:
+            if value is not None and isinstance(value, list):
+                value = tuple(value)
+        elif f.name in _DAGMA_CONFIG_EDGE_FIELDS:
+            if value is not None:
+                value = _normalise_edge_list(
+                    value, f"dagma_config.{f.name}"
+                )
+        kwargs[f.name] = value
+    try:
+        return DAGMAConfig(**kwargs)
+    except TypeError as exc:
+        raise ValueError(
+            f"dagma_config reconstruction failed: {exc}"
+        ) from exc
+
+
+def _reconstruct_corrupted_prior_spec(d: object) -> CorruptedPriorSpec:
+    """Reconstruct :class:`CorruptedPriorSpec` from a JSON-decoded dict."""
+    _check_keys_strict(d, CorruptedPriorSpec, "corrupted_prior_spec")
+    kwargs: dict[str, Any] = {}
+    for f in dataclasses.fields(CorruptedPriorSpec):
+        value = d[f.name]
+        if f.name in _CORRUPTED_PRIOR_EDGE_FIELDS:
+            value = _normalise_edge_list(
+                value, f"corrupted_prior_spec.{f.name}"
+            )
+        elif f.name == "edge_labels":
+            if not isinstance(value, dict):
+                raise ValueError(
+                    "corrupted_prior_spec.edge_labels must be a dict; "
+                    f"got {type(value).__name__}."
+                )
+            value = dict(value)
+        kwargs[f.name] = value
+    try:
+        return CorruptedPriorSpec(**kwargs)
+    except TypeError as exc:
+        raise ValueError(
+            f"corrupted_prior_spec reconstruction failed: {exc}"
+        ) from exc
+
+
+def _reconstruct_main_study_config(d: object) -> MainStudyConfig:
+    """Reconstruct :class:`MainStudyConfig` from a JSON-decoded dict."""
+    _check_keys_strict(d, MainStudyConfig, "config")
+    dagma = _reconstruct_dagma_config(d["dagma_config"])
+    if d["corrupted_prior_spec"] is None:
+        corrupted: Optional[CorruptedPriorSpec] = None
+    else:
+        corrupted = _reconstruct_corrupted_prior_spec(
+            d["corrupted_prior_spec"]
+        )
+    return MainStudyConfig(
+        method_family=d["method_family"],
+        seed_value=d["seed_value"],
+        seed_population=d["seed_population"],
+        dagma_config=dagma,
+        parent_heldout_run_hash_full=d["parent_heldout_run_hash_full"],
+        lambda_prior=d["lambda_prior"],
+        confidence=d["confidence"],
+        corrupted_prior_spec=corrupted,
+        matched_l1_lambda1=d["matched_l1_lambda1"],
+        schema_version=d["schema_version"],
+    )
+
+
+def record_to_dict(record: "MainStudyRunRecord") -> dict:
+    """Serialise a :class:`MainStudyRunRecord` to a JSON-safe dict.
+
+    Iterates the dataclass fields in declaration order and routes
+    every value through :func:`canonicalize_for_json`. The returned
+    dict contains exactly the record's declared field set; optional
+    fields are present with ``None`` when unset.
+    """
+    if not isinstance(record, MainStudyRunRecord):
+        raise TypeError(
+            "record_to_dict requires a MainStudyRunRecord instance; "
+            f"got {type(record).__name__}."
+        )
+    out: dict[str, Any] = {}
+    for f in dataclasses.fields(MainStudyRunRecord):
+        out[f.name] = canonicalize_for_json(
+            getattr(record, f.name), field_name=f.name
+        )
+    expected = {f.name for f in dataclasses.fields(MainStudyRunRecord)}
+    if set(out.keys()) != expected:
+        raise RuntimeError(
+            "record_to_dict produced a key set that does not match "
+            f"MainStudyRunRecord fields. expected {sorted(expected)}, "
+            f"got {sorted(out.keys())}."
+        )
+    return out
+
+
+def record_from_dict(d: object) -> "MainStudyRunRecord":
+    """Reconstruct a :class:`MainStudyRunRecord` from a JSON-decoded dict.
+
+    The loader is strict: it requires the exact top-level and nested
+    field sets to match the declared dataclasses, does not infer
+    defaults for missing fields, and propagates all dataclass
+    validators by running ``__post_init__`` during construction.
+    """
+    if not isinstance(d, dict):
+        raise TypeError(
+            "record_from_dict requires a dict; got "
+            f"{type(d).__name__}."
+        )
+    if "schema_version" not in d:
+        raise ValueError(
+            "record dict is missing required field 'schema_version'."
+        )
+    sv = d["schema_version"]
+    if sv != SCHEMA_VERSION:
+        raise ValueError(
+            f"schema_version mismatch: got {sv!r}, expected "
+            f"{SCHEMA_VERSION}."
+        )
+    _check_keys_strict(d, MainStudyRunRecord, "record")
+    config = _reconstruct_main_study_config(d["config"])
+    kwargs = {k: v for k, v in d.items() if k != "config"}
+    kwargs["config"] = config
+    return MainStudyRunRecord(**kwargs)
+
+
+def record_to_json(record: "MainStudyRunRecord") -> str:
+    """Serialise a :class:`MainStudyRunRecord` to a canonical JSON string.
+
+    Uses ``json.dumps`` with ``sort_keys=True`` and tight separators
+    so two calls on the same record produce byte-identical strings.
+    """
+    return json.dumps(
+        record_to_dict(record),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def record_from_json(s: str) -> "MainStudyRunRecord":
+    """Parse a canonical JSON string into a :class:`MainStudyRunRecord`.
+
+    ``json.JSONDecodeError`` propagates unchanged on invalid JSON.
+    Non-object JSON values (arrays, strings, numbers, booleans, null)
+    are rejected with ``ValueError``.
+    """
+    if not isinstance(s, str):
+        raise TypeError(
+            "record_from_json requires a string; got "
+            f"{type(s).__name__}."
+        )
+    parsed = json.loads(s)
+    if not isinstance(parsed, dict):
+        raise ValueError(
+            "record_from_json requires a JSON object at the top "
+            f"level; got {type(parsed).__name__}."
+        )
+    return record_from_dict(parsed)
+
+
 __all__ = [
     "FIT_STATUSES",
     "METRIC_STATUSES",
@@ -777,4 +1027,8 @@ __all__ = [
     "diagnostics_to_canonical",
     "derive_metric_status_for_failure",
     "make_failure_record",
+    "record_to_dict",
+    "record_from_dict",
+    "record_to_json",
+    "record_from_json",
 ]

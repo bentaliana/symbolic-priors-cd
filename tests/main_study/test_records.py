@@ -32,6 +32,10 @@ from experiments.main_study.records import (
     derive_metric_status_for_failure,
     diagnostics_to_canonical,
     make_failure_record,
+    record_from_dict,
+    record_from_json,
+    record_to_dict,
+    record_to_json,
 )
 from experiments.main_study.schema import (
     FROZEN_LAMBDA_PRIOR,
@@ -852,13 +856,16 @@ _RECORDS_ALLOWED_PREFIXES: frozenset[str] = frozenset({
     "__future__",
     "copy",
     "dataclasses",
+    "json",
     "math",
     "re",
     "typing",
     "datetime",
     "numpy",
     "experiments.main_study.paths",
+    "experiments.main_study.priors",
     "experiments.main_study.schema",
+    "symbolic_priors_cd.wrappers.dagma",
     "symbolic_priors_cd.wrappers.status",
 })
 
@@ -1322,3 +1329,571 @@ def test_make_failure_record_infrastructure_failure_path():
     assert record.fit_status == "infrastructure_failure_during_fit"
     assert record.metric_status == "not_computed_due_to_fit_failure"
     assert record.failure_kind == "infrastructure"
+
+
+# ===========================================================================
+# record_to_dict / record_from_dict / record_to_json / record_from_json
+# ===========================================================================
+
+
+import json as _stdlib_json  # noqa: E402
+
+
+def _hard_exclusion_kwargs_for_failure(cfg: MainStudyConfig) -> dict:
+    return dict(
+        config=cfg,
+        n_nodes=10,
+        fit_status="model_fit_failure",
+        failure_kind="non_convergence",
+        failure_message="diverged",
+        runtime_seconds=1.0,
+        fit_runtime_seconds=1.0,
+        wrapper_diagnostics={},
+        generated_at_utc=_VALID_GENERATED_AT,
+    )
+
+
+# ---------------------------------------------------------------------------
+# T-1: record_to_dict rejects non-record input
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_dict_rejects_empty_dict():
+    with pytest.raises(TypeError, match="MainStudyRunRecord"):
+        record_to_dict({})  # type: ignore[arg-type]
+
+
+def test_record_to_dict_rejects_none():
+    with pytest.raises(TypeError, match="MainStudyRunRecord"):
+        record_to_dict(None)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# T-2: record_to_dict has exactly the dataclass field names
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_dict_keys_exactly_match_dataclass_fields():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    expected = {f.name for f in dataclasses.fields(MainStudyRunRecord)}
+    assert set(d.keys()) == expected
+
+
+# ---------------------------------------------------------------------------
+# T-3: record_to_dict includes optional absent fields as None
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_dict_includes_absent_optional_fields_as_none():
+    record = _build_success_record(
+        code_version=None,
+        confidence_mask_path=None,
+        prior_edge_set_clean_path=None,
+        prior_edge_set_corrupted_path=None,
+        per_edge_labels_path=None,
+    )
+    d = record_to_dict(record)
+    assert d["code_version"] is None
+    assert d["confidence_mask_path"] is None
+    assert d["prior_edge_set_clean_path"] is None
+    assert d["prior_edge_set_corrupted_path"] is None
+    assert d["per_edge_labels_path"] is None
+
+
+# ---------------------------------------------------------------------------
+# T-4: output passes json.dumps with canonical settings
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_dict_output_is_json_serialisable():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    payload = _stdlib_json.dumps(d, sort_keys=True, separators=(",", ":"))
+    assert isinstance(payload, str)
+    assert len(payload) > 0
+
+
+# ---------------------------------------------------------------------------
+# T-5: record_to_json deterministic
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_json_is_deterministic():
+    record = _build_success_record()
+    a = record_to_json(record)
+    b = record_to_json(record)
+    assert a == b
+
+
+# ---------------------------------------------------------------------------
+# T-6 to T-11: round-trip equality across method families and statuses
+# ---------------------------------------------------------------------------
+
+
+def test_round_trip_prior_free_success():
+    record = _build_success_record()
+    reconstructed = record_from_dict(record_to_dict(record))
+    assert reconstructed == record
+
+
+def test_round_trip_soft_frobenius_success():
+    cfg = _build_soft_frobenius_config()
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    assert reconstructed == record
+
+
+def test_round_trip_hard_exclusion_success():
+    cfg = _build_hard_exclusion_config()
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    assert reconstructed == record
+    # confidence_mask_path is None for hard_exclusion regardless of fit_status.
+    assert reconstructed.confidence_mask_path is None
+
+
+def test_round_trip_matched_l1_success():
+    cfg = _build_matched_l1_config()
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    assert reconstructed == record
+
+
+def test_round_trip_model_fit_failure():
+    cfg = _build_prior_free_config()
+    record = make_failure_record(**_failure_kwargs(config=cfg))
+    reconstructed = record_from_dict(record_to_dict(record))
+    assert reconstructed == record
+
+
+def test_round_trip_graph_invalid_downstream_noncomputed():
+    cfg = _build_prior_free_config()
+    record = make_failure_record(
+        config=cfg,
+        n_nodes=10,
+        fit_status="success",
+        failure_kind=None,
+        failure_message="",
+        runtime_seconds=120.0,
+        fit_runtime_seconds=100.0,
+        wrapper_diagnostics={"training_status": "converged"},
+        generated_at_utc=_VALID_GENERATED_AT,
+        graph_status="cyclic",
+        sampler_status="unavailable_invalid_graph",
+        continuous_w_path="results/main_study/abcdef012345/artefacts/r/continuous_w.npz",
+        thresholded_adjacency_path="results/main_study/abcdef012345/artefacts/r/thresholded_adjacency.npz",
+        true_adjacency_path="results/main_study/abcdef012345/artefacts/r/true_adjacency.npz",
+    )
+    reconstructed = record_from_dict(record_to_dict(record))
+    assert reconstructed == record
+
+
+# ---------------------------------------------------------------------------
+# T-12 to T-17: strict top-level loading
+# ---------------------------------------------------------------------------
+
+
+def test_record_from_dict_rejects_non_dict_input():
+    with pytest.raises(TypeError, match="dict"):
+        record_from_dict("not a dict")  # type: ignore[arg-type]
+
+
+def test_record_from_dict_rejects_missing_schema_version():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    del d["schema_version"]
+    with pytest.raises(ValueError, match="schema_version"):
+        record_from_dict(d)
+
+
+@pytest.mark.parametrize("bad_version", [1, 3, 0, -1])
+def test_record_from_dict_rejects_wrong_schema_version(bad_version):
+    record = _build_success_record()
+    d = record_to_dict(record)
+    d["schema_version"] = bad_version
+    with pytest.raises(ValueError, match="schema_version"):
+        record_from_dict(d)
+
+
+def test_record_from_dict_rejects_unknown_top_level_fields_and_names_them():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    d["bogus_field"] = "intruder"
+    with pytest.raises(ValueError) as exc:
+        record_from_dict(d)
+    assert "bogus_field" in str(exc.value)
+    assert "unknown record" in str(exc.value)
+
+
+def test_record_from_dict_rejects_missing_required_top_level_fields_and_names_them():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    del d["fit_status"]
+    with pytest.raises(ValueError) as exc:
+        record_from_dict(d)
+    assert "fit_status" in str(exc.value)
+    assert "missing record" in str(exc.value)
+
+
+def test_record_from_dict_rejects_missing_optional_top_level_fields():
+    """Persisted records must use explicit nulls; absence is rejected
+    even for optional fields with defaults."""
+    record = _build_success_record(code_version=None)
+    d = record_to_dict(record)
+    del d["code_version"]
+    with pytest.raises(ValueError) as exc:
+        record_from_dict(d)
+    assert "code_version" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# T-18 to T-23: strict nested loading
+# ---------------------------------------------------------------------------
+
+
+def test_record_from_dict_rejects_unknown_nested_config_field():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    d["config"]["bogus_config_field"] = 0
+    with pytest.raises(ValueError, match="unknown config"):
+        record_from_dict(d)
+
+
+def test_record_from_dict_rejects_unknown_nested_dagma_config_field():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    d["config"]["dagma_config"]["bogus_dagma_field"] = 0
+    with pytest.raises(ValueError, match="unknown dagma_config"):
+        record_from_dict(d)
+
+
+def test_record_from_dict_rejects_unknown_nested_corrupted_prior_spec_field():
+    cfg = _build_soft_frobenius_config()
+    record = _build_success_record(config=cfg)
+    d = record_to_dict(record)
+    d["config"]["corrupted_prior_spec"]["bogus_cp_field"] = 0
+    with pytest.raises(ValueError, match="unknown corrupted_prior_spec"):
+        record_from_dict(d)
+
+
+def test_record_from_dict_rejects_missing_nested_config_field():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    del d["config"]["method_family"]
+    with pytest.raises(ValueError, match="missing config"):
+        record_from_dict(d)
+
+
+def test_record_from_dict_rejects_missing_nested_dagma_config_field():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    del d["config"]["dagma_config"]["loss_type"]
+    with pytest.raises(ValueError, match="missing dagma_config"):
+        record_from_dict(d)
+
+
+@pytest.mark.parametrize(
+    "removed",
+    ["forbidden_edges", "edge_labels"],
+)
+def test_record_from_dict_rejects_missing_nested_corrupted_prior_spec_field(removed):
+    cfg = _build_soft_frobenius_config()
+    record = _build_success_record(config=cfg)
+    d = record_to_dict(record)
+    del d["config"]["corrupted_prior_spec"][removed]
+    with pytest.raises(ValueError) as exc:
+        record_from_dict(d)
+    msg = str(exc.value)
+    assert "missing corrupted_prior_spec" in msg
+    assert removed in msg
+
+
+# ---------------------------------------------------------------------------
+# T-24 to T-26: malformed nested values
+# ---------------------------------------------------------------------------
+
+
+def test_record_from_dict_rejects_malformed_nested_config_value():
+    record = _build_success_record()
+    d = record_to_dict(record)
+    d["config"]["method_family"] = "not_a_family"
+    with pytest.raises(ValueError, match="method_family"):
+        record_from_dict(d)
+
+
+def test_record_from_dict_rejects_malformed_dagma_config_value():
+    """prior_free requires exclude_edges=None; a non-null edge list
+    triggers MainStudyConfig._validate_prior_free."""
+    record = _build_success_record()
+    d = record_to_dict(record)
+    d["config"]["dagma_config"]["exclude_edges"] = [[0, 1]]
+    with pytest.raises(ValueError, match="prior_free"):
+        record_from_dict(d)
+
+
+def test_record_from_dict_rejects_malformed_corrupted_prior_spec_edge_list():
+    cfg = _build_soft_frobenius_config()
+    record = _build_success_record(config=cfg)
+    d = record_to_dict(record)
+    # forbidden_edges must be a list of [i, j] pairs; a single integer
+    # entry is rejected by the structural check.
+    d["config"]["corrupted_prior_spec"]["forbidden_edges"] = [[0]]
+    with pytest.raises(
+        ValueError, match="corrupted_prior_spec.forbidden_edges"
+    ):
+        record_from_dict(d)
+
+
+def test_record_from_dict_rejects_non_list_corrupted_prior_spec_edges():
+    cfg = _build_soft_frobenius_config()
+    record = _build_success_record(config=cfg)
+    d = record_to_dict(record)
+    d["config"]["corrupted_prior_spec"]["forbidden_edges"] = "not a list"
+    with pytest.raises(
+        ValueError, match="corrupted_prior_spec.forbidden_edges"
+    ):
+        record_from_dict(d)
+
+
+# ---------------------------------------------------------------------------
+# T-27 to T-32: nested reconstruction preserves runtime types
+# ---------------------------------------------------------------------------
+
+
+def test_dagma_config_reconstruction_preserves_non_default_fields():
+    custom_dagma = DAGMAConfig(
+        T=3,
+        lambda1=0.07,
+        s=(0.95, 0.85, 0.75),
+        mu_init=0.5,
+        mu_factor=0.05,
+        w_threshold_internal=0.0,
+        lr=1e-3,
+        warm_iter=1000,
+        max_iter=2000,
+        beta_1=0.9,
+        beta_2=0.99,
+        loss_type="l2",
+        project_threshold=0.25,
+        h_diagnostic_threshold=1e-6,
+    )
+    cfg = MainStudyConfig(
+        method_family="prior_free",
+        seed_value=401,
+        seed_population="main_calibration",
+        dagma_config=custom_dagma,
+        parent_heldout_run_hash_full=_VALID_PARENT_HASH,
+    )
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    rdc = reconstructed.config.dagma_config
+    assert rdc.T == 3
+    assert rdc.lambda1 == pytest.approx(0.07)
+    assert rdc.s == (0.95, 0.85, 0.75)
+    assert isinstance(rdc.s, tuple)
+    assert rdc.lr == pytest.approx(1e-3)
+    assert rdc.beta_1 == pytest.approx(0.9)
+    assert rdc.beta_2 == pytest.approx(0.99)
+    assert rdc.project_threshold == pytest.approx(0.25)
+    assert rdc.exclude_edges is None
+
+
+def test_dagma_config_reconstruction_preserves_exclude_edges_tuple():
+    cfg = _build_hard_exclusion_config()
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    rdc = reconstructed.config.dagma_config
+    assert isinstance(rdc.exclude_edges, tuple)
+    for edge in rdc.exclude_edges:
+        assert isinstance(edge, tuple)
+        assert len(edge) == 2
+        assert all(isinstance(idx, int) for idx in edge)
+
+
+def test_corrupted_prior_spec_reconstruction_preserves_edge_tuples():
+    cp = _make_corrupted_prior(
+        forbidden_edges=((0, 2), (1, 3), (2, 4)),
+        corruption_fraction=0.4,
+        corruption_index=2,
+        n_corrupted=1,
+        n_correct=2,
+        removed_clean_edges=((1, 3),),
+        added_true_positive_edges=((0, 1),),
+        edge_labels={
+            "0,2": "true_negative_retained",
+            "2,4": "true_negative_retained",
+            "0,1": "true_positive_corrupted_replacement",
+        },
+    )
+    cfg = MainStudyConfig(
+        method_family="soft_frobenius",
+        seed_value=401,
+        seed_population="main_calibration",
+        dagma_config=DAGMAConfig(),
+        parent_heldout_run_hash_full=_VALID_PARENT_HASH,
+        lambda_prior=FROZEN_LAMBDA_PRIOR,
+        confidence=0.5,
+        corrupted_prior_spec=cp,
+    )
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    rcp = reconstructed.config.corrupted_prior_spec
+    for field_name in (
+        "forbidden_edges",
+        "removed_clean_edges",
+        "added_true_positive_edges",
+    ):
+        value = getattr(rcp, field_name)
+        assert isinstance(value, tuple), (
+            f"{field_name} must be tuple-of-tuples; got "
+            f"{type(value).__name__}"
+        )
+        for edge in value:
+            assert isinstance(edge, tuple)
+            assert len(edge) == 2
+            assert all(isinstance(idx, int) for idx in edge)
+
+
+def test_edge_labels_remains_plain_dict_str_str():
+    cfg = _build_soft_frobenius_config()
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    el = reconstructed.config.corrupted_prior_spec.edge_labels
+    assert type(el) is dict
+    for k, v in el.items():
+        assert isinstance(k, str)
+        assert isinstance(v, str)
+
+
+def test_hard_exclusion_round_trip_preserves_exclude_equals_forbidden():
+    cfg = _build_hard_exclusion_config()
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    excl = reconstructed.config.dagma_config.exclude_edges
+    forb = reconstructed.config.corrupted_prior_spec.forbidden_edges
+    assert tuple(sorted(excl)) == tuple(sorted(forb))
+
+
+def test_soft_frobenius_round_trip_preserves_frozen_lambda_prior():
+    cfg = _build_soft_frobenius_config()
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    assert reconstructed.config.lambda_prior == pytest.approx(
+        FROZEN_LAMBDA_PRIOR
+    )
+
+
+def test_configuration_hash_full_survives_round_trip():
+    """The reconstructed record's stored hash must equal the hash
+    recomputed from its reconstructed config."""
+    cfg = _build_soft_frobenius_config()
+    record = _build_success_record(config=cfg)
+    reconstructed = record_from_dict(record_to_dict(record))
+    recomputed = compute_configuration_hash(reconstructed.config)
+    assert reconstructed.configuration_hash_full == recomputed
+    assert reconstructed.configuration_hash_full == record.configuration_hash_full
+
+
+# ---------------------------------------------------------------------------
+# T-33 to T-39: JSON loader input validation
+# ---------------------------------------------------------------------------
+
+
+def test_record_from_json_rejects_non_string_input():
+    with pytest.raises(TypeError, match="string"):
+        record_from_json(b"{}")  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="string"):
+        record_from_json({})  # type: ignore[arg-type]
+
+
+def test_record_from_json_propagates_jsondecodeerror():
+    with pytest.raises(_stdlib_json.JSONDecodeError):
+        record_from_json("not json at all")
+
+
+@pytest.mark.parametrize(
+    "non_object",
+    [
+        "[1, 2, 3]",
+        '"just a string"',
+        "42",
+        "true",
+        "null",
+    ],
+)
+def test_record_from_json_rejects_non_object_top_level(non_object):
+    with pytest.raises(ValueError, match="JSON object"):
+        record_from_json(non_object)
+
+
+# ---------------------------------------------------------------------------
+# T-40: JSON parses with json.loads and contains lists
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_json_parses_back_to_dict_with_lists_for_edges():
+    cfg = _build_hard_exclusion_config()
+    record = _build_success_record(config=cfg)
+    payload = record_to_json(record)
+    parsed = _stdlib_json.loads(payload)
+    assert isinstance(parsed, dict)
+    excl = parsed["config"]["dagma_config"]["exclude_edges"]
+    assert isinstance(excl, list)
+    assert all(isinstance(edge, list) and len(edge) == 2 for edge in excl)
+    forb = parsed["config"]["corrupted_prior_spec"]["forbidden_edges"]
+    assert isinstance(forb, list)
+    assert all(isinstance(edge, list) and len(edge) == 2 for edge in forb)
+
+
+def test_record_to_json_string_contains_no_python_tuple_syntax():
+    cfg = _build_hard_exclusion_config()
+    record = _build_success_record(config=cfg)
+    payload = record_to_json(record)
+    # Python tuple syntax would write parentheses; canonical JSON
+    # never uses parentheses for arrays.
+    assert "(" not in payload
+    assert ")" not in payload
+
+
+# ---------------------------------------------------------------------------
+# T-41 to T-43: regression and safety
+# ---------------------------------------------------------------------------
+
+
+def test_record_to_dict_emits_edge_collections_as_two_int_lists():
+    cfg = _build_hard_exclusion_config()
+    record = _build_success_record(config=cfg)
+    d = record_to_dict(record)
+    for entry in d["config"]["dagma_config"]["exclude_edges"]:
+        assert isinstance(entry, list)
+        assert len(entry) == 2
+        assert all(isinstance(idx, int) for idx in entry)
+    for entry in d["config"]["corrupted_prior_spec"]["forbidden_edges"]:
+        assert isinstance(entry, list)
+        assert len(entry) == 2
+        assert all(isinstance(idx, int) for idx in entry)
+
+
+def test_record_from_dict_converts_json_edge_lists_to_tuple_of_tuples():
+    cfg = _build_hard_exclusion_config()
+    record = _build_success_record(config=cfg)
+    payload = record_to_json(record)
+    reconstructed = record_from_json(payload)
+    excl = reconstructed.config.dagma_config.exclude_edges
+    forb = reconstructed.config.corrupted_prior_spec.forbidden_edges
+    assert isinstance(excl, tuple)
+    assert all(isinstance(e, tuple) for e in excl)
+    assert isinstance(forb, tuple)
+    assert all(isinstance(e, tuple) for e in forb)
+
+
+def test_record_from_dict_does_not_silently_ignore_nested_unknown_fields():
+    """Regression: extra nested keys must always raise."""
+    record = _build_success_record()
+    d = record_to_dict(record)
+    # Plant an unknown key in three different nested dicts; the first
+    # check encountered should raise.
+    d["config"]["dagma_config"]["bonus"] = 0
+    with pytest.raises(ValueError, match="unknown dagma_config"):
+        record_from_dict(d)
