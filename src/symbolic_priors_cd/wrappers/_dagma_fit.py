@@ -85,3 +85,78 @@ def run_dagma_fit(X_local: np.ndarray, cfg: "DAGMAConfig") -> _DagmaFitResult:
         h_final=float(model.h_final),
         score_final=float(model.score_final),
     )
+
+
+def run_soft_prior_dagma_fit(
+    X_local: np.ndarray,
+    cfg: "DAGMAConfig",
+    *,
+    lambda_prior: float,
+    confidence_mask: np.ndarray,
+) -> _DagmaFitResult:
+    """Call SoftPriorDagmaLinear.fit and return a provisional result record.
+
+    Mirrors :func:`run_dagma_fit` but instantiates
+    ``SoftPriorDagmaLinear`` so the targeted Frobenius prior gradient
+    is added to each Adam iteration. The returned record uses the same
+    ``_DagmaFitResult`` dataclass so callers can treat both helpers
+    uniformly.
+
+    Parameters
+    ----------
+    X_local : np.ndarray
+        Model-frame training data, shape ``(n_samples, n_vars)``,
+        float. The caller is responsible for passing an independent
+        copy: the parent mean-centres its input in place.
+    cfg : DAGMAConfig
+        Resolved configuration whose values are passed explicitly to
+        the underlying fit call. No argument is left to the library
+        default.
+    lambda_prior : float
+        Non-negative penalty scale for the prior gradient.
+    confidence_mask : np.ndarray
+        Square non-negative matrix with zero diagonal, shape
+        ``(n_vars, n_vars)``. Per-entry weighting for the targeted
+        Frobenius prior gradient.
+
+    Returns
+    -------
+    _DagmaFitResult
+        Contains a copy of the returned continuous W matrix and the
+        ``h_final`` / ``score_final`` scalars captured from the fitted
+        model.
+
+    Raises
+    ------
+    Any exception raised by ``SoftPriorDagmaLinear.fit`` propagates
+    unchanged. Construction-time validation errors from
+    ``SoftPriorDagmaLinear`` propagate unchanged.
+    """
+    from symbolic_priors_cd.wrappers._soft_prior_dagma import (
+        SoftPriorDagmaLinear,
+    )
+
+    model = SoftPriorDagmaLinear(
+        loss_type=cfg.loss_type,
+        lambda_prior=lambda_prior,
+        confidence_mask=confidence_mask,
+    )
+    W = model.fit(
+        X=X_local,
+        lambda1=cfg.lambda1,
+        w_threshold=cfg.w_threshold_internal,
+        T=cfg.T,
+        mu_init=cfg.mu_init,
+        mu_factor=cfg.mu_factor,
+        s=list(cfg.s),
+        warm_iter=cfg.warm_iter,
+        max_iter=cfg.max_iter,
+        lr=cfg.lr,
+        beta_1=cfg.beta_1,
+        beta_2=cfg.beta_2,
+    )
+    return _DagmaFitResult(
+        W=W.copy(),
+        h_final=float(model.h_final),
+        score_final=float(model.score_final),
+    )
