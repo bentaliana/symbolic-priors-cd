@@ -3830,5 +3830,17 @@ This entry records an implementation verification and interpretation reminder. I
 
 The matched-L1 calibration protocol is frozen in:
 
-```text
 docs/10_matched_l1_calibration_plan.md
+
+
+## Decision: matched_l1_lambda1 frozen from M-7 calibration
+
+**Status:** Frozen  
+**Applies to:** Main-study matched-L1 baseline  
+**Selected value:** `matched_l1_lambda1 = 0.0625`
+
+### Decision
+
+The matched-L1 baseline will use:
+
+matched_l1_lambda1 = 0.0625
