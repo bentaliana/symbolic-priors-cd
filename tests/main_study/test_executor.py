@@ -145,13 +145,30 @@ def _hard_exclusion_config() -> MainStudyConfig:
     )
 
 
+_UNSET = object()
+
+
+def _default_sampler() -> Any:
+    """A no-op callable that satisfies the model_sampler contract."""
+
+    def _sampler(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    return _sampler
+
+
 def _make_fit_outcome(
     *,
     graph_status: str = "valid_dag",
     sampler_status: str = "available",
     training_status: str = "converged",
     wrapper_diagnostics: dict[str, Any] | None = None,
+    model_sampler: Any = _UNSET,
 ) -> FitOutcome:
+    if model_sampler is _UNSET:
+        model_sampler = (
+            _default_sampler() if sampler_status == "available" else None
+        )
     return FitOutcome(
         continuous_w=np.zeros((_N_NODES, _N_NODES), dtype=float),
         thresholded_adjacency=np.zeros(
@@ -165,6 +182,7 @@ def _make_fit_outcome(
             if wrapper_diagnostics is None
             else wrapper_diagnostics
         ),
+        model_sampler=model_sampler,
     )
 
 
@@ -1195,3 +1213,311 @@ def test_executor_module_imports_are_allowlisted():
             f"executor.py import {mod!r} is not in the allowlist "
             f"{sorted(_EXECUTOR_ALLOWED_PREFIXES)}."
         )
+
+
+# ===========================================================================
+# FitOutcome.model_sampler
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# FitOutcome validation for model_sampler
+# ---------------------------------------------------------------------------
+
+
+def test_fitoutcome_accepts_callable_model_sampler_when_sampler_available():
+    callable_sampler = _default_sampler()
+    fo = FitOutcome(
+        continuous_w=np.zeros((_N_NODES, _N_NODES)),
+        thresholded_adjacency=np.zeros((_N_NODES, _N_NODES), dtype=bool),
+        graph_status="valid_dag",
+        sampler_status="available",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=callable_sampler,
+    )
+    assert fo.model_sampler is callable_sampler
+    assert callable(fo.model_sampler)
+
+
+def test_fitoutcome_rejects_none_model_sampler_when_sampler_available():
+    with pytest.raises(ValueError, match="model_sampler"):
+        FitOutcome(
+            continuous_w=np.zeros((_N_NODES, _N_NODES)),
+            thresholded_adjacency=np.zeros(
+                (_N_NODES, _N_NODES), dtype=bool
+            ),
+            graph_status="valid_dag",
+            sampler_status="available",
+            training_status="converged",
+            wrapper_diagnostics={},
+            model_sampler=None,
+        )
+
+
+def test_fitoutcome_rejects_non_callable_model_sampler_when_sampler_available():
+    with pytest.raises(ValueError, match="model_sampler"):
+        FitOutcome(
+            continuous_w=np.zeros((_N_NODES, _N_NODES)),
+            thresholded_adjacency=np.zeros(
+                (_N_NODES, _N_NODES), dtype=bool
+            ),
+            graph_status="valid_dag",
+            sampler_status="available",
+            training_status="converged",
+            wrapper_diagnostics={},
+            model_sampler="not a callable",
+        )
+
+
+def test_fitoutcome_accepts_none_model_sampler_when_sampler_unavailable():
+    fo = FitOutcome(
+        continuous_w=np.zeros((_N_NODES, _N_NODES)),
+        thresholded_adjacency=np.zeros((_N_NODES, _N_NODES), dtype=bool),
+        graph_status="cyclic",
+        sampler_status="unavailable_invalid_graph",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=None,
+    )
+    assert fo.model_sampler is None
+
+
+def test_fitoutcome_default_model_sampler_is_none():
+    """Omitting the kwarg yields None — the default that supports the
+    unavailable-sampler path."""
+    fo = FitOutcome(
+        continuous_w=np.zeros((_N_NODES, _N_NODES)),
+        thresholded_adjacency=np.zeros((_N_NODES, _N_NODES), dtype=bool),
+        graph_status="cyclic",
+        sampler_status="unavailable_invalid_graph",
+        training_status="converged",
+        wrapper_diagnostics={},
+    )
+    assert fo.model_sampler is None
+
+
+# ---------------------------------------------------------------------------
+# Metric backend receives the FitOutcome (with callable model_sampler) intact
+# ---------------------------------------------------------------------------
+
+
+def test_metric_backend_receives_fitoutcome_with_callable_model_sampler():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    sampler_marker = _default_sampler()
+
+    captured: dict[str, Any] = {}
+
+    def fake_loader(c):
+        return _make_data_bundle()
+
+    def fake_fit(p, d, mask):
+        return _make_fit_outcome(model_sampler=sampler_marker)
+
+    def fake_metric(p, d, fo):
+        captured["fit_outcome"] = fo
+        # The metric backend can inspect or call the sampler.
+        assert callable(fo.model_sampler)
+        captured["sampler_call_result"] = fo.model_sampler(1, 2, kwarg="x")
+        return _make_metric_outcome()
+
+    execute_planned_run(
+        planned,
+        data_loader=fake_loader,
+        fit_backend=fake_fit,
+        metric_backend=fake_metric,
+        generated_at_utc=_GENERATED_AT,
+    )
+    forwarded = captured["fit_outcome"]
+    assert isinstance(forwarded, FitOutcome)
+    # Identity preservation: the executor forwards the exact callable
+    # the fit backend produced, no wrapping.
+    assert forwarded.model_sampler is sampler_marker
+
+
+# ---------------------------------------------------------------------------
+# model_sampler isolation from record, diagnostics, and artefacts
+# ---------------------------------------------------------------------------
+
+
+def test_model_sampler_is_not_in_record_wrapper_diagnostics():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    sampler = _default_sampler()
+
+    def fake_loader(c):
+        return _make_data_bundle()
+
+    def fake_fit(p, d, mask):
+        # wrapper_diagnostics is a separate field; the sampler must
+        # never appear inside it.
+        return _make_fit_outcome(
+            wrapper_diagnostics={"training_status": "converged"},
+            model_sampler=sampler,
+        )
+
+    def fake_metric(p, d, fo):
+        return _make_metric_outcome()
+
+    result = execute_planned_run(
+        planned,
+        data_loader=fake_loader,
+        fit_backend=fake_fit,
+        metric_backend=fake_metric,
+        generated_at_utc=_GENERATED_AT,
+    )
+    diag = result.record.wrapper_diagnostics
+    assert "model_sampler" not in diag
+    # And no nested value is the sampler callable.
+    for value in diag.values():
+        assert value is not sampler
+        assert not callable(value)
+
+
+def test_model_sampler_is_not_in_any_artefact_payload():
+    cfg = _soft_frobenius_config(confidence=0.5)
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    sampler = _default_sampler()
+
+    def fake_loader(c):
+        return _make_data_bundle()
+
+    def fake_fit(p, d, mask):
+        return _make_fit_outcome(model_sampler=sampler)
+
+    def fake_metric(p, d, fo):
+        return _make_metric_outcome()
+
+    result = execute_planned_run(
+        planned,
+        data_loader=fake_loader,
+        fit_backend=fake_fit,
+        metric_backend=fake_metric,
+        generated_at_utc=_GENERATED_AT,
+    )
+
+    def _walk(value):
+        """Yield every nested value in a JSON-like / npz-dict payload."""
+        yield value
+        if isinstance(value, dict):
+            for v in value.values():
+                yield from _walk(v)
+        elif isinstance(value, (list, tuple)):
+            for v in value:
+                yield from _walk(v)
+
+    for artefact_name, payload in result.artefacts.items():
+        for value in _walk(payload):
+            assert value is not sampler, (
+                f"sampler leaked into artefact {artefact_name!r}"
+            )
+            # Per-value callable check: arrays and dicts are not
+            # callable; if any value in the payload is callable,
+            # that would be a leak.
+            if callable(value):
+                # Numpy ndarrays are not callable; allow only non-
+                # callable payload values.
+                raise AssertionError(
+                    f"callable value found in artefact {artefact_name!r}: "
+                    f"{value!r}"
+                )
+
+
+def test_main_study_run_record_has_no_model_sampler_field():
+    """Sanity: the record schema does not expose a model_sampler field,
+    so the sampler cannot accidentally be persisted there."""
+    import dataclasses as _dc
+
+    field_names = {f.name for f in _dc.fields(MainStudyRunRecord)}
+    assert "model_sampler" not in field_names
+
+
+# ---------------------------------------------------------------------------
+# Gating: invalid graph / unavailable sampler still skip metric_backend
+# ---------------------------------------------------------------------------
+
+
+def test_graph_invalid_path_does_not_require_model_sampler():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    metric_calls: list = []
+
+    def fake_loader(c):
+        return _make_data_bundle()
+
+    def fake_fit(p, d, mask):
+        # No model_sampler needed; sampler_status is not "available".
+        return _make_fit_outcome(
+            graph_status="cyclic",
+            sampler_status="unavailable_invalid_graph",
+            model_sampler=None,
+        )
+
+    def fake_metric(p, d, fo):
+        metric_calls.append(1)
+        return _make_metric_outcome()
+
+    result = execute_planned_run(
+        planned,
+        data_loader=fake_loader,
+        fit_backend=fake_fit,
+        metric_backend=fake_metric,
+        generated_at_utc=_GENERATED_AT,
+    )
+    assert metric_calls == []
+    assert result.record.metric_status == "unavailable_graph_invalid"
+
+
+def test_sampler_unavailable_path_does_not_require_model_sampler():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    metric_calls: list = []
+
+    def fake_loader(c):
+        return _make_data_bundle()
+
+    def fake_fit(p, d, mask):
+        return _make_fit_outcome(
+            graph_status="valid_dag",
+            sampler_status="unavailable_unresolved_noise_policy",
+            model_sampler=None,
+        )
+
+    def fake_metric(p, d, fo):
+        metric_calls.append(1)
+        return _make_metric_outcome()
+
+    result = execute_planned_run(
+        planned,
+        data_loader=fake_loader,
+        fit_backend=fake_fit,
+        metric_backend=fake_metric,
+        generated_at_utc=_GENERATED_AT,
+    )
+    assert metric_calls == []
+    assert result.record.metric_status == "unavailable_sampler_failure"
+
+
+def test_model_fit_failure_still_returns_failure_record_with_empty_artefacts():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+
+    def fake_loader(c):
+        return _make_data_bundle()
+
+    def fake_fit(p, d, mask):
+        raise ModelFitFailure("diverged")
+
+    def fake_metric(p, d, fo):
+        return _make_metric_outcome()
+
+    result = execute_planned_run(
+        planned,
+        data_loader=fake_loader,
+        fit_backend=fake_fit,
+        metric_backend=fake_metric,
+        generated_at_utc=_GENERATED_AT,
+    )
+    assert result.record.fit_status == "model_fit_failure"
+    assert result.artefacts == {}

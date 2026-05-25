@@ -161,8 +161,17 @@ class FitOutcome:
 
     Carries the continuous and thresholded weight matrices, the
     graph/sampler/training status strings the runner needs to decide
-    whether to compute metrics, and the wrapper diagnostics dict that
-    will be canonicalised before being stored on the record.
+    whether to compute metrics, the wrapper diagnostics dict that
+    will be canonicalised before being stored on the record, and an
+    optional in-memory ``model_sampler`` callable that downstream
+    metric computation can use to draw interventional samples from
+    the learned model.
+
+    ``model_sampler`` is required to be callable when
+    ``sampler_status == "available"`` and may be ``None`` otherwise.
+    It is never serialised, recorded, canonicalised, or written into
+    any artefact; the executor only forwards it on the
+    ``FitOutcome`` instance passed to the metric backend.
     """
 
     continuous_w: np.ndarray
@@ -171,6 +180,7 @@ class FitOutcome:
     sampler_status: str
     training_status: str
     wrapper_diagnostics: dict[str, object]
+    model_sampler: Optional[Callable[..., object]] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.continuous_w, np.ndarray):
@@ -227,6 +237,22 @@ class FitOutcome:
                 "FitOutcome.wrapper_diagnostics must be a dict; got "
                 f"{type(self.wrapper_diagnostics).__name__}."
             )
+        # model_sampler is required to be callable only when the
+        # sampler is reported as available. For invalid-graph or
+        # unavailable-sampler outcomes the metric backend will not
+        # be invoked, so model_sampler may be absent (None).
+        if self.sampler_status == "available":
+            if self.model_sampler is None:
+                raise ValueError(
+                    "FitOutcome.model_sampler must be a callable when "
+                    "sampler_status == 'available'; got None."
+                )
+            if not callable(self.model_sampler):
+                raise ValueError(
+                    "FitOutcome.model_sampler must be callable when "
+                    "sampler_status == 'available'; got "
+                    f"{type(self.model_sampler).__name__}."
+                )
 
 
 @dataclass(frozen=True, kw_only=True)
