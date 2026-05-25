@@ -101,3 +101,17 @@ results/main_study/calibration/matched_l1/*
 !results/main_study/274cfe3fef32/records/*.json
 !results/main_study/274cfe3fef32/artifacts/
 !results/main_study/274cfe3fef32/artifacts/**
+
+# Keep curated main evaluation artefacts.
+!results/main_study/main_evaluation/
+results/main_study/main_evaluation/*
+!results/main_study/main_evaluation/864fe6722256/
+!results/main_study/main_evaluation/864fe6722256/main_evaluation_execution_summary.json
+!results/main_study/main_evaluation/864fe6722256/main_evaluation_workload_status.csv
+!results/main_study/main_evaluation/864fe6722256/main_evaluation_execution_summary.md
+
+!results/main_study/864fe6722256/
+!results/main_study/864fe6722256/records/
+!results/main_study/864fe6722256/records/*.json
+!results/main_study/864fe6722256/artifacts/
+!results/main_study/864fe6722256/artifacts/**
