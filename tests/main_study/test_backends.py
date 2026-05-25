@@ -811,8 +811,10 @@ def test_execute_planned_run_with_real_backends_returns_execution_result(
 
 _BACKENDS_ALLOWED_PREFIXES: frozenset[str] = frozenset({
     "__future__",
+    "collections",
     "dataclasses",
     "math",
+    "time",
     "typing",
     "inspect",
     "numpy",
@@ -823,6 +825,7 @@ _BACKENDS_ALLOWED_PREFIXES: frozenset[str] = frozenset({
     "experiments.main_study.paths",
     "symbolic_priors_cd.data.scm_generator",
     "symbolic_priors_cd.data.interventions",
+    "symbolic_priors_cd.metrics",
     "symbolic_priors_cd.wrappers.dagma",
     "symbolic_priors_cd.wrappers.preprocessing",
     "symbolic_priors_cd.wrappers._dagma_fit",
@@ -832,7 +835,6 @@ _BACKENDS_ALLOWED_PREFIXES: frozenset[str] = frozenset({
 
 
 _BACKENDS_FORBIDDEN_PREFIXES: tuple[str, ...] = (
-    "symbolic_priors_cd.metrics",
     "experiments.selection_study",
     "experiments.main_study.records",
     "experiments.main_study.calibration_lambda_prior",
@@ -901,3 +903,827 @@ def test_backends_perform_no_file_io(monkeypatch, fake_wrapper):
     backend = DAGMABackend()
     backend(planned, _make_bundle_5(), None)
     assert calls == []
+
+
+# ===========================================================================
+# RealMetricBackend
+# ===========================================================================
+
+
+from experiments.main_study.backends import (
+    DEFAULT_BANDWIDTH_MULTIPLIERS,
+    DEFAULT_INTERVENTION_VALUES_RAW,
+    PER_INTERVENTION_GT_SEED_OFFSET,
+    PER_INTERVENTION_MODEL_SEED_OFFSET,
+    SHD_REVERSAL_COST,
+    RealMetricBackend,
+    build_default_intervention_specs,
+)
+from experiments.main_study.backends import (
+    _aggregate_bandwidth_sweep,
+    _compute_per_intervention_record,
+    _median_bandwidth_deterministic,
+)
+from symbolic_priors_cd.data.scm_generator import (
+    generate_linear_gaussian_scm as _generate_scm,
+)
+
+
+# ---------------------------------------------------------------------------
+# A. Intervention specs and seed policy
+# ---------------------------------------------------------------------------
+
+
+def test_build_default_intervention_specs_target_major_order():
+    specs = build_default_intervention_specs(n_nodes=3)
+    assert len(specs) == 6
+    expected_ids = [
+        "do_X0_neg2", "do_X0_pos2",
+        "do_X1_neg2", "do_X1_pos2",
+        "do_X2_neg2", "do_X2_pos2",
+    ]
+    assert [s["intervention_id"] for s in specs] == expected_ids
+    # target_node alternates between increasing values; pairs.
+    assert [s["target_node"] for s in specs] == [0, 0, 1, 1, 2, 2]
+    assert [s["value_raw"] for s in specs] == [-2.0, 2.0] * 3
+
+
+@pytest.mark.parametrize("bad", [True, False, 0, -1, 1.5, "10"])
+def test_build_default_intervention_specs_rejects_invalid_n_nodes(bad):
+    with pytest.raises(ValueError, match="n_nodes"):
+        build_default_intervention_specs(n_nodes=bad)
+
+
+def test_intervention_seed_offsets_do_not_collide_with_protocol_seeds():
+    # Build for two protocol seeds at calibration (401) and evaluation (501).
+    specs = build_default_intervention_specs(n_nodes=10)
+    for base in (401, 501):
+        gt_seeds = [
+            base + PER_INTERVENTION_GT_SEED_OFFSET + idx
+            for idx in range(len(specs))
+        ]
+        model_seeds = [
+            base + PER_INTERVENTION_MODEL_SEED_OFFSET + idx
+            for idx in range(len(specs))
+        ]
+        # No seed equals the base.
+        for s in gt_seeds + model_seeds:
+            assert s != base, (
+                f"per-intervention seed {s} equals base seed {base}"
+            )
+        # GT and model seed pools are disjoint.
+        assert set(gt_seeds).isdisjoint(set(model_seeds)), (
+            f"GT and model seed pools overlap for base {base}"
+        )
+        # All seeds lie well above the prior-seed band (9000-9199).
+        for s in gt_seeds + model_seeds:
+            assert s > 9199, (
+                f"per-intervention seed {s} falls into the prior-seed "
+                "band"
+            )
+
+
+# ---------------------------------------------------------------------------
+# B. Deterministic bandwidth helper
+# ---------------------------------------------------------------------------
+
+
+def test_median_bandwidth_deterministic_repeatable():
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal((20, 3))
+    y = rng.standard_normal((20, 3))
+    a = _median_bandwidth_deterministic(x, y)
+    b = _median_bandwidth_deterministic(x, y)
+    assert a is not None
+    assert a > 0
+    assert a == b
+
+
+def test_median_bandwidth_returns_none_for_identical_samples():
+    x = np.zeros((10, 3))
+    y = np.zeros((10, 3))
+    assert _median_bandwidth_deterministic(x, y) is None
+
+
+def test_median_bandwidth_returns_none_for_nan_samples():
+    x = np.zeros((5, 3))
+    x[0, 0] = float("nan")
+    y = np.zeros((5, 3))
+    assert _median_bandwidth_deterministic(x, y) is None
+
+
+def test_median_bandwidth_returns_none_for_inf_samples():
+    x = np.zeros((5, 3))
+    x[0, 0] = float("inf")
+    y = np.zeros((5, 3))
+    assert _median_bandwidth_deterministic(x, y) is None
+
+
+def test_median_bandwidth_rejects_wrong_shape():
+    x = np.zeros((5, 3))
+    y = np.zeros((5, 4))
+    with pytest.raises(ValueError, match="columns"):
+        _median_bandwidth_deterministic(x, y)
+
+
+def test_median_bandwidth_rejects_non_2d():
+    x = np.zeros(10)
+    y = np.zeros((5, 3))
+    with pytest.raises(ValueError, match="2D"):
+        _median_bandwidth_deterministic(x, y)
+
+
+def test_median_bandwidth_matches_hand_computed_case():
+    x = np.array([[0.0, 0.0], [1.0, 0.0]])
+    y = np.array([[2.0, 0.0], [3.0, 0.0]])
+    # Pooled squared pairwise distances (upper triangle):
+    # (0,1)=1, (0,2)=4, (0,3)=9, (1,2)=1, (1,3)=4, (2,3)=1
+    # Sorted: [1, 1, 1, 4, 4, 9]. Median over 6 values: (1+4)/2 = 2.5.
+    assert _median_bandwidth_deterministic(x, y) == pytest.approx(2.5)
+
+
+def test_median_bandwidth_works_on_non_contiguous_views():
+    rng = np.random.default_rng(0)
+    full = rng.standard_normal((40, 6))
+    # Strided slice creates a non-contiguous view.
+    x = full[:, ::2]
+    y = full[:, 1::2]
+    a = _median_bandwidth_deterministic(x, y)
+    assert a is not None
+    assert a > 0
+
+
+# ---------------------------------------------------------------------------
+# C. Per-intervention record helper with mocked samplers/metrics
+# ---------------------------------------------------------------------------
+
+
+def _bundle_with_real_scm(n_nodes: int = 5) -> DataBundle:
+    """A DataBundle carrying a real SCM in metadata (for intervene call)."""
+    scm = _generate_scm(n_nodes=n_nodes, expected_edges=n_nodes, seed=401)
+    return DataBundle(
+        x_train=np.random.default_rng(0).standard_normal((40, n_nodes)),
+        true_adjacency=np.asarray(scm.adjacency, dtype=bool).copy(),
+        scm_seed=401,
+        metadata={"scm": scm},
+    )
+
+
+def _fit_outcome_with_callable_sampler(n_nodes: int = 5) -> FitOutcome:
+    def fake_sampler(intervention, n_samples, *, sample_seed, noise_policy="residual_fitted"):
+        return np.random.default_rng(sample_seed).standard_normal(
+            (n_samples, n_nodes)
+        )
+
+    # A simple valid DAG: chain 0->1->2->...
+    adj = np.zeros((n_nodes, n_nodes), dtype=bool)
+    for i in range(n_nodes - 1):
+        adj[i, i + 1] = True
+    return FitOutcome(
+        continuous_w=np.zeros((n_nodes, n_nodes)),
+        thresholded_adjacency=adj,
+        graph_status="valid_dag",
+        sampler_status="available",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=fake_sampler,
+    )
+
+
+def test_per_intervention_record_has_required_fields_and_keys(monkeypatch):
+    cfg = _prior_free_config(seed_value=401)
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+    fit = _fit_outcome_with_callable_sampler(5)
+
+    def fake_mmd(x, y, bandwidth=None):
+        # Distinguish by multiplier through the bandwidth value.
+        return -0.01 * float(bandwidth)
+
+    monkeypatch.setattr(backends_mod, "mmd_rbf_unbiased", fake_mmd)
+
+    spec = {
+        "intervention_id": "do_X0_neg2",
+        "target_node": 0,
+        "value_raw": -2.0,
+    }
+    record = _compute_per_intervention_record(
+        planned=planned,
+        data_bundle=bundle,
+        fit_outcome=fit,
+        intervention_spec=spec,
+        intervention_index=0,
+        n_samples=16,
+        bandwidth_multipliers=(0.5, 1.0, 2.0),
+    )
+    expected_fields = {
+        "intervention_id",
+        "target_node",
+        "value_raw",
+        "value_model_frame",
+        "ground_truth_sampling_seed",
+        "model_sampling_seed",
+        "n_ground_truth_samples",
+        "n_model_samples",
+        "mmd_value",
+        "mmd_status",
+        "bandwidth_used",
+        "bandwidth_sweep",
+        "sampler_status_for_intervention",
+        "sampler_reason",
+    }
+    assert set(record.keys()) == expected_fields
+    assert record["mmd_status"] == "available"
+    assert record["sampler_status_for_intervention"] == "available"
+    assert record["sampler_reason"] is None
+    assert set(record["bandwidth_sweep"].keys()) == {"0.5x", "1.0x", "2.0x"}
+    # The "1.0x" entry is the primary mmd_value.
+    assert record["mmd_value"] == record["bandwidth_sweep"]["1.0x"]
+    # Negative finite value is preserved (no clipping).
+    assert record["mmd_value"] < 0
+    # Seed math.
+    assert (
+        record["ground_truth_sampling_seed"]
+        == 401 + PER_INTERVENTION_GT_SEED_OFFSET + 0
+    )
+    assert (
+        record["model_sampling_seed"]
+        == 401 + PER_INTERVENTION_MODEL_SEED_OFFSET + 0
+    )
+    assert record["n_ground_truth_samples"] == 16
+    assert record["n_model_samples"] == 16
+
+
+def test_per_intervention_record_model_sampler_returns_none(monkeypatch):
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+
+    def none_sampler(intervention, n_samples, *, sample_seed, noise_policy="residual_fitted"):
+        return None
+
+    fit = FitOutcome(
+        continuous_w=np.zeros((5, 5)),
+        thresholded_adjacency=np.zeros((5, 5), dtype=bool),
+        graph_status="valid_dag",
+        sampler_status="available",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=none_sampler,
+    )
+    record = _compute_per_intervention_record(
+        planned=planned,
+        data_bundle=bundle,
+        fit_outcome=fit,
+        intervention_spec={
+            "intervention_id": "do_X0_neg2",
+            "target_node": 0,
+            "value_raw": -2.0,
+        },
+        intervention_index=0,
+        n_samples=16,
+        bandwidth_multipliers=(0.5, 1.0, 2.0),
+    )
+    assert record["mmd_status"] == "unavailable_sampler_failure"
+    assert record["mmd_value"] is None
+    assert record["n_model_samples"] == 0
+    assert record["bandwidth_used"] is None
+    assert all(v is None for v in record["bandwidth_sweep"].values())
+
+
+def test_per_intervention_record_degenerate_bandwidth(monkeypatch):
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+    fit = _fit_outcome_with_callable_sampler(5)
+
+    monkeypatch.setattr(
+        backends_mod,
+        "_median_bandwidth_deterministic",
+        lambda x, y: None,
+    )
+    record = _compute_per_intervention_record(
+        planned=planned,
+        data_bundle=bundle,
+        fit_outcome=fit,
+        intervention_spec={
+            "intervention_id": "do_X0_neg2",
+            "target_node": 0,
+            "value_raw": -2.0,
+        },
+        intervention_index=0,
+        n_samples=16,
+        bandwidth_multipliers=(0.5, 1.0, 2.0),
+    )
+    assert record["mmd_status"] == "unavailable_other"
+    assert record["mmd_value"] is None
+    assert record["bandwidth_used"] is None
+    assert all(v is None for v in record["bandwidth_sweep"].values())
+
+
+def test_per_intervention_record_missing_scm_raises():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle_no_scm = DataBundle(
+        x_train=np.zeros((10, 5)),
+        true_adjacency=np.zeros((5, 5), dtype=bool),
+        scm_seed=401,
+        metadata={},
+    )
+    fit = _fit_outcome_with_callable_sampler(5)
+    with pytest.raises(KeyError, match="scm"):
+        _compute_per_intervention_record(
+            planned=planned,
+            data_bundle=bundle_no_scm,
+            fit_outcome=fit,
+            intervention_spec={
+                "intervention_id": "do_X0_neg2",
+                "target_node": 0,
+                "value_raw": -2.0,
+            },
+            intervention_index=0,
+            n_samples=16,
+            bandwidth_multipliers=(0.5, 1.0, 2.0),
+        )
+
+
+def test_per_intervention_record_non_callable_sampler_raises():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+    # Build a FitOutcome with model_sampler=None then bypass the
+    # validator by using sampler_status != "available" so the
+    # constructor doesn't reject it.
+    fit = FitOutcome(
+        continuous_w=np.zeros((5, 5)),
+        thresholded_adjacency=np.zeros((5, 5), dtype=bool),
+        graph_status="cyclic",
+        sampler_status="unavailable_invalid_graph",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=None,
+    )
+    with pytest.raises(ValueError, match="model_sampler"):
+        _compute_per_intervention_record(
+            planned=planned,
+            data_bundle=bundle,
+            fit_outcome=fit,
+            intervention_spec={
+                "intervention_id": "do_X0_neg2",
+                "target_node": 0,
+                "value_raw": -2.0,
+            },
+            intervention_index=0,
+            n_samples=16,
+            bandwidth_multipliers=(0.5, 1.0, 2.0),
+        )
+
+
+# ---------------------------------------------------------------------------
+# D. RealMetricBackend validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [True, False, 0, -1, 1.5, "10"])
+def test_realmetricbackend_rejects_invalid_mmd_n_samples(bad):
+    with pytest.raises(ValueError, match="mmd_n_samples"):
+        RealMetricBackend(mmd_n_samples=bad)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        (),                       # empty tuple
+        (0.5, 0.0),              # zero entry
+        (0.5, -1.0),             # negative entry
+        (0.5, float("nan")),     # NaN
+        (0.5, float("inf")),     # inf
+        (0.5, True),             # bool
+    ],
+)
+def test_realmetricbackend_rejects_invalid_bandwidth_multipliers(bad):
+    with pytest.raises(ValueError, match="bandwidth_multipliers"):
+        RealMetricBackend(bandwidth_multipliers=bad)
+
+
+def test_realmetricbackend_requires_primary_multiplier_1():
+    with pytest.raises(ValueError, match="primary multiplier"):
+        RealMetricBackend(bandwidth_multipliers=(0.5, 2.0))
+
+
+def test_realmetricbackend_rejects_intervention_spec_missing_field():
+    bad = ({"target_node": 0, "value_raw": -2.0},)  # missing intervention_id
+    with pytest.raises(ValueError, match="intervention_id"):
+        RealMetricBackend(intervention_specs=bad)
+
+
+def test_realmetricbackend_call_rejects_invalid_graph_status():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+    fit = FitOutcome(
+        continuous_w=np.zeros((5, 5)),
+        thresholded_adjacency=np.zeros((5, 5), dtype=bool),
+        graph_status="cyclic",
+        sampler_status="unavailable_invalid_graph",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=None,
+    )
+    with pytest.raises(ValueError, match="graph_status"):
+        RealMetricBackend()(planned, bundle, fit)
+
+
+def test_realmetricbackend_call_rejects_invalid_sampler_status():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+    fit = FitOutcome(
+        continuous_w=np.zeros((5, 5)),
+        thresholded_adjacency=np.zeros((5, 5), dtype=bool),
+        graph_status="valid_dag",
+        sampler_status="unavailable_unresolved_noise_policy",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=None,
+    )
+    with pytest.raises(ValueError, match="sampler_status"):
+        RealMetricBackend()(planned, bundle, fit)
+
+
+def test_realmetricbackend_call_rejects_missing_scm():
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle_no_scm = DataBundle(
+        x_train=np.zeros((10, 5)),
+        true_adjacency=np.zeros((5, 5), dtype=bool),
+        scm_seed=401,
+        metadata={},
+    )
+    fit = _fit_outcome_with_callable_sampler(5)
+    with pytest.raises(KeyError, match="scm"):
+        RealMetricBackend()(planned, bundle_no_scm, fit)
+
+
+# ---------------------------------------------------------------------------
+# E. SID/SHD/MMD aggregation with mocked metric primitives
+# ---------------------------------------------------------------------------
+
+
+def test_realmetricbackend_aggregates_metrics_with_mocked_primitives(
+    monkeypatch,
+):
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+    fit = _fit_outcome_with_callable_sampler(5)
+
+    monkeypatch.setattr(backends_mod, "sid_score", lambda p, t: 7)
+    monkeypatch.setattr(
+        backends_mod, "shd", lambda p, t, reversal_cost=2: 3
+    )
+
+    # Return values keyed by bandwidth so different multipliers give
+    # different MMD values; with default DEFAULT_BANDWIDTH_MULTIPLIERS
+    # the test uses base * 0.5/1.0/2.0.
+    def fake_mmd(x, y, bandwidth=None):
+        return -0.01 * float(bandwidth)
+
+    monkeypatch.setattr(backends_mod, "mmd_rbf_unbiased", fake_mmd)
+
+    backend = RealMetricBackend(
+        mmd_n_samples=16,
+        intervention_specs=(
+            {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
+            {"intervention_id": "do_X1_pos2", "target_node": 1, "value_raw": 2.0},
+        ),
+    )
+    outcome = backend(planned, bundle, fit)
+    assert outcome.sid == 7.0
+    assert outcome.shd == 3.0
+    # mmd_primary = mean of the two "1.0x" sweep values, both finite
+    # and negative; the mean is also negative.
+    assert outcome.mmd < 0
+    assert math.isfinite(outcome.mmd)
+    payload = outcome.interventions_mmd
+    assert payload["mmd_available_count"] == 2
+    assert payload["mmd_missing_count"] == 0
+    assert payload["mmd_n_samples"] == 16
+    assert payload["bandwidth_multipliers"] == [0.5, 1.0, 2.0]
+    # Aggregate sweep entries reflect mean of finite per-intervention values.
+    agg = payload["mmd_bandwidth_sweep"]
+    for key in ("0.5x", "1.0x", "2.0x"):
+        assert agg[key] is not None
+        assert math.isfinite(agg[key])
+    # Primary mmd equals aggregate "1.0x".
+    assert outcome.mmd == pytest.approx(agg["1.0x"])
+
+
+def test_realmetricbackend_no_available_records_raises(monkeypatch):
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+
+    def none_sampler(intervention, n_samples, *, sample_seed, noise_policy="residual_fitted"):
+        return None
+
+    adj = np.zeros((5, 5), dtype=bool)
+    adj[0, 1] = True
+    fit = FitOutcome(
+        continuous_w=np.zeros((5, 5)),
+        thresholded_adjacency=adj,
+        graph_status="valid_dag",
+        sampler_status="available",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=none_sampler,
+    )
+    monkeypatch.setattr(backends_mod, "sid_score", lambda p, t: 0)
+    monkeypatch.setattr(
+        backends_mod, "shd", lambda p, t, reversal_cost=2: 0
+    )
+    backend = RealMetricBackend(
+        mmd_n_samples=16,
+        intervention_specs=(
+            {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
+        ),
+    )
+    with pytest.raises(ValueError, match="no available MMD"):
+        backend(planned, bundle, fit)
+
+
+def test_realmetricbackend_metric_runtime_seconds_finite_and_non_negative(
+    monkeypatch,
+):
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+    fit = _fit_outcome_with_callable_sampler(5)
+    monkeypatch.setattr(backends_mod, "sid_score", lambda p, t: 0)
+    monkeypatch.setattr(
+        backends_mod, "shd", lambda p, t, reversal_cost=2: 0
+    )
+    monkeypatch.setattr(
+        backends_mod,
+        "mmd_rbf_unbiased",
+        lambda x, y, bandwidth=None: -0.1,
+    )
+    backend = RealMetricBackend(
+        mmd_n_samples=16,
+        intervention_specs=(
+            {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
+        ),
+    )
+    outcome = backend(planned, bundle, fit)
+    assert math.isfinite(outcome.metric_runtime_seconds)
+    assert outcome.metric_runtime_seconds >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# G. Raw-unit / sampler-discipline
+# ---------------------------------------------------------------------------
+
+
+def test_realmetricbackend_passes_raw_intervention_value_to_sampler(
+    monkeypatch,
+):
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+    captured: list = []
+
+    def capturing_sampler(intervention, n_samples, *, sample_seed, noise_policy="residual_fitted"):
+        captured.append((intervention.target, intervention.value))
+        return np.random.default_rng(sample_seed).standard_normal((n_samples, 5))
+
+    adj = np.zeros((5, 5), dtype=bool)
+    adj[0, 1] = True
+    fit = FitOutcome(
+        continuous_w=np.zeros((5, 5)),
+        thresholded_adjacency=adj,
+        graph_status="valid_dag",
+        sampler_status="available",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=capturing_sampler,
+    )
+    monkeypatch.setattr(backends_mod, "sid_score", lambda p, t: 0)
+    monkeypatch.setattr(
+        backends_mod, "shd", lambda p, t, reversal_cost=2: 0
+    )
+    monkeypatch.setattr(
+        backends_mod,
+        "mmd_rbf_unbiased",
+        lambda x, y, bandwidth=None: -0.1,
+    )
+    backend = RealMetricBackend(
+        mmd_n_samples=8,
+        intervention_specs=(
+            {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
+            {"intervention_id": "do_X1_pos2", "target_node": 1, "value_raw": 2.0},
+        ),
+    )
+    backend(planned, bundle, fit)
+    # The metric backend passes the raw intervention value through
+    # to the sampler without any preprocessing-side conversion.
+    assert (0, -2.0) in captured
+    assert (1, 2.0) in captured
+
+
+def test_realmetricbackend_treats_sampler_opaquely(monkeypatch):
+    """A plain callable (no .__self__, no preprocessor) must work."""
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    bundle = _bundle_with_real_scm(5)
+
+    def plain_callable_sampler(intervention, n_samples, *, sample_seed, noise_policy="residual_fitted"):
+        return np.random.default_rng(sample_seed).standard_normal((n_samples, 5))
+
+    adj = np.zeros((5, 5), dtype=bool)
+    adj[0, 1] = True
+    fit = FitOutcome(
+        continuous_w=np.zeros((5, 5)),
+        thresholded_adjacency=adj,
+        graph_status="valid_dag",
+        sampler_status="available",
+        training_status="converged",
+        wrapper_diagnostics={},
+        model_sampler=plain_callable_sampler,
+    )
+    monkeypatch.setattr(backends_mod, "sid_score", lambda p, t: 0)
+    monkeypatch.setattr(
+        backends_mod, "shd", lambda p, t, reversal_cost=2: 0
+    )
+    monkeypatch.setattr(
+        backends_mod,
+        "mmd_rbf_unbiased",
+        lambda x, y, bandwidth=None: -0.1,
+    )
+    backend = RealMetricBackend(
+        mmd_n_samples=8,
+        intervention_specs=(
+            {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
+        ),
+    )
+    outcome = backend(planned, bundle, fit)
+    # value_model_frame falls back to None because the plain callable
+    # exposes no .__self__/preprocessor.
+    record = outcome.interventions_mmd["records"][0]
+    assert record["value_model_frame"] is None
+
+
+# ---------------------------------------------------------------------------
+# Bandwidth aggregator
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_bandwidth_sweep_means_finite_values():
+    records = [
+        {"bandwidth_sweep": {"0.5x": 0.1, "1.0x": 0.2, "2.0x": 0.3}},
+        {"bandwidth_sweep": {"0.5x": 0.3, "1.0x": 0.4, "2.0x": 0.5}},
+    ]
+    agg = _aggregate_bandwidth_sweep(records, (0.5, 1.0, 2.0))
+    assert agg["0.5x"] == pytest.approx(0.2)
+    assert agg["1.0x"] == pytest.approx(0.3)
+    assert agg["2.0x"] == pytest.approx(0.4)
+
+
+def test_aggregate_bandwidth_sweep_returns_none_when_no_available():
+    records = [
+        {"bandwidth_sweep": {"0.5x": None, "1.0x": None, "2.0x": None}},
+    ]
+    agg = _aggregate_bandwidth_sweep(records, (0.5, 1.0, 2.0))
+    assert agg == {"0.5x": None, "1.0x": None, "2.0x": None}
+
+
+def test_aggregate_bandwidth_sweep_preserves_negative_values():
+    records = [
+        {"bandwidth_sweep": {"0.5x": -0.1, "1.0x": -0.2, "2.0x": -0.3}},
+        {"bandwidth_sweep": {"0.5x": -0.3, "1.0x": -0.4, "2.0x": -0.5}},
+    ]
+    agg = _aggregate_bandwidth_sweep(records, (0.5, 1.0, 2.0))
+    for key in agg:
+        assert agg[key] < 0
+
+
+# ---------------------------------------------------------------------------
+# F. Integration: execute_planned_run with real fit + real metric stubs
+# ---------------------------------------------------------------------------
+
+
+def _real_integration_metric_backend() -> RealMetricBackend:
+    """RealMetricBackend with reduced spec for fast integration tests."""
+    return RealMetricBackend(
+        mmd_n_samples=32,
+        intervention_specs=(
+            {"intervention_id": "do_X0_neg2", "target_node": 0, "value_raw": -2.0},
+            {"intervention_id": "do_X0_pos2", "target_node": 0, "value_raw": 2.0},
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "config_builder",
+    [_prior_free_config, _soft_frobenius_config],
+)
+def test_execute_planned_run_with_real_fit_and_real_metric_backend(
+    config_builder, monkeypatch
+):
+    """End-to-end smoke: real DataBundleLoader, real fit, real metric
+    backend; sid_score/shd/mmd_rbf_unbiased are monkeypatched to keep
+    the test stable regardless of DAGMA's actual numeric output."""
+    monkeypatch.setattr(backends_mod, "sid_score", lambda p, t: 5)
+    monkeypatch.setattr(
+        backends_mod, "shd", lambda p, t, reversal_cost=2: 3
+    )
+
+    def fake_mmd(x, y, bandwidth=None):
+        return -0.01 * float(bandwidth)
+
+    monkeypatch.setattr(backends_mod, "mmd_rbf_unbiased", fake_mmd)
+
+    cfg = config_builder()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    loader = DataBundleLoader(n_nodes=5, expected_edges=5, n_train=200)
+    fit_backend = MainStudyFitBackend()
+    metric_backend = _real_integration_metric_backend()
+
+    result = execute_planned_run(
+        planned,
+        data_loader=loader,
+        fit_backend=fit_backend,
+        metric_backend=metric_backend,
+        generated_at_utc=_GENERATED_AT,
+    )
+    assert isinstance(result, ExecutionResult)
+    rec = result.record
+    if rec.metric_status == "computed":
+        assert rec.sid == 5.0
+        assert rec.shd == 3.0
+        assert rec.mmd is not None and math.isfinite(rec.mmd)
+        # interventions_mmd artefact present and contains records.
+        payload = result.artefacts["interventions_mmd.json"]
+        assert "records" in payload
+        assert payload["mmd_available_count"] >= 1
+    # Else: the fit produced an invalid graph; the metric backend was
+    # correctly not called.
+
+
+def test_realmetricbackend_integration_does_no_file_io(monkeypatch):
+    """Sentinel: full integration path does not open files / make dirs."""
+    monkeypatch.setattr(backends_mod, "sid_score", lambda p, t: 5)
+    monkeypatch.setattr(
+        backends_mod, "shd", lambda p, t, reversal_cost=2: 3
+    )
+    monkeypatch.setattr(
+        backends_mod,
+        "mmd_rbf_unbiased",
+        lambda x, y, bandwidth=None: -0.01 * float(bandwidth),
+    )
+    calls: list[str] = []
+
+    def trap_open(*args, **kwargs):
+        calls.append("open")
+        raise AssertionError("must not call open()")
+
+    def trap_mkdir(*args, **kwargs):
+        calls.append("mkdir")
+        raise AssertionError("must not create directories")
+
+    monkeypatch.setattr("builtins.open", trap_open)
+    monkeypatch.setattr(Path, "mkdir", trap_mkdir)
+
+    cfg = _prior_free_config()
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    loader = DataBundleLoader(n_nodes=5, expected_edges=5, n_train=200)
+    execute_planned_run(
+        planned,
+        data_loader=loader,
+        fit_backend=MainStudyFitBackend(),
+        metric_backend=_real_integration_metric_backend(),
+        generated_at_utc=_GENERATED_AT,
+    )
+    assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# H. Import allowlist update (after adding symbolic_priors_cd.metrics)
+# ---------------------------------------------------------------------------
+
+
+def test_backends_allowlist_permits_symbolic_priors_metrics():
+    """The metrics module is now allowed in backends.py."""
+    src = Path(backends_mod.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    metrics_imports = [
+        m
+        for m in _module_imports(tree)
+        if m.startswith("symbolic_priors_cd.metrics")
+    ]
+    assert metrics_imports, (
+        "backends.py is expected to import from symbolic_priors_cd.metrics"
+    )
+    # Forbidden prefixes still hold.
+    for mod in _module_imports(tree):
+        for forbidden in _BACKENDS_FORBIDDEN_PREFIXES:
+            assert not mod.startswith(forbidden)
