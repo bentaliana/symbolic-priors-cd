@@ -429,24 +429,51 @@ class MainStudyRunRecord:
                     "metric_status='computed' requires "
                     f"fit_status='success'; got {self.fit_status!r}."
                 )
+            # sid and shd are non-negative integer-valued distances by
+            # construction. mmd is the raw unbiased RBF MMD estimator,
+            # which can take negative finite values in finite samples;
+            # the project policy is to record those values exactly
+            # rather than clip them. Therefore mmd is only required to
+            # be finite (and a real number), not non-negative.
             for label, value in (
                 ("sid", self.sid),
                 ("shd", self.shd),
-                ("mmd", self.mmd),
             ):
-                if value is None or not isinstance(
-                    value, (int, float)
-                ) or isinstance(value, bool):
+                if (
+                    value is None
+                    or isinstance(value, bool)
+                    or not isinstance(value, (int, float))
+                ):
                     raise ValueError(
-                        f"metric_status='computed' requires finite "
-                        f"non-negative {label}; got {value!r}."
+                        f"metric_status='computed' requires {label} to "
+                        "be a finite non-negative number; got "
+                        f"{value!r}."
                     )
                 v = float(value)
                 if not math.isfinite(v) or v < 0.0:
                     raise ValueError(
-                        f"metric_status='computed' requires finite "
-                        f"non-negative {label}; got {value!r}."
+                        f"metric_status='computed' requires {label} to "
+                        "be finite and non-negative; got "
+                        f"{value!r}."
                     )
+            mmd_value = self.mmd
+            if (
+                mmd_value is None
+                or isinstance(mmd_value, bool)
+                or not isinstance(mmd_value, (int, float))
+            ):
+                raise ValueError(
+                    "metric_status='computed' requires mmd to be a "
+                    f"finite real number; got {mmd_value!r}."
+                )
+            mmd_float = float(mmd_value)
+            if not math.isfinite(mmd_float):
+                raise ValueError(
+                    "metric_status='computed' requires mmd to be "
+                    f"finite (negative finite values are accepted "
+                    "because the raw unbiased RBF MMD estimator can be "
+                    f"negative in finite samples); got {mmd_value!r}."
+                )
             if self.metric_runtime_seconds is None:
                 raise ValueError(
                     "metric_status='computed' requires "

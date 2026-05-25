@@ -546,10 +546,64 @@ def test_computed_record_rejects_bad_shd(bad):
         _build_success_record(shd=bad)
 
 
-@pytest.mark.parametrize("bad", [None, float("nan"), float("inf"), -0.5])
+@pytest.mark.parametrize("bad", [None, float("nan"), float("inf"), float("-inf")])
 def test_computed_record_rejects_bad_mmd(bad):
+    # Negative finite mmd values are valid for the raw unbiased RBF MMD
+    # estimator and are covered by dedicated acceptance tests below.
     with pytest.raises(ValueError, match="mmd"):
         _build_success_record(mmd=bad)
+
+
+@pytest.mark.parametrize("good", [-1e-4, -0.5, -1.0, 0.0, 0.001, 1.5])
+def test_computed_record_accepts_finite_mmd_including_negative(good):
+    record = _build_success_record(mmd=good)
+    assert record.mmd == good
+    # The validator must preserve the exact float; no clipping, rounding,
+    # or transformation occurs.
+    assert record.mmd is good or float(record.mmd) == float(good)
+
+
+def test_computed_record_preserves_small_negative_mmd_exactly():
+    record = _build_success_record(mmd=-1e-4)
+    assert record.mmd == -1e-4
+
+
+def test_computed_record_rejects_nan_mmd_with_finite_message():
+    with pytest.raises(ValueError) as exc:
+        _build_success_record(mmd=float("nan"))
+    msg = str(exc.value)
+    assert "mmd" in msg
+    assert "finite" in msg
+
+
+def test_computed_record_rejects_inf_mmd_with_finite_message():
+    with pytest.raises(ValueError) as exc:
+        _build_success_record(mmd=float("inf"))
+    msg = str(exc.value)
+    assert "mmd" in msg
+    assert "finite" in msg
+
+
+def test_computed_record_rejects_negative_sid_with_non_negative_message():
+    with pytest.raises(ValueError) as exc:
+        _build_success_record(sid=-1)
+    msg = str(exc.value)
+    assert "sid" in msg
+    assert "non-negative" in msg
+
+
+def test_computed_record_rejects_negative_shd_with_non_negative_message():
+    with pytest.raises(ValueError) as exc:
+        _build_success_record(shd=-1)
+    msg = str(exc.value)
+    assert "shd" in msg
+    assert "non-negative" in msg
+
+
+def test_failure_record_with_negative_mmd_still_rejected():
+    """When metric_status != 'computed', mmd must be None regardless of sign."""
+    with pytest.raises(ValueError, match="mmd"):
+        _build_failure_record(mmd=-0.001)
 
 
 # ---------------------------------------------------------------------------
