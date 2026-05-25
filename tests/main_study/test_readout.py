@@ -1,7 +1,7 @@
 """Tests for the M-9a main-evaluation readout foundation.
 
 All tests run under ``tmp_path``. The real DAGMA wrappers, the real
-metric backend, and the real M-8 record set are never used. Each
+metric backend, and the real record set are never used. Each
 test builds minimal synthetic records and writes only npz/json
 artefacts the readout step needs.
 """
@@ -24,8 +24,12 @@ from experiments.main_study.priors import (
     CorruptedPriorSpec,
 )
 from experiments.main_study.readout import (
+    BASELINE_COMPARISON_CSV,
+    BASELINE_CONDITION_LABELS,
     CELL_SUMMARY_CSV,
     CONTINUOUS_W_KEY,
+    DEGRADATION_SUMMARY_CSV,
+    DIFF_CONVENTION,
     EVALUATION_SEED_VALUES,
     EXPECTED_COUNTS_BY_METHOD,
     EXPECTED_LAMBDA_PRIOR,
@@ -36,28 +40,59 @@ from experiments.main_study.readout import (
     FLAT_RECORDS_CSV,
     FORBIDDEN_CALIBRATION_SEEDS,
     FORBIDDEN_EDGE_ENGAGEMENT_CSV,
+    FORBIDDEN_EDGE_ENGAGEMENT_SUMMARY_CSV,
     FlatRecordRow,
+    METRIC_COLUMNS,
+    METRIC_CORRELATIONS_CSV,
+    PAIRED_COMPARISON_PAIRS,
+    PAIRED_SEED_COMPARISONS_CSV,
+    PER_INTERVENTION_MMD_LONG_CSV,
+    PER_INTERVENTION_MMD_SUMMARY_CSV,
     PROJECT_THRESHOLD,
+    REFERENCE_FORBIDDEN_EDGE_COMPARISON_CSV,
+    STATISTICS_SUMMARY_JSON,
     STATUS_SUMMARY_CSV,
     THRESHOLDED_ADJACENCY_KEY,
     VALIDATION_SUMMARY_JSON,
     ValidationSummary,
+    compute_baseline_comparison,
+    compute_degradation_summary,
+    compute_forbidden_edge_engagement_summary,
+    compute_metric_correlations,
+    compute_paired_seed_comparisons,
+    compute_per_intervention_mmd_summary,
     compute_prior_edge_engagement,
+    compute_reference_forbidden_edge_comparison,
+    condition_key,
+    extract_per_intervention_mmd,
     flatten_record,
     forbidden_edges_from_record,
+    generate_hypothesis_statistics,
     generate_readout_foundation,
+    kendall_tau_b,
+    linear_slope,
+    load_flat_records_csv,
     load_main_evaluation_records,
     load_npz_array,
     main as cli_main,
     main_evaluation_readout_dir,
     main_evaluation_records_dir,
     off_diagonal_edge_count,
+    paired_seed_difference,
+    pearson_corr,
+    rank_values_average_ties,
     record_config_value,
+    reference_forbidden_edges_by_seed,
     resolve_artifact_path,
+    select_condition,
+    spearman_corr,
+    summary_stats,
     validate_flat_rows,
     write_cell_summary_csv,
+    write_dict_rows_csv,
     write_flat_records_csv,
     write_forbidden_edge_engagement_csv,
+    write_statistics_summary_json,
     write_status_summary_csv,
     write_validation_summary_json,
 )
@@ -1075,3 +1110,745 @@ def test_docs_03_not_modified(tmp_path):
         strict=True,
     )
     assert not (tmp_path / "docs").exists()
+
+
+
+# ===========================================================================
+# ESTS
+# ===========================================================================
+
+
+def _build_grid_and_flat(tmp_path: Path) -> tuple[tuple[dict, ...], Path]:
+    """Persist the canonical 224-record grid plus the M-9a flat CSV.
+
+    Each record gets sid/shd/mmd that vary by confidence and
+    corruption so downstream slopes and correlations have
+    non-trivial values.
+    """
+    for seed in EVALUATION_SEED_VALUES:
+        # prior_free
+        cfg = _make_config(method_family="prior_free", seed=seed)
+        planned = make_planned_run(cfg, _RUN_HASH12)
+        rec = _make_record(
+            planned, base_dir=tmp_path,
+            sid=10.0 + seed - 501,
+            shd=6.0 + (seed - 501) * 0.5,
+            mmd=0.05 + (seed - 501) * 0.005,
+        )
+        _persist(rec, planned, tmp_path)
+        # matched_l1
+        cfg = _make_config(method_family="matched_l1", seed=seed)
+        planned = make_planned_run(cfg, _RUN_HASH12)
+        rec = _make_record(
+            planned, base_dir=tmp_path,
+            sid=8.0 + (seed - 501) * 0.5,
+            shd=5.0 + (seed - 501) * 0.5,
+            mmd=0.04 + (seed - 501) * 0.005,
+        )
+        _persist(rec, planned, tmp_path)
+        # hard_exclusion: corruption-axis only
+        for idx, cf in enumerate(CORRUPTION_GRID):
+            cfg = _make_config(
+                method_family="hard_exclusion",
+                seed=seed,
+                corruption_fraction=cf,
+                corruption_index=idx,
+            )
+            planned = make_planned_run(cfg, _RUN_HASH12)
+            rec = _make_record(
+                planned, base_dir=tmp_path,
+                sid=5.0 + cf * 10,
+                shd=3.0 + cf * 5,
+                mmd=0.03 + cf * 0.04,
+            )
+            _persist(rec, planned, tmp_path)
+        # soft_frobenius: 5x5 grid
+        for idx, cf in enumerate(CORRUPTION_GRID):
+            for cn in CONFIDENCE_GRID:
+                cfg = _make_config(
+                    method_family="soft_frobenius",
+                    seed=seed,
+                    confidence=cn,
+                    corruption_fraction=cf,
+                    corruption_index=idx,
+                )
+                planned = make_planned_run(cfg, _RUN_HASH12)
+                rec = _make_record(
+                    planned, base_dir=tmp_path,
+                    sid=4.0 + cf * 8 + (1 - cn) * 2,
+                    shd=2.0 + cf * 4 + (1 - cn) * 1,
+                    mmd=0.02 + cf * 0.05 + (1 - cn) * 0.01,
+                )
+                _persist(rec, planned, tmp_path)
+    generate_readout_foundation(
+        output_root=tmp_path,
+        main_evaluation_run_hash12=_RUN_HASH12,
+        strict=True,
+    )
+    flat_csv = main_evaluation_readout_dir(
+        tmp_path, _RUN_HASH12
+    ) / FLAT_RECORDS_CSV
+    flat = load_flat_records_csv(flat_csv)
+    return flat, flat_csv
+
+
+# ---------------------------------------------------------------------------
+# I. load_flat_records_csv
+# ---------------------------------------------------------------------------
+
+
+def test_load_flat_records_csv_exact_column_order(tmp_path):
+    flat, csv_path = _build_grid_and_flat(tmp_path)
+    assert len(flat) == EXPECTED_RECORD_COUNT
+
+
+def test_load_flat_records_csv_rejects_wrong_header(tmp_path):
+    bad = tmp_path / "bad.csv"
+    bad.write_text("not,the,canonical,header\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="canonical column order"):
+        load_flat_records_csv(bad)
+
+
+def test_load_flat_records_csv_empty_cells_become_none(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    pf = [r for r in flat if r["method_family"] == "prior_free"][0]
+    assert pf["confidence"] is None
+    assert pf["corruption_fraction"] is None
+
+
+def test_load_flat_records_csv_numeric_coercion(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    soft = [r for r in flat if r["method_family"] == "soft_frobenius"][0]
+    assert isinstance(soft["confidence"], float)
+    assert isinstance(soft["seed_value"], int)
+    assert isinstance(soft["edge_count_from_thresholded_adjacency"], int)
+    assert isinstance(soft["sid"], float)
+
+
+# ---------------------------------------------------------------------------
+# J. Condition helpers
+# ---------------------------------------------------------------------------
+
+
+def test_condition_key_all_families(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    keys = {condition_key(r) for r in flat}
+    assert ("prior_free", None, None) in keys
+    assert ("matched_l1", None, None) in keys
+    assert ("soft_frobenius", 0.0, 1.0) in keys
+    assert ("hard_exclusion", 0.0, None) in keys
+
+
+def test_select_condition_seed_sorted(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    rows = select_condition(flat, method_family="prior_free")
+    assert tuple(r["seed_value"] for r in rows) == tuple(
+        sorted(EVALUATION_SEED_VALUES)
+    )
+
+
+def test_select_condition_clean_soft_conf1(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    rows = select_condition(
+        flat,
+        method_family="soft_frobenius",
+        corruption_fraction=0.0,
+        confidence=1.0,
+    )
+    assert len(rows) == 7
+
+
+# ---------------------------------------------------------------------------
+# K. Descriptive summaries
+# ---------------------------------------------------------------------------
+
+
+def test_summary_stats_sample_std_and_median():
+    s = summary_stats([1.0, 2.0, 3.0, 4.0, 5.0])
+    assert s["n"] == 5
+    assert s["mean"] == pytest.approx(3.0)
+    assert s["median"] == pytest.approx(3.0)
+    assert s["std"] == pytest.approx(math.sqrt(2.5))
+    assert s["min"] == 1.0
+    assert s["max"] == 5.0
+
+
+def test_summary_stats_accepts_negative_mmd():
+    s = summary_stats([-0.01, 0.0, 0.01])
+    assert s["n"] == 3
+    assert s["min"] < 0.0
+
+
+def test_summary_stats_empty():
+    s = summary_stats([None, None])
+    assert s["n"] == 0
+    assert s["mean"] is None
+
+
+def test_compute_baseline_comparison_four_conditions_x_all_metrics(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    rows = compute_baseline_comparison(flat)
+    assert len(rows) == 16
+    labels = {r["condition_label"] for r in rows}
+    assert labels == set(BASELINE_CONDITION_LABELS)
+    metrics = {r["metric"] for r in rows}
+    assert metrics == set(METRIC_COLUMNS)
+
+
+# ---------------------------------------------------------------------------
+# L. Paired-seed comparisons
+# ---------------------------------------------------------------------------
+
+
+def test_paired_seed_difference_pairs_by_seed(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    a = select_condition(flat, method_family="prior_free")
+    b = select_condition(flat, method_family="matched_l1")
+    out = paired_seed_difference(
+        a, b, metric="sid",
+        label_a="prior_free", label_b="matched_l1",
+        n_bootstrap=200, random_seed=42,
+    )
+    assert out["n_pairs"] == 7
+    assert out["diff_convention"] == "a - b"
+
+
+def test_paired_seed_difference_rejects_mismatched_seeds():
+    rows_a = [{"seed_value": 501, "sid": 5.0}]
+    rows_b = [{"seed_value": 502, "sid": 4.0}]
+    with pytest.raises(ValueError, match="seed sets differ"):
+        paired_seed_difference(
+            rows_a, rows_b, metric="sid",
+            label_a="A", label_b="B",
+            n_bootstrap=10, random_seed=1,
+        )
+
+
+def test_paired_seed_difference_diff_convention_is_a_minus_b():
+    rows_a = [
+        {"seed_value": 501, "sid": 10.0},
+        {"seed_value": 502, "sid": 12.0},
+    ]
+    rows_b = [
+        {"seed_value": 501, "sid": 4.0},
+        {"seed_value": 502, "sid": 5.0},
+    ]
+    out = paired_seed_difference(
+        rows_a, rows_b, metric="sid",
+        label_a="A", label_b="B",
+        n_bootstrap=100, random_seed=1,
+    )
+    assert out["mean_diff"] == pytest.approx(6.5)
+    assert out["wins_a_lower"] == 0
+    assert out["wins_b_lower"] == 2
+
+
+def test_paired_seed_bootstrap_ci_is_deterministic():
+    rows_a = [
+        {"seed_value": s, "sid": float(s)}
+        for s in EVALUATION_SEED_VALUES
+    ]
+    rows_b = [
+        {"seed_value": s, "sid": float(s) - 1.0}
+        for s in EVALUATION_SEED_VALUES
+    ]
+    a = paired_seed_difference(
+        rows_a, rows_b, metric="sid",
+        label_a="A", label_b="B",
+        n_bootstrap=500, random_seed=12345,
+    )
+    b = paired_seed_difference(
+        rows_a, rows_b, metric="sid",
+        label_a="A", label_b="B",
+        n_bootstrap=500, random_seed=12345,
+    )
+    assert a["bootstrap_ci_low"] == b["bootstrap_ci_low"]
+    assert a["bootstrap_ci_high"] == b["bootstrap_ci_high"]
+
+
+def test_paired_seed_wins_counts_lower_is_better():
+    rows_a = [{"seed_value": 501, "sid": 2.0}, {"seed_value": 502, "sid": 9.0}]
+    rows_b = [{"seed_value": 501, "sid": 4.0}, {"seed_value": 502, "sid": 9.0}]
+    out = paired_seed_difference(
+        rows_a, rows_b, metric="sid",
+        label_a="A", label_b="B",
+        n_bootstrap=10, random_seed=1,
+    )
+    assert out["wins_a_lower"] == 1
+    assert out["wins_b_lower"] == 0
+    assert out["ties"] == 1
+
+
+def test_paired_seed_edge_count_wins_phrased_as_sparser():
+    doc = (paired_seed_difference.__doc__ or "")
+    assert "sparser" in doc.lower()
+    assert "not " in doc.lower() and "better" in doc.lower()
+
+
+def test_compute_paired_seed_comparisons_only_predeclared(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    rows = compute_paired_seed_comparisons(
+        flat, n_bootstrap=200, random_seed=42,
+    )
+    assert len(rows) == 20
+    pairs_seen = {(r["label_a"], r["label_b"]) for r in rows}
+    assert pairs_seen == set(PAIRED_COMPARISON_PAIRS)
+
+
+def test_compute_paired_seed_no_best_confidence_comparison(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    rows = compute_paired_seed_comparisons(
+        flat, n_bootstrap=200, random_seed=42,
+    )
+    for r in rows:
+        for fld in ("label_a", "label_b"):
+            label = str(r[fld]).lower()
+            assert "best" not in label
+            assert "argmax" not in label
+
+
+# ---------------------------------------------------------------------------
+# M. Correlations
+# ---------------------------------------------------------------------------
+
+
+def test_rank_values_average_ties_basic():
+    assert rank_values_average_ties([1.0, 2.0, 2.0, 3.0]) == [
+        1.0, 2.5, 2.5, 4.0,
+    ]
+
+
+def test_pearson_perfect_linear():
+    x = [1.0, 2.0, 3.0, 4.0, 5.0]
+    y = [2.0, 4.0, 6.0, 8.0, 10.0]
+    assert pearson_corr(x, y) == pytest.approx(1.0)
+
+
+def test_pearson_negative_linear():
+    x = [1.0, 2.0, 3.0]
+    y = [3.0, 2.0, 1.0]
+    assert pearson_corr(x, y) == pytest.approx(-1.0)
+
+
+def test_pearson_returns_none_on_constant():
+    assert pearson_corr([1.0, 1.0, 1.0], [1.0, 2.0, 3.0]) is None
+
+
+def test_spearman_monotone_with_ties():
+    x = [1.0, 2.0, 2.0, 3.0]
+    y = [10.0, 20.0, 30.0, 40.0]
+    s = spearman_corr(x, y)
+    assert s is not None
+    assert 0.9 <= s <= 1.0
+
+
+def test_kendall_tau_b_simple_cases():
+    assert kendall_tau_b([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == pytest.approx(1.0)
+    assert kendall_tau_b([1.0, 2.0, 3.0], [3.0, 2.0, 1.0]) == pytest.approx(-1.0)
+
+
+def test_compute_metric_correlations_overall_and_per_method(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    rows = compute_metric_correlations(flat)
+    groups = {r["group_label"] for r in rows}
+    assert "all" in groups
+    assert any(g.startswith("method_family:") for g in groups)
+    assert len(rows) == 20
+
+
+# ---------------------------------------------------------------------------
+# N. Degradation
+# ---------------------------------------------------------------------------
+
+
+def test_linear_slope_simple():
+    assert linear_slope([0.0, 1.0, 2.0], [0.0, 2.0, 4.0]) == pytest.approx(2.0)
+
+
+def test_linear_slope_constant_x_returns_none():
+    assert linear_slope([1.0, 1.0, 1.0], [1.0, 2.0, 3.0]) is None
+
+
+def test_compute_degradation_summary_hard_exclusion_and_soft(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    rows = compute_degradation_summary(flat)
+    families = {r["method_family"] for r in rows}
+    assert "hard_exclusion" in families
+    assert "soft_frobenius" in families
+    soft_rows = [r for r in rows if r["method_family"] == "soft_frobenius"]
+    assert len(soft_rows) == 20
+    hard_rows = [r for r in rows if r["method_family"] == "hard_exclusion"]
+    assert len(hard_rows) == 4
+    for r in rows:
+        text = " ".join(str(v) for v in r.values()).lower()
+        for forbidden in (
+            "graceful", "robust", "winner", "best", "supported",
+        ):
+            assert forbidden not in text
+
+
+# ---------------------------------------------------------------------------
+# O. Forbidden-edge engagement summary
+# ---------------------------------------------------------------------------
+
+
+def test_forbidden_engagement_summary_groups_correctly(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    rows = compute_forbidden_edge_engagement_summary(flat)
+    assert len(rows) == 32
+
+
+def test_reference_forbidden_edges_by_seed_exactly_one_per_seed(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    records = load_main_evaluation_records(
+        main_evaluation_records_dir(tmp_path, _RUN_HASH12)
+    )
+    ref = reference_forbidden_edges_by_seed(records)
+    assert set(ref.keys()) == set(EVALUATION_SEED_VALUES)
+
+
+def test_reference_forbidden_edges_rejects_missing(tmp_path):
+    cfg = _make_config(method_family="prior_free", seed=501)
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    _persist(_make_record(planned, base_dir=tmp_path), planned, tmp_path)
+    records = load_main_evaluation_records(
+        main_evaluation_records_dir(tmp_path, _RUN_HASH12)
+    )
+    with pytest.raises(ValueError, match="no clean-soft"):
+        reference_forbidden_edges_by_seed(records)
+
+
+def test_reference_comparison_uses_clean_soft_edge_set(tmp_path):
+    flat, _ = _build_grid_and_flat(tmp_path)
+    records = load_main_evaluation_records(
+        main_evaluation_records_dir(tmp_path, _RUN_HASH12)
+    )
+    rows = compute_reference_forbidden_edge_comparison(
+        records, flat, base_dir=tmp_path,
+    )
+    assert len(rows) == 28
+    for seed in EVALUATION_SEED_VALUES:
+        per_seed = [r for r in rows if r["seed_value"] == seed]
+        ref_n = {r["n_reference_forbidden_edges"] for r in per_seed}
+        assert len(ref_n) == 1
+
+
+# ---------------------------------------------------------------------------
+# P. Per-intervention MMD
+# ---------------------------------------------------------------------------
+
+
+def _write_interventions_mmd(
+    planned, *, base_dir: Path, n_records: int = 2,
+) -> None:
+    rel = planned.artefact_paths["interventions_mmd.json"]
+    full = base_dir / rel
+    full.parent.mkdir(parents=True, exist_ok=True)
+    records = []
+    for k in range(n_records):
+        records.append({
+            "intervention_id": f"do_X{k}_pos",
+            "target_node": k,
+            "value_raw": 1.0,
+            "value_model_frame": 1.1,
+            "ground_truth_sampling_seed": 10501 + k,
+            "model_sampling_seed": 20501 + k,
+            "n_ground_truth_samples": 1000,
+            "n_model_samples": 1000,
+            "mmd_value": 0.1 + 0.01 * k,
+            "mmd_status": "available",
+            "bandwidth_used": 1.5,
+            "bandwidth_sweep": {
+                "0.5x": 0.05 + 0.001 * k,
+                "1.0x": 0.1 + 0.01 * k,
+                "2.0x": 0.2 + 0.02 * k,
+            },
+            "sampler_status_for_intervention": "available",
+            "sampler_reason": None,
+        })
+    payload = {
+        "records": records,
+        "mmd_primary": 0.1,
+        "mmd_bandwidth_sweep": {"0.5x": 0.05, "1.0x": 0.1, "2.0x": 0.2},
+    }
+    full.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_extract_per_intervention_mmd_parses_expected_schema(tmp_path):
+    cfg = _make_config(method_family="prior_free", seed=501)
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    rec = _make_record(planned, base_dir=tmp_path)
+    _write_interventions_mmd(planned, base_dir=tmp_path, n_records=3)
+    rows = extract_per_intervention_mmd(rec, base_dir=tmp_path)
+    assert len(rows) == 3
+    for r in rows:
+        assert r["intervention_id"]
+        assert isinstance(r["target_node"], int)
+        assert r["mmd_status"] == "available"
+        assert r["bandwidth_sweep_0_5x"] is not None
+        assert r["bandwidth_sweep_1_0x"] is not None
+        assert r["bandwidth_sweep_2_0x"] is not None
+
+
+def test_extract_per_intervention_mmd_missing_path_on_computed_raises(tmp_path):
+    cfg = _make_config(method_family="prior_free", seed=501)
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    rec = _make_record(planned, base_dir=tmp_path)
+    object.__setattr__(rec, "interventions_mmd_path", None)
+    with pytest.raises(ValueError, match="interventions_mmd_path is None"):
+        extract_per_intervention_mmd(rec, base_dir=tmp_path)
+
+
+def test_extract_per_intervention_mmd_missing_bandwidth_key_raises(tmp_path):
+    cfg = _make_config(method_family="prior_free", seed=501)
+    planned = make_planned_run(cfg, _RUN_HASH12)
+    rec = _make_record(planned, base_dir=tmp_path)
+    rel = planned.artefact_paths["interventions_mmd.json"]
+    full = tmp_path / rel
+    full.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "records": [{
+            "intervention_id": "x",
+            "target_node": 0,
+            "value_raw": 0.0,
+            "value_model_frame": 0.0,
+            "ground_truth_sampling_seed": 10501,
+            "model_sampling_seed": 20501,
+            "n_ground_truth_samples": 1000,
+            "n_model_samples": 1000,
+            "mmd_value": 0.1,
+            "mmd_status": "available",
+            "bandwidth_used": 1.0,
+            "bandwidth_sweep": {"0.5x": 0.05, "1.0x": 0.1},
+            "sampler_status_for_intervention": "available",
+            "sampler_reason": None,
+        }],
+        "mmd_primary": 0.1,
+    }
+    full.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="2.0x"):
+        extract_per_intervention_mmd(rec, base_dir=tmp_path)
+
+
+def test_per_intervention_mmd_summary_finite_only():
+    rows = [
+        {
+            "method_family": "prior_free",
+            "seed_value": 501,
+            "corruption_fraction": None,
+            "confidence": None,
+            "intervention_id": "do_X0_pos",
+            "target_node": 0,
+            "value_raw": 1.0,
+            "mmd_value": 0.1,
+            "mmd_status": "available",
+        },
+        {
+            "method_family": "prior_free",
+            "seed_value": 502,
+            "corruption_fraction": None,
+            "confidence": None,
+            "intervention_id": "do_X0_pos",
+            "target_node": 0,
+            "value_raw": 1.0,
+            "mmd_value": float("nan"),
+            "mmd_status": "available",
+        },
+        {
+            "method_family": "prior_free",
+            "seed_value": 503,
+            "corruption_fraction": None,
+            "confidence": None,
+            "intervention_id": "do_X0_pos",
+            "target_node": 0,
+            "value_raw": 1.0,
+            "mmd_value": 0.3,
+            "mmd_status": "available",
+        },
+    ]
+    out = compute_per_intervention_mmd_summary(rows)
+    assert len(out) == 1
+    assert out[0]["n"] == 2
+    assert out[0]["mean_mmd"] == pytest.approx(0.2)
+
+
+# ---------------------------------------------------------------------------
+# Q. Output and orchestrator
+# ---------------------------------------------------------------------------
+
+
+def test_write_dict_rows_csv_deterministic_field_order(tmp_path):
+    rows = [{"b": 2, "a": 1, "c": None}, {"a": 10, "b": 20, "c": 30}]
+    out = tmp_path / "dr.csv"
+    write_dict_rows_csv(rows, out, ("a", "b", "c"))
+    text = out.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    assert lines[0] == "a,b,c"
+    assert lines[1] == "1,2,"
+    assert lines[2] == "10,20,30"
+
+
+def test_write_dict_rows_csv_rejects_unknown_keys(tmp_path):
+    out = tmp_path / "x.csv"
+    with pytest.raises(ValueError, match="unexpected keys"):
+        write_dict_rows_csv(
+            [{"a": 1, "extra": 2}], out, ("a",)
+        )
+
+
+def test_statistics_summary_json_required_keys(tmp_path):
+    _build_grid_and_flat(tmp_path)
+    summary = generate_hypothesis_statistics(
+        output_root=tmp_path,
+        main_evaluation_run_hash12=_RUN_HASH12,
+        n_bootstrap=100,
+        random_seed=90210,
+    )
+    required = {
+        "main_evaluation_run_hash12",
+        "input_flat_csv",
+        "output_files",
+        "n_flat_rows",
+        "n_baseline_rows",
+        "n_paired_comparison_rows",
+        "n_correlation_rows",
+        "n_degradation_rows",
+        "n_forbidden_engagement_rows",
+        "n_reference_forbidden_rows",
+        "n_per_intervention_mmd_rows",
+        "n_per_intervention_mmd_summary_rows",
+        "no_plots_created",
+        "no_notebook_created",
+        "no_hypothesis_verdicts",
+    }
+    assert required.issubset(set(summary.keys()))
+    assert summary["no_plots_created"] is True
+    assert summary["no_notebook_created"] is True
+    assert summary["no_hypothesis_verdicts"] is True
+
+
+def test_generate_hypothesis_statistics_writes_all_files(tmp_path):
+    _build_grid_and_flat(tmp_path)
+    generate_hypothesis_statistics(
+        output_root=tmp_path,
+        main_evaluation_run_hash12=_RUN_HASH12,
+        n_bootstrap=100,
+        random_seed=90210,
+    )
+    rd = main_evaluation_readout_dir(tmp_path, _RUN_HASH12)
+    assert (rd / BASELINE_COMPARISON_CSV).exists()
+    assert (rd / PAIRED_SEED_COMPARISONS_CSV).exists()
+    assert (rd / METRIC_CORRELATIONS_CSV).exists()
+    assert (rd / DEGRADATION_SUMMARY_CSV).exists()
+    assert (rd / FORBIDDEN_EDGE_ENGAGEMENT_SUMMARY_CSV).exists()
+    assert (rd / REFERENCE_FORBIDDEN_EDGE_COMPARISON_CSV).exists()
+    assert (rd / PER_INTERVENTION_MMD_LONG_CSV).exists()
+    assert (rd / PER_INTERVENTION_MMD_SUMMARY_CSV).exists()
+    assert (rd / STATISTICS_SUMMARY_JSON).exists()
+
+
+def test_generate_hypothesis_statistics_no_plots_or_verdicts(tmp_path):
+    _build_grid_and_flat(tmp_path)
+    generate_hypothesis_statistics(
+        output_root=tmp_path,
+        main_evaluation_run_hash12=_RUN_HASH12,
+        n_bootstrap=100,
+        random_seed=90210,
+    )
+    for ext in ("*.png", "*.jpg", "*.pdf", "*.svg", "*.ipynb"):
+        assert not list(tmp_path.rglob(ext))
+    rd = main_evaluation_readout_dir(tmp_path, _RUN_HASH12)
+    forbidden = (
+        "h1 is supported", "h2 is supported", "h3 is supported",
+        "refuted", "proven", "winner", "best method",
+    )
+    for path in rd.glob("*.csv"):
+        text = path.read_text(encoding="utf-8").lower()
+        for token in forbidden:
+            assert token not in text, (
+                f"forbidden token in {path.name}"
+            )
+
+
+def test_cli_full_pipeline_returns_zero(tmp_path):
+    _build_full_grid(tmp_path)
+    rc = cli_main([
+        "--output-root", str(tmp_path),
+        "--main-evaluation-run-hash12", _RUN_HASH12,
+        "--n-bootstrap", "100",
+        "--random-seed", "42",
+    ])
+    assert rc == 0
+
+
+def test_cli_skip_hypothesis_statistics_returns_zero(tmp_path):
+    _build_full_grid(tmp_path)
+    rc = cli_main([
+        "--output-root", str(tmp_path),
+        "--main-evaluation-run-hash12", _RUN_HASH12,
+        "--skip-hypothesis-statistics",
+    ])
+    assert rc == 0
+    rd = main_evaluation_readout_dir(tmp_path, _RUN_HASH12)
+    assert not (rd / BASELINE_COMPARISON_CSV).exists()
+
+
+def test_cli_returns_one_on_failure(tmp_path):
+    rc = cli_main([
+        "--output-root", str(tmp_path),
+        "--main-evaluation-run-hash12", _RUN_HASH12,
+    ])
+    assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# R. Static scope checks (M-9b)
+# ---------------------------------------------------------------------------
+
+
+_M9B_FORBIDDEN_EXTRA_PREFIXES: tuple[str, ...] = (
+    "scipy",
+    "pandas",
+    "statsmodels",
+    "sklearn",
+)
+
+
+def test_readout_does_not_import_scipy_pandas_statsmodels_sklearn():
+    src = Path(readout_mod.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    for mod in _module_imports(tree):
+        for forbidden in _M9B_FORBIDDEN_EXTRA_PREFIXES:
+            assert not mod.startswith(forbidden), (
+                f"readout.py must not import {mod!r}; forbidden "
+                f"prefix {forbidden!r}."
+            )
+
+
+def test_readout_source_has_no_final_verdict_phrases():
+    src = Path(readout_mod.__file__).read_text(encoding="utf-8")
+    src_lower = src.lower()
+    forbidden_phrases = (
+        "h1 is supported",
+        "h2 is supported",
+        "h3 is supported",
+        "refuted",
+        "proven",
+        "winner",
+        "best method",
+    )
+    for phrase in forbidden_phrases:
+        assert phrase not in src_lower, (
+            f"readout.py must not contain final-verdict phrase "
+            f"{phrase!r}."
+        )
+
+
+def test_readout_source_has_no_post_hoc_confidence_selection():
+    src = Path(readout_mod.__file__).read_text(encoding="utf-8")
+    src_lower = src.lower()
+    for phrase in ("best confidence", "max confidence", "argmax"):
+        assert phrase not in src_lower, (
+            f"readout.py must not contain post-hoc selection phrase "
+            f"{phrase!r}."
+        )

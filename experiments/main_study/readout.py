@@ -84,6 +84,60 @@ STATUS_SUMMARY_CSV: str = "status_summary.csv"
 VALIDATION_SUMMARY_JSON: str = "validation_summary.json"
 FORBIDDEN_EDGE_ENGAGEMENT_CSV: str = "forbidden_edge_engagement.csv"
 
+# M-9b output filenames (statistics and diagnostics).
+BASELINE_COMPARISON_CSV: str = "baseline_comparison.csv"
+PAIRED_SEED_COMPARISONS_CSV: str = "paired_seed_comparisons.csv"
+METRIC_CORRELATIONS_CSV: str = "metric_correlations.csv"
+DEGRADATION_SUMMARY_CSV: str = "degradation_summary.csv"
+FORBIDDEN_EDGE_ENGAGEMENT_SUMMARY_CSV: str = (
+    "forbidden_edge_engagement_summary.csv"
+)
+REFERENCE_FORBIDDEN_EDGE_COMPARISON_CSV: str = (
+    "reference_forbidden_edge_comparison.csv"
+)
+PER_INTERVENTION_MMD_LONG_CSV: str = "per_intervention_mmd_long.csv"
+PER_INTERVENTION_MMD_SUMMARY_CSV: str = "per_intervention_mmd_summary.csv"
+STATISTICS_SUMMARY_JSON: str = "statistics_summary.json"
+
+# Core metrics. For SID, SHD, and MMD, lower means lower error. For
+# edge_count_from_thresholded_adjacency, lower means sparser learned
+# graph, NOT necessarily better. The wins_a_lower column in the
+# paired-comparison CSV must therefore be interpreted as "a is
+# sparser", not "a is better", whenever metric == edge_count.
+METRIC_COLUMNS: tuple[str, ...] = (
+    "sid",
+    "shd",
+    "mmd",
+    "edge_count_from_thresholded_adjacency",
+)
+
+# Predeclared baseline conditions (no post-hoc confidence selection).
+_BASELINE_LABEL_PRIOR_FREE: str = "prior_free"
+_BASELINE_LABEL_MATCHED_L1: str = "matched_l1"
+_BASELINE_LABEL_SOFT_CLEAN_CONF1: str = "soft_frobenius_clean_conf1"
+_BASELINE_LABEL_HARD_EXCLUSION_CLEAN: str = "hard_exclusion_clean"
+
+BASELINE_CONDITION_LABELS: tuple[str, ...] = (
+    _BASELINE_LABEL_PRIOR_FREE,
+    _BASELINE_LABEL_MATCHED_L1,
+    _BASELINE_LABEL_SOFT_CLEAN_CONF1,
+    _BASELINE_LABEL_HARD_EXCLUSION_CLEAN,
+)
+
+# Predeclared paired comparisons (A-E). diff convention is a - b.
+PAIRED_COMPARISON_PAIRS: tuple[tuple[str, str], ...] = (
+    (_BASELINE_LABEL_SOFT_CLEAN_CONF1, _BASELINE_LABEL_PRIOR_FREE),    # A
+    (_BASELINE_LABEL_SOFT_CLEAN_CONF1, _BASELINE_LABEL_MATCHED_L1),    # B
+    (
+        _BASELINE_LABEL_SOFT_CLEAN_CONF1,
+        _BASELINE_LABEL_HARD_EXCLUSION_CLEAN,
+    ),                                                                  # C
+    (_BASELINE_LABEL_MATCHED_L1, _BASELINE_LABEL_PRIOR_FREE),          # D
+    (_BASELINE_LABEL_HARD_EXCLUSION_CLEAN, _BASELINE_LABEL_PRIOR_FREE),# E
+)
+
+DIFF_CONVENTION: str = "a - b"
+
 
 # Canonical flat-CSV column order. The writer iterates this tuple
 # verbatim so column order is reproducible and pandas reads back the
@@ -1222,6 +1276,1496 @@ def generate_readout_foundation(
 
 
 # ---------------------------------------------------------------------------
+# Numeric coercion / CSV reading
+# ---------------------------------------------------------------------------
+
+
+# Columns parsed as float (None for empty cells).
+_FLAT_FLOAT_COLUMNS: frozenset[str] = frozenset({
+    "confidence",
+    "corruption_fraction",
+    "lambda_prior",
+    "matched_l1_lambda1",
+    "dagma_lambda1",
+    "sid",
+    "shd",
+    "mmd",
+    "mean_abs_w_targeted_forbidden_edges",
+    "fraction_targeted_forbidden_above_threshold",
+    "mean_abs_w_non_targeted_edges",
+})
+
+# Columns parsed as int (None for empty cells).
+_FLAT_INT_COLUMNS: frozenset[str] = frozenset({
+    "seed_value",
+    "corruption_index",
+    "edge_count_from_thresholded_adjacency",
+    "n_targeted_forbidden_edges",
+})
+
+
+def _parse_cell(value: str, *, column: str) -> Any:
+    """Parse one CSV cell into the right Python type for ``column``.
+
+    Empty cells become ``None``. Float and int columns are coerced;
+    everything else is returned as the original string.
+    """
+    if value == "":
+        return None
+    if column in _FLAT_INT_COLUMNS:
+        try:
+            return int(value)
+        except ValueError:
+            return int(float(value))
+    if column in _FLAT_FLOAT_COLUMNS:
+        return float(value)
+    return value
+
+
+def load_flat_records_csv(path: Path) -> tuple[dict[str, Any], ...]:
+    """Load the M-9a flat CSV and parse numeric cells.
+
+    Validates that the header matches :data:`FLAT_CSV_COLUMNS` in
+    order. Returns a tuple of dicts (one per row); empty cells
+    become ``None``.
+    """
+    if not isinstance(path, Path):
+        raise TypeError(
+            f"load_flat_records_csv requires a Path; got "
+            f"{type(path).__name__}."
+        )
+    if not path.exists():
+        raise FileNotFoundError(
+            f"load_flat_records_csv: {path!r} does not exist."
+        )
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        reader = csv.reader(fh)
+        header = next(reader, None)
+        if header is None:
+            raise ValueError(
+                f"load_flat_records_csv: {path!r} is empty."
+            )
+        if tuple(header) != FLAT_CSV_COLUMNS:
+            raise ValueError(
+                "load_flat_records_csv: header does not match the "
+                f"canonical column order. expected {FLAT_CSV_COLUMNS}, "
+                f"got {tuple(header)}."
+            )
+        out: list[dict[str, Any]] = []
+        for raw in reader:
+            if len(raw) != len(FLAT_CSV_COLUMNS):
+                raise ValueError(
+                    "load_flat_records_csv: row has "
+                    f"{len(raw)} cells; expected "
+                    f"{len(FLAT_CSV_COLUMNS)}."
+                )
+            row = {
+                col: _parse_cell(raw[i], column=col)
+                for i, col in enumerate(FLAT_CSV_COLUMNS)
+            }
+            out.append(row)
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Condition helpers
+# ---------------------------------------------------------------------------
+
+
+def condition_key(
+    row: dict[str, Any],
+) -> tuple[str, Optional[float], Optional[float]]:
+    """Return ``(method_family, corruption_fraction, confidence)``."""
+    return (
+        str(row["method_family"]),
+        None if row["corruption_fraction"] is None
+        else float(row["corruption_fraction"]),
+        None if row["confidence"] is None
+        else float(row["confidence"]),
+    )
+
+
+def select_condition(
+    rows: Iterable[dict[str, Any]],
+    *,
+    method_family: str,
+    corruption_fraction: Optional[float] = None,
+    confidence: Optional[float] = None,
+) -> tuple[dict[str, Any], ...]:
+    """Filter ``rows`` by condition and return seed-sorted matches.
+
+    ``None`` for ``corruption_fraction`` or ``confidence`` matches
+    rows whose own value is ``None`` (i.e. prior_free / matched_l1
+    / hard_exclusion's confidence axis), not a wildcard.
+    """
+    matches: list[dict[str, Any]] = []
+    for r in rows:
+        if r["method_family"] != method_family:
+            continue
+        cf = r["corruption_fraction"]
+        cn = r["confidence"]
+        if corruption_fraction is None:
+            if cf is not None:
+                continue
+        else:
+            if cf is None or not _is_close(
+                float(cf), float(corruption_fraction)
+            ):
+                continue
+        if confidence is None:
+            if cn is not None:
+                continue
+        else:
+            if cn is None or not _is_close(
+                float(cn), float(confidence)
+            ):
+                continue
+        matches.append(r)
+    matches.sort(key=lambda r: int(r["seed_value"]))
+    return tuple(matches)
+
+
+def _select_baseline_rows(
+    rows: Iterable[dict[str, Any]], label: str
+) -> tuple[dict[str, Any], ...]:
+    """Return seed-sorted rows for one predeclared baseline label."""
+    if label == _BASELINE_LABEL_PRIOR_FREE:
+        return select_condition(rows, method_family="prior_free")
+    if label == _BASELINE_LABEL_MATCHED_L1:
+        return select_condition(rows, method_family="matched_l1")
+    if label == _BASELINE_LABEL_SOFT_CLEAN_CONF1:
+        return select_condition(
+            rows,
+            method_family="soft_frobenius",
+            corruption_fraction=0.0,
+            confidence=1.0,
+        )
+    if label == _BASELINE_LABEL_HARD_EXCLUSION_CLEAN:
+        return select_condition(
+            rows,
+            method_family="hard_exclusion",
+            corruption_fraction=0.0,
+        )
+    raise ValueError(
+        f"_select_baseline_rows: unknown baseline label {label!r}; "
+        f"expected one of {BASELINE_CONDITION_LABELS}."
+    )
+
+
+def _baseline_condition_key(
+    label: str,
+) -> tuple[str, Optional[float], Optional[float]]:
+    if label == _BASELINE_LABEL_PRIOR_FREE:
+        return ("prior_free", None, None)
+    if label == _BASELINE_LABEL_MATCHED_L1:
+        return ("matched_l1", None, None)
+    if label == _BASELINE_LABEL_SOFT_CLEAN_CONF1:
+        return ("soft_frobenius", 0.0, 1.0)
+    if label == _BASELINE_LABEL_HARD_EXCLUSION_CLEAN:
+        return ("hard_exclusion", 0.0, None)
+    raise ValueError(
+        f"_baseline_condition_key: unknown label {label!r}."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Descriptive statistics
+# ---------------------------------------------------------------------------
+
+
+def summary_stats(
+    values: Iterable[float],
+) -> dict[str, Any]:
+    """Return ``n``, ``mean``, sample-``std``, ``median``, ``min``, ``max``.
+
+    Negative finite values (e.g. the unbiased RBF MMD-squared
+    estimator) are accepted. Inputs are filtered to finite floats
+    before summarising; ``n`` is the post-filter count.
+    """
+    out: list[float] = []
+    for v in values:
+        if v is None:
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        f = float(v)
+        if not math.isfinite(f):
+            continue
+        out.append(f)
+    n = len(out)
+    if n == 0:
+        return {
+            "n": 0,
+            "mean": None,
+            "std": None,
+            "median": None,
+            "min": None,
+            "max": None,
+        }
+    mean = float(statistics.fmean(out))
+    median = float(statistics.median(out))
+    std = float(statistics.stdev(out)) if n >= 2 else 0.0
+    return {
+        "n": int(n),
+        "mean": mean,
+        "std": std,
+        "median": median,
+        "min": float(min(out)),
+        "max": float(max(out)),
+    }
+
+
+def compute_baseline_comparison(
+    rows: Iterable[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Emit one descriptive row per (baseline condition, metric).
+
+    No method ranking. Output column order is the writer's
+    canonical order.
+    """
+    rows_t = tuple(rows)
+    out: list[dict[str, Any]] = []
+    for label in BASELINE_CONDITION_LABELS:
+        family, cf, cn = _baseline_condition_key(label)
+        selected = _select_baseline_rows(rows_t, label)
+        for metric in METRIC_COLUMNS:
+            values = [r[metric] for r in selected]
+            stats = summary_stats(values)
+            out.append({
+                "condition_label": label,
+                "method_family": family,
+                "corruption_fraction": cf,
+                "confidence": cn,
+                "metric": metric,
+                "n": stats["n"],
+                "mean": stats["mean"],
+                "std": stats["std"],
+                "median": stats["median"],
+                "min": stats["min"],
+                "max": stats["max"],
+            })
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Paired-seed comparisons
+# ---------------------------------------------------------------------------
+
+
+def _two_sided_sign_test_p(
+    n_pos: int, n_neg: int
+) -> Optional[float]:
+    """Two-sided sign-test p-value for paired data (excluding ties).
+
+    Under H0, P(positive) == 0.5. p = 2 * min(P(X <= k_min),
+    P(X >= k_max)) clipped to 1. Returns ``None`` if both counts are
+    zero (no informative pairs).
+    """
+    n = int(n_pos) + int(n_neg)
+    if n == 0:
+        return None
+    k = min(int(n_pos), int(n_neg))
+    cumulative = 0.0
+    for i in range(0, k + 1):
+        cumulative += math.comb(n, i) * (0.5 ** n)
+    p = 2.0 * cumulative
+    return min(1.0, float(p))
+
+
+def _benjamini_hochberg_q_values(
+    p_values: list[Optional[float]],
+) -> list[Optional[float]]:
+    """Benjamini-Hochberg adjusted q-values, preserving input order.
+
+    ``None`` entries stay ``None`` and are excluded from m.
+    """
+    indexed = [
+        (i, p) for i, p in enumerate(p_values) if p is not None
+    ]
+    m = len(indexed)
+    if m == 0:
+        return [None] * len(p_values)
+    indexed.sort(key=lambda x: float(x[1]))
+    raw_q: list[float] = []
+    for rank_idx, (_, p) in enumerate(indexed, start=1):
+        raw_q.append(float(p) * float(m) / float(rank_idx))
+    # Enforce monotone non-decreasing from largest to smallest sorted p.
+    for k in range(len(raw_q) - 2, -1, -1):
+        if raw_q[k] > raw_q[k + 1]:
+            raw_q[k] = raw_q[k + 1]
+    out: list[Optional[float]] = [None] * len(p_values)
+    for rank_idx, (orig_i, _) in enumerate(indexed):
+        out[orig_i] = min(1.0, float(raw_q[rank_idx]))
+    return out
+
+
+def paired_seed_difference(
+    rows_a: Iterable[dict[str, Any]],
+    rows_b: Iterable[dict[str, Any]],
+    *,
+    metric: str,
+    label_a: str,
+    label_b: str,
+    n_bootstrap: int = 10000,
+    random_seed: int = 90210,
+) -> dict[str, Any]:
+    """Paired-by-seed difference + percentile bootstrap CI.
+
+    The difference convention is fixed: ``diff = value_a - value_b``.
+    The function requires identical seed sets and emits one summary
+    dictionary covering effect sizes, win/tie counts, and a
+    two-sided sign-test p-value. For ``metric ==
+    edge_count_from_thresholded_adjacency``, ``wins_a_lower`` means
+    "a is sparser", not "a is better".
+    """
+    if metric not in METRIC_COLUMNS:
+        raise ValueError(
+            f"paired_seed_difference: metric must be one of "
+            f"{METRIC_COLUMNS}; got {metric!r}."
+        )
+    a_by_seed = {
+        int(r["seed_value"]): r for r in rows_a
+    }
+    b_by_seed = {
+        int(r["seed_value"]): r for r in rows_b
+    }
+    if set(a_by_seed.keys()) != set(b_by_seed.keys()):
+        raise ValueError(
+            "paired_seed_difference: seed sets differ between "
+            f"label_a={label_a!r} (seeds={sorted(a_by_seed)}) and "
+            f"label_b={label_b!r} (seeds={sorted(b_by_seed)})."
+        )
+    seeds_sorted = sorted(a_by_seed.keys())
+    a_values: list[float] = []
+    b_values: list[float] = []
+    for s in seeds_sorted:
+        a_v = a_by_seed[s].get(metric)
+        b_v = b_by_seed[s].get(metric)
+        if a_v is None or b_v is None:
+            raise ValueError(
+                f"paired_seed_difference: missing {metric!r} value "
+                f"at seed {s} (a={a_v!r}, b={b_v!r})."
+            )
+        a_values.append(float(a_v))
+        b_values.append(float(b_v))
+    a_arr = np.array(a_values, dtype=float)
+    b_arr = np.array(b_values, dtype=float)
+    diffs = a_arr - b_arr
+    n_pairs = int(diffs.shape[0])
+    mean_a = float(np.mean(a_arr)) if n_pairs else None
+    mean_b = float(np.mean(b_arr)) if n_pairs else None
+    mean_diff = float(np.mean(diffs)) if n_pairs else None
+    median_diff = float(np.median(diffs)) if n_pairs else None
+
+    wins_a_lower = int(np.sum(a_arr < b_arr))
+    wins_b_lower = int(np.sum(a_arr > b_arr))
+    ties = int(np.sum(a_arr == b_arr))
+
+    # Sign test on the directionality of the paired difference.
+    n_pos = int(np.sum(diffs > 0))
+    n_neg = int(np.sum(diffs < 0))
+    sign_p = _two_sided_sign_test_p(n_pos, n_neg)
+
+    # Percentile paired bootstrap CI of the mean difference.
+    ci_low: Optional[float] = None
+    ci_high: Optional[float] = None
+    if n_pairs > 0 and int(n_bootstrap) > 0:
+        rng = np.random.default_rng(int(random_seed))
+        indices = rng.integers(
+            0, n_pairs, size=(int(n_bootstrap), n_pairs)
+        )
+        boot_means = diffs[indices].mean(axis=1)
+        ci_low = float(np.percentile(boot_means, 2.5))
+        ci_high = float(np.percentile(boot_means, 97.5))
+
+    return {
+        "label_a": label_a,
+        "label_b": label_b,
+        "metric": metric,
+        "diff_convention": DIFF_CONVENTION,
+        "n_pairs": n_pairs,
+        "mean_a": mean_a,
+        "mean_b": mean_b,
+        "mean_diff": mean_diff,
+        "median_diff": median_diff,
+        "bootstrap_ci_low": ci_low,
+        "bootstrap_ci_high": ci_high,
+        "wins_a_lower": wins_a_lower,
+        "wins_b_lower": wins_b_lower,
+        "ties": ties,
+        "sign_test_p_two_sided": sign_p,
+        "bh_q_value": None,
+    }
+
+
+def compute_paired_seed_comparisons(
+    rows: Iterable[dict[str, Any]],
+    *,
+    n_bootstrap: int = 10000,
+    random_seed: int = 90210,
+) -> tuple[dict[str, Any], ...]:
+    """Compute the five predeclared paired comparisons across all metrics.
+
+    No best-confidence or post-hoc selected comparison is produced.
+    BH q-values are computed across the entire table.
+    """
+    rows_t = tuple(rows)
+    out: list[dict[str, Any]] = []
+    for (label_a, label_b) in PAIRED_COMPARISON_PAIRS:
+        rows_a = _select_baseline_rows(rows_t, label_a)
+        rows_b = _select_baseline_rows(rows_t, label_b)
+        for metric in METRIC_COLUMNS:
+            out.append(paired_seed_difference(
+                rows_a,
+                rows_b,
+                metric=metric,
+                label_a=label_a,
+                label_b=label_b,
+                n_bootstrap=int(n_bootstrap),
+                random_seed=int(random_seed),
+            ))
+    p_values = [row["sign_test_p_two_sided"] for row in out]
+    q_values = _benjamini_hochberg_q_values(p_values)
+    for row, q in zip(out, q_values):
+        row["bh_q_value"] = q
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Correlations (Pearson / Spearman / Kendall tau-b)
+# ---------------------------------------------------------------------------
+
+
+def rank_values_average_ties(
+    values: Iterable[float],
+) -> list[float]:
+    """Return average-tie ranks (1-indexed) for ``values``."""
+    arr = [float(v) for v in values]
+    n = len(arr)
+    order = sorted(range(n), key=lambda i: arr[i])
+    ranks: list[float] = [0.0] * n
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and arr[order[j + 1]] == arr[order[i]]:
+            j += 1
+        # ranks i..j are tied; assign average rank
+        avg = (i + 1 + j + 1) / 2.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = float(avg)
+        i = j + 1
+    return ranks
+
+
+def _pairwise_finite(
+    x: Iterable[float], y: Iterable[float]
+) -> tuple[list[float], list[float]]:
+    xs = list(x)
+    ys = list(y)
+    if len(xs) != len(ys):
+        raise ValueError(
+            "pairwise correlation requires equal-length sequences; "
+            f"got len(x)={len(xs)}, len(y)={len(ys)}."
+        )
+    xf: list[float] = []
+    yf: list[float] = []
+    for xv, yv in zip(xs, ys):
+        if xv is None or yv is None:
+            continue
+        if isinstance(xv, bool) or isinstance(yv, bool):
+            continue
+        if not isinstance(xv, (int, float)) or not isinstance(
+            yv, (int, float)
+        ):
+            continue
+        xf_v = float(xv)
+        yf_v = float(yv)
+        if not math.isfinite(xf_v) or not math.isfinite(yf_v):
+            continue
+        xf.append(xf_v)
+        yf.append(yf_v)
+    return xf, yf
+
+
+def pearson_corr(
+    x: Iterable[float], y: Iterable[float]
+) -> Optional[float]:
+    """Pearson correlation, or ``None`` if undefined."""
+    xs, ys = _pairwise_finite(x, y)
+    n = len(xs)
+    if n < 2:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    sxx = sum((xv - mx) ** 2 for xv in xs)
+    syy = sum((yv - my) ** 2 for yv in ys)
+    if sxx == 0.0 or syy == 0.0:
+        return None
+    sxy = sum((xv - mx) * (yv - my) for xv, yv in zip(xs, ys))
+    return float(sxy / math.sqrt(sxx * syy))
+
+
+def spearman_corr(
+    x: Iterable[float], y: Iterable[float]
+) -> Optional[float]:
+    """Spearman rank correlation with average-tie ranks; ``None`` if undefined."""
+    xs, ys = _pairwise_finite(x, y)
+    if len(xs) < 2:
+        return None
+    rx = rank_values_average_ties(xs)
+    ry = rank_values_average_ties(ys)
+    return pearson_corr(rx, ry)
+
+
+def kendall_tau_b(
+    x: Iterable[float], y: Iterable[float]
+) -> Optional[float]:
+    """Kendall tau-b (tie-corrected); ``None`` if undefined."""
+    xs, ys = _pairwise_finite(x, y)
+    n = len(xs)
+    if n < 2:
+        return None
+    n_concord = 0
+    n_discord = 0
+    ties_x_only = 0
+    ties_y_only = 0
+    for i in range(n - 1):
+        for j in range(i + 1, n):
+            dx = xs[i] - xs[j]
+            dy = ys[i] - ys[j]
+            if dx == 0.0 and dy == 0.0:
+                continue
+            if dx == 0.0:
+                ties_x_only += 1
+                continue
+            if dy == 0.0:
+                ties_y_only += 1
+                continue
+            if (dx > 0) == (dy > 0):
+                n_concord += 1
+            else:
+                n_discord += 1
+    total_pairs = n * (n - 1) // 2
+    denom_x = total_pairs - ties_x_only
+    denom_y = total_pairs - ties_y_only
+    if denom_x <= 0 or denom_y <= 0:
+        return None
+    denom = math.sqrt(float(denom_x) * float(denom_y))
+    if denom == 0.0:
+        return None
+    return float((n_concord - n_discord) / denom)
+
+
+# Metric pairs used by compute_metric_correlations. Descriptive,
+# never causal.
+_CORRELATION_PAIRS: tuple[tuple[str, str], ...] = (
+    ("sid", "mmd"),
+    ("shd", "mmd"),
+    ("edge_count_from_thresholded_adjacency", "mmd"),
+    ("sid", "shd"),
+)
+
+
+def compute_metric_correlations(
+    rows: Iterable[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Compute metric correlations overall and per method_family."""
+    rows_t = tuple(rows)
+    out: list[dict[str, Any]] = []
+    for x_metric, y_metric in _CORRELATION_PAIRS:
+        xs = [r[x_metric] for r in rows_t]
+        ys = [r[y_metric] for r in rows_t]
+        out.append({
+            "group_label": "all",
+            "method_family": "",
+            "x_metric": x_metric,
+            "y_metric": y_metric,
+            "n": len(_pairwise_finite(xs, ys)[0]),
+            "pearson": pearson_corr(xs, ys),
+            "spearman": spearman_corr(xs, ys),
+            "kendall_tau_b": kendall_tau_b(xs, ys),
+        })
+    families = sorted({r["method_family"] for r in rows_t})
+    for family in families:
+        family_rows = [
+            r for r in rows_t if r["method_family"] == family
+        ]
+        for x_metric, y_metric in _CORRELATION_PAIRS:
+            xs = [r[x_metric] for r in family_rows]
+            ys = [r[y_metric] for r in family_rows]
+            xf, _ = _pairwise_finite(xs, ys)
+            out.append({
+                "group_label": f"method_family:{family}",
+                "method_family": family,
+                "x_metric": x_metric,
+                "y_metric": y_metric,
+                "n": len(xf),
+                "pearson": pearson_corr(xs, ys),
+                "spearman": spearman_corr(xs, ys),
+                "kendall_tau_b": kendall_tau_b(xs, ys),
+            })
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Degradation slopes (descriptive only)
+# ---------------------------------------------------------------------------
+
+
+def linear_slope(
+    x: Iterable[float], y: Iterable[float]
+) -> Optional[float]:
+    """Least-squares slope of y on x; ``None`` if undefined."""
+    xs, ys = _pairwise_finite(x, y)
+    n = len(xs)
+    if n < 2:
+        return None
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    sxx = sum((xv - mx) ** 2 for xv in xs)
+    if sxx == 0.0:
+        return None
+    sxy = sum((xv - mx) * (yv - my) for xv, yv in zip(xs, ys))
+    return float(sxy / sxx)
+
+
+def _summarise_slopes(
+    slopes: list[Optional[float]],
+) -> dict[str, Any]:
+    finite = [
+        float(s) for s in slopes
+        if s is not None and math.isfinite(float(s))
+    ]
+    n = len(finite)
+    if n == 0:
+        return {
+            "n_seed_slopes": 0,
+            "mean_slope": None,
+            "std_slope": None,
+            "median_slope": None,
+            "min_slope": None,
+            "max_slope": None,
+        }
+    return {
+        "n_seed_slopes": int(n),
+        "mean_slope": float(statistics.fmean(finite)),
+        "std_slope": (
+            float(statistics.stdev(finite)) if n >= 2 else 0.0
+        ),
+        "median_slope": float(statistics.median(finite)),
+        "min_slope": float(min(finite)),
+        "max_slope": float(max(finite)),
+    }
+
+
+def compute_degradation_summary(
+    rows: Iterable[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Per-seed metric-vs-corruption slopes, then descriptive summaries.
+
+    Descriptive only; no graceful-degradation verdict.
+    """
+    rows_t = tuple(rows)
+    out: list[dict[str, Any]] = []
+    # hard_exclusion: one slope per seed per metric.
+    hard_by_seed: dict[int, list[dict[str, Any]]] = {}
+    for r in rows_t:
+        if r["method_family"] == "hard_exclusion":
+            hard_by_seed.setdefault(
+                int(r["seed_value"]), []
+            ).append(r)
+    for metric in METRIC_COLUMNS:
+        slopes: list[Optional[float]] = []
+        for seed in sorted(hard_by_seed):
+            members = sorted(
+                hard_by_seed[seed],
+                key=lambda r: float(r["corruption_fraction"] or 0.0),
+            )
+            xs = [
+                float(m["corruption_fraction"]) for m in members
+                if m["corruption_fraction"] is not None
+            ]
+            ys = [
+                m[metric] for m in members
+                if m[metric] is not None
+                and m["corruption_fraction"] is not None
+            ]
+            slopes.append(linear_slope(xs, ys))
+        stats = _summarise_slopes(slopes)
+        out.append({
+            "method_family": "hard_exclusion",
+            "confidence": None,
+            "metric": metric,
+            **stats,
+        })
+    # soft_frobenius: one slope per (confidence, seed) per metric.
+    soft_by_conf_seed: dict[
+        float, dict[int, list[dict[str, Any]]]
+    ] = {}
+    for r in rows_t:
+        if r["method_family"] == "soft_frobenius":
+            cn = (
+                None if r["confidence"] is None
+                else float(r["confidence"])
+            )
+            if cn is None:
+                continue
+            soft_by_conf_seed.setdefault(cn, {}).setdefault(
+                int(r["seed_value"]), []
+            ).append(r)
+    for cn in sorted(soft_by_conf_seed):
+        for metric in METRIC_COLUMNS:
+            slopes = []
+            for seed in sorted(soft_by_conf_seed[cn]):
+                members = sorted(
+                    soft_by_conf_seed[cn][seed],
+                    key=lambda r: float(
+                        r["corruption_fraction"] or 0.0
+                    ),
+                )
+                xs = [
+                    float(m["corruption_fraction"]) for m in members
+                    if m["corruption_fraction"] is not None
+                ]
+                ys = [
+                    m[metric] for m in members
+                    if m[metric] is not None
+                    and m["corruption_fraction"] is not None
+                ]
+                slopes.append(linear_slope(xs, ys))
+            stats = _summarise_slopes(slopes)
+            out.append({
+                "method_family": "soft_frobenius",
+                "confidence": cn,
+                "metric": metric,
+                **stats,
+            })
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Forbidden-edge engagement summary
+# ---------------------------------------------------------------------------
+
+
+def compute_forbidden_edge_engagement_summary(
+    rows: Iterable[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Group M-9a direct engagement columns and summarise per cell."""
+    rows_t = tuple(rows)
+    grouped: dict[
+        tuple[str, Optional[float], Optional[float]],
+        list[dict[str, Any]],
+    ] = {}
+    for r in rows_t:
+        key = (
+            r["method_family"],
+            None if r["corruption_fraction"] is None
+            else float(r["corruption_fraction"]),
+            None if r["confidence"] is None
+            else float(r["confidence"]),
+        )
+        grouped.setdefault(key, []).append(r)
+    out: list[dict[str, Any]] = []
+    def sort_key(k: tuple[str, Optional[float], Optional[float]]):
+        cf = float("-inf") if k[1] is None else k[1]
+        cn = float("-inf") if k[2] is None else k[2]
+        return (k[0], cf, cn)
+    for key in sorted(grouped.keys(), key=sort_key):
+        members = grouped[key]
+        targeted_means = [
+            m["mean_abs_w_targeted_forbidden_edges"] for m in members
+        ]
+        targeted_fracs = [
+            m["fraction_targeted_forbidden_above_threshold"]
+            for m in members
+        ]
+        non_targeted_means = [
+            m["mean_abs_w_non_targeted_edges"] for m in members
+        ]
+        ecs = [
+            m["edge_count_from_thresholded_adjacency"] for m in members
+        ]
+        ts = summary_stats(targeted_means)
+        fs = summary_stats(targeted_fracs)
+        ns = summary_stats(non_targeted_means)
+        es = summary_stats(ecs)
+        out.append({
+            "method_family": key[0],
+            "corruption_fraction": key[1],
+            "confidence": key[2],
+            "n": len(members),
+            "mean_targeted_abs_w_mean": ts["mean"],
+            "std_targeted_abs_w_mean": ts["std"],
+            "median_targeted_abs_w_mean": ts["median"],
+            "mean_fraction_targeted_above_threshold": fs["mean"],
+            "std_fraction_targeted_above_threshold": fs["std"],
+            "median_fraction_targeted_above_threshold": fs["median"],
+            "mean_non_targeted_abs_w_mean": ns["mean"],
+            "std_non_targeted_abs_w_mean": ns["std"],
+            "median_non_targeted_abs_w_mean": ns["median"],
+            "mean_edge_count": es["mean"],
+            "std_edge_count": es["std"],
+            "median_edge_count": es["median"],
+        })
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Reference (clean soft) forbidden-edge comparison
+# ---------------------------------------------------------------------------
+
+
+def reference_forbidden_edges_by_seed(
+    records: Iterable[MainStudyRunRecord],
+) -> dict[int, tuple[tuple[int, int], ...]]:
+    """Return the seed -> clean-soft forbidden_edges mapping.
+
+    The reference is the soft_frobenius record at corruption=0.0 and
+    confidence=1.0; exactly one such record must exist per seed.
+    Missing or duplicate references raise ``ValueError``.
+    """
+    found: dict[int, list[MainStudyRunRecord]] = {}
+    for rec in records:
+        cfg = rec.config
+        if cfg.method_family != "soft_frobenius":
+            continue
+        if cfg.corrupted_prior_spec is None:
+            continue
+        if not _is_close(
+            float(cfg.corrupted_prior_spec.corruption_fraction), 0.0
+        ):
+            continue
+        if cfg.confidence is None or not _is_close(
+            float(cfg.confidence), 1.0
+        ):
+            continue
+        found.setdefault(int(cfg.seed_value), []).append(rec)
+    out: dict[int, tuple[tuple[int, int], ...]] = {}
+    for seed, recs in found.items():
+        if len(recs) != 1:
+            raise ValueError(
+                "reference_forbidden_edges_by_seed: expected exactly "
+                f"one soft_frobenius (corruption=0.0, confidence=1.0) "
+                f"reference at seed {seed!r}; got {len(recs)}."
+            )
+        fe = forbidden_edges_from_record(recs[0])
+        if fe is None:
+            raise ValueError(
+                "reference_forbidden_edges_by_seed: clean-soft "
+                f"reference at seed {seed!r} has no forbidden_edges."
+            )
+        out[int(seed)] = tuple(fe)
+    if not out:
+        raise ValueError(
+            "reference_forbidden_edges_by_seed: no clean-soft "
+            "reference found in the supplied records."
+        )
+    return out
+
+
+def _flat_lookup_by_run_id(
+    flat_rows: Iterable[dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
+    return {str(r["run_id"]): r for r in flat_rows}
+
+
+def _reference_comparison_target(
+    records: Iterable[MainStudyRunRecord], label: str, seed: int
+) -> Optional[MainStudyRunRecord]:
+    key = _baseline_condition_key(label)
+    family, cf, cn = key
+    for rec in records:
+        cfg = rec.config
+        if cfg.method_family != family:
+            continue
+        if int(cfg.seed_value) != int(seed):
+            continue
+        # corruption_fraction check
+        rec_cf: Optional[float] = (
+            None if cfg.corrupted_prior_spec is None
+            else float(cfg.corrupted_prior_spec.corruption_fraction)
+        )
+        if cf is None:
+            if rec_cf is not None:
+                continue
+        else:
+            if rec_cf is None or not _is_close(float(rec_cf), float(cf)):
+                continue
+        # confidence check
+        rec_cn = (
+            None if cfg.confidence is None else float(cfg.confidence)
+        )
+        if cn is None:
+            if rec_cn is not None:
+                continue
+        else:
+            if rec_cn is None or not _is_close(float(rec_cn), float(cn)):
+                continue
+        return rec
+    return None
+
+
+def compute_reference_forbidden_edge_comparison(
+    records: Iterable[MainStudyRunRecord],
+    flat_rows: Iterable[dict[str, Any]],
+    *,
+    base_dir: Path,
+) -> tuple[dict[str, Any], ...]:
+    """Compare four baseline conditions on the clean-soft forbidden-edge set.
+
+    For each seed and each of the four baseline labels:
+
+    - prior_free
+    - matched_l1
+    - soft_frobenius_clean_conf1
+    - hard_exclusion_clean
+
+    load the condition's ``continuous_w.npz`` and compute engagement
+    on the seed-specific clean-soft forbidden-edge set. The true
+    graph is intentionally not used.
+    """
+    records_t = tuple(records)
+    flat_lookup = _flat_lookup_by_run_id(flat_rows)
+    ref_edges_by_seed = reference_forbidden_edges_by_seed(records_t)
+    out: list[dict[str, Any]] = []
+    for seed in sorted(ref_edges_by_seed):
+        ref_edges = ref_edges_by_seed[int(seed)]
+        for label in BASELINE_CONDITION_LABELS:
+            family, cf, cn = _baseline_condition_key(label)
+            rec = _reference_comparison_target(records_t, label, seed)
+            if rec is None:
+                raise ValueError(
+                    "compute_reference_forbidden_edge_comparison: "
+                    f"missing record for seed {seed!r}, condition "
+                    f"{label!r}."
+                )
+            cont_w = load_npz_array(
+                rec.continuous_w_path,
+                base_dir=base_dir,
+                expected_key=CONTINUOUS_W_KEY,
+            )
+            engagement = compute_prior_edge_engagement(
+                cont_w, ref_edges, threshold=PROJECT_THRESHOLD,
+            )
+            thr_arr = load_npz_array(
+                rec.thresholded_adjacency_path,
+                base_dir=base_dir,
+                expected_key=THRESHOLDED_ADJACENCY_KEY,
+            )
+            edge_count: Optional[int] = (
+                None if thr_arr is None
+                else off_diagonal_edge_count(thr_arr)
+            )
+            flat_row = flat_lookup.get(rec.run_id, {})
+            out.append({
+                "seed_value": int(seed),
+                "condition_label": label,
+                "method_family": family,
+                "corruption_fraction": cf,
+                "confidence": cn,
+                "n_reference_forbidden_edges": int(len(ref_edges)),
+                "mean_abs_w_reference_forbidden_edges": engagement[
+                    "mean_abs_w_targeted_forbidden_edges"
+                ],
+                "fraction_reference_forbidden_above_threshold": engagement[
+                    "fraction_targeted_forbidden_above_threshold"
+                ],
+                "mean_abs_w_reference_non_targeted_edges": engagement[
+                    "mean_abs_w_non_targeted_edges"
+                ],
+                "edge_count_from_thresholded_adjacency": edge_count,
+                "sid": flat_row.get("sid"),
+                "shd": flat_row.get("shd"),
+                "mmd": flat_row.get("mmd"),
+            })
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Per-intervention MMD extraction and summary
+# ---------------------------------------------------------------------------
+
+
+_REQUIRED_INTERVENTION_FIELDS: tuple[str, ...] = (
+    "intervention_id",
+    "target_node",
+    "value_raw",
+    "value_model_frame",
+    "ground_truth_sampling_seed",
+    "model_sampling_seed",
+    "n_ground_truth_samples",
+    "n_model_samples",
+    "mmd_value",
+    "mmd_status",
+    "bandwidth_used",
+    "bandwidth_sweep",
+    "sampler_status_for_intervention",
+    "sampler_reason",
+)
+
+_REQUIRED_BANDWIDTH_KEYS: tuple[str, ...] = ("0.5x", "1.0x", "2.0x")
+
+
+def extract_per_intervention_mmd(
+    record: MainStudyRunRecord, *, base_dir: Path
+) -> tuple[dict[str, Any], ...]:
+    """Read and flatten per-intervention MMD records from disk.
+
+    The record's ``interventions_mmd_path`` must be non-``None``
+    whenever ``metric_status == "computed"``; missing path raises
+    ``ValueError``. The artefact JSON must contain every key in
+    :data:`_REQUIRED_INTERVENTION_FIELDS` for every record entry,
+    and the bandwidth sweep must contain ``"0.5x"``, ``"1.0x"``,
+    ``"2.0x"`` keys. Mismatches raise ``ValueError`` naming the
+    missing key. MMD values are returned exactly as persisted; no
+    recomputation occurs here.
+    """
+    if (
+        record.metric_status == "computed"
+        and record.interventions_mmd_path is None
+    ):
+        raise ValueError(
+            "extract_per_intervention_mmd: record "
+            f"{record.run_id!r} has metric_status='computed' but "
+            "interventions_mmd_path is None."
+        )
+    if record.interventions_mmd_path is None:
+        return ()
+    full = resolve_artifact_path(
+        record.interventions_mmd_path, base_dir=base_dir
+    )
+    if full is None:
+        return ()
+    payload = json.loads(full.read_text(encoding="utf-8"))
+    if "records" not in payload or not isinstance(
+        payload["records"], list
+    ):
+        raise ValueError(
+            "extract_per_intervention_mmd: payload at "
+            f"{record.interventions_mmd_path!r} is missing the "
+            "'records' list."
+        )
+    cfg = record.config
+    method_family = cfg.method_family
+    seed_value = int(cfg.seed_value)
+    cf = (
+        None if cfg.corrupted_prior_spec is None
+        else float(cfg.corrupted_prior_spec.corruption_fraction)
+    )
+    cn = (
+        None if cfg.confidence is None else float(cfg.confidence)
+    )
+    out: list[dict[str, Any]] = []
+    for entry in payload["records"]:
+        for f in _REQUIRED_INTERVENTION_FIELDS:
+            if f not in entry:
+                raise ValueError(
+                    "extract_per_intervention_mmd: intervention "
+                    f"record at {record.interventions_mmd_path!r} is "
+                    f"missing required field {f!r}."
+                )
+        sweep = entry["bandwidth_sweep"]
+        if not isinstance(sweep, dict):
+            raise ValueError(
+                "extract_per_intervention_mmd: bandwidth_sweep at "
+                f"{record.interventions_mmd_path!r} must be a dict; "
+                f"got {type(sweep).__name__}."
+            )
+        for k in _REQUIRED_BANDWIDTH_KEYS:
+            if k not in sweep:
+                raise ValueError(
+                    "extract_per_intervention_mmd: bandwidth_sweep "
+                    f"at {record.interventions_mmd_path!r} is missing "
+                    f"required key {k!r}."
+                )
+        out.append({
+            "run_id": record.run_id,
+            "method_family": method_family,
+            "seed_value": seed_value,
+            "corruption_fraction": cf,
+            "confidence": cn,
+            "intervention_id": str(entry["intervention_id"]),
+            "target_node": int(entry["target_node"]),
+            "value_raw": (
+                None if entry["value_raw"] is None
+                else float(entry["value_raw"])
+            ),
+            "mmd_value": (
+                None if entry["mmd_value"] is None
+                else float(entry["mmd_value"])
+            ),
+            "mmd_status": str(entry["mmd_status"]),
+            "bandwidth_used": (
+                None if entry["bandwidth_used"] is None
+                else float(entry["bandwidth_used"])
+            ),
+            "bandwidth_sweep_0_5x": (
+                None if sweep["0.5x"] is None else float(sweep["0.5x"])
+            ),
+            "bandwidth_sweep_1_0x": (
+                None if sweep["1.0x"] is None else float(sweep["1.0x"])
+            ),
+            "bandwidth_sweep_2_0x": (
+                None if sweep["2.0x"] is None else float(sweep["2.0x"])
+            ),
+            "sampler_status_for_intervention": str(
+                entry["sampler_status_for_intervention"]
+            ),
+            "sampler_reason": (
+                None if entry["sampler_reason"] is None
+                else str(entry["sampler_reason"])
+            ),
+        })
+    return tuple(out)
+
+
+def compute_per_intervention_mmd_summary(
+    per_intervention_rows: Iterable[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """Group per-intervention MMD long rows and summarise mmd_value.
+
+    Only rows whose ``mmd_status`` indicates an available value and
+    whose ``mmd_value`` is finite are summarised.
+    """
+    grouped: dict[
+        tuple[
+            str, Optional[float], Optional[float],
+            str, int, Optional[float],
+        ],
+        list[float],
+    ] = {}
+    for r in per_intervention_rows:
+        status = str(r.get("mmd_status", ""))
+        if status not in ("available", "computed"):
+            continue
+        v = r.get("mmd_value")
+        if v is None or not _is_finite_real(v):
+            continue
+        key = (
+            str(r["method_family"]),
+            None if r["corruption_fraction"] is None
+            else float(r["corruption_fraction"]),
+            None if r["confidence"] is None
+            else float(r["confidence"]),
+            str(r["intervention_id"]),
+            int(r["target_node"]),
+            None if r["value_raw"] is None
+            else float(r["value_raw"]),
+        )
+        grouped.setdefault(key, []).append(float(v))
+    out: list[dict[str, Any]] = []
+    def sort_key(k):
+        cf = float("-inf") if k[1] is None else k[1]
+        cn = float("-inf") if k[2] is None else k[2]
+        vr = float("-inf") if k[5] is None else k[5]
+        return (k[0], cf, cn, k[3], k[4], vr)
+    for key in sorted(grouped.keys(), key=sort_key):
+        values = grouped[key]
+        stats = summary_stats(values)
+        out.append({
+            "method_family": key[0],
+            "corruption_fraction": key[1],
+            "confidence": key[2],
+            "intervention_id": key[3],
+            "target_node": key[4],
+            "value_raw": key[5],
+            "n": stats["n"],
+            "mean_mmd": stats["mean"],
+            "std_mmd": stats["std"],
+            "median_mmd": stats["median"],
+            "min_mmd": stats["min"],
+            "max_mmd": stats["max"],
+        })
+    return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Generic dict-rows CSV writer
+# ---------------------------------------------------------------------------
+
+
+def write_dict_rows_csv(
+    rows: Iterable[dict[str, Any]],
+    path: Path,
+    fieldnames: tuple[str, ...],
+) -> None:
+    """Write ``rows`` to ``path`` with the given column order.
+
+    None becomes an empty cell, matching the M-9a CSV null convention.
+    Unknown fields in any row raise ``ValueError`` naming the row.
+    Missing expected fields are written as empty cells.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fn_set = set(fieldnames)
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(list(fieldnames))
+        for r in rows:
+            extras = set(r.keys()) - fn_set
+            if extras:
+                raise ValueError(
+                    "write_dict_rows_csv: row contains unexpected "
+                    f"keys {sorted(extras)} (allowed: "
+                    f"{sorted(fn_set)})."
+                )
+            writer.writerow([
+                _csv_cell(r.get(col, None)) for col in fieldnames
+            ])
+
+
+# Canonical M-9b column orders.
+_BASELINE_COMPARISON_COLUMNS: tuple[str, ...] = (
+    "condition_label",
+    "method_family",
+    "corruption_fraction",
+    "confidence",
+    "metric",
+    "n", "mean", "std", "median", "min", "max",
+)
+
+_PAIRED_COMPARISON_COLUMNS: tuple[str, ...] = (
+    "label_a", "label_b", "metric", "diff_convention", "n_pairs",
+    "mean_a", "mean_b", "mean_diff", "median_diff",
+    "bootstrap_ci_low", "bootstrap_ci_high",
+    "wins_a_lower", "wins_b_lower", "ties",
+    "sign_test_p_two_sided", "bh_q_value",
+)
+
+_METRIC_CORRELATIONS_COLUMNS: tuple[str, ...] = (
+    "group_label", "method_family", "x_metric", "y_metric", "n",
+    "pearson", "spearman", "kendall_tau_b",
+)
+
+_DEGRADATION_COLUMNS: tuple[str, ...] = (
+    "method_family", "confidence", "metric", "n_seed_slopes",
+    "mean_slope", "std_slope", "median_slope",
+    "min_slope", "max_slope",
+)
+
+_FORBIDDEN_ENGAGEMENT_SUMMARY_COLUMNS: tuple[str, ...] = (
+    "method_family", "corruption_fraction", "confidence", "n",
+    "mean_targeted_abs_w_mean", "std_targeted_abs_w_mean",
+    "median_targeted_abs_w_mean",
+    "mean_fraction_targeted_above_threshold",
+    "std_fraction_targeted_above_threshold",
+    "median_fraction_targeted_above_threshold",
+    "mean_non_targeted_abs_w_mean", "std_non_targeted_abs_w_mean",
+    "median_non_targeted_abs_w_mean",
+    "mean_edge_count", "std_edge_count", "median_edge_count",
+)
+
+_REFERENCE_FORBIDDEN_COMPARISON_COLUMNS: tuple[str, ...] = (
+    "seed_value", "condition_label", "method_family",
+    "corruption_fraction", "confidence",
+    "n_reference_forbidden_edges",
+    "mean_abs_w_reference_forbidden_edges",
+    "fraction_reference_forbidden_above_threshold",
+    "mean_abs_w_reference_non_targeted_edges",
+    "edge_count_from_thresholded_adjacency",
+    "sid", "shd", "mmd",
+)
+
+_PER_INTERVENTION_MMD_LONG_COLUMNS: tuple[str, ...] = (
+    "run_id", "method_family", "seed_value",
+    "corruption_fraction", "confidence",
+    "intervention_id", "target_node", "value_raw",
+    "mmd_value", "mmd_status", "bandwidth_used",
+    "bandwidth_sweep_0_5x", "bandwidth_sweep_1_0x",
+    "bandwidth_sweep_2_0x",
+    "sampler_status_for_intervention", "sampler_reason",
+)
+
+_PER_INTERVENTION_MMD_SUMMARY_COLUMNS: tuple[str, ...] = (
+    "method_family", "corruption_fraction", "confidence",
+    "intervention_id", "target_node", "value_raw",
+    "n", "mean_mmd", "std_mmd", "median_mmd",
+    "min_mmd", "max_mmd",
+)
+
+
+def write_statistics_summary_json(
+    summary: dict[str, Any], path: Path
+) -> None:
+    """Write the M-9b statistics summary as canonical JSON."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(summary, sort_keys=True, separators=(",", ":"))
+    path.write_text(text, encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+
+def generate_hypothesis_statistics(
+    *,
+    output_root: Path,
+    main_evaluation_run_hash12: str,
+    n_bootstrap: int = 10000,
+    random_seed: int = 90210,
+) -> dict[str, Any]:
+    """Compute and write all M-9b outputs into the existing readout dir.
+
+    Reads the M-9a flat CSV plus the original record JSONs (and the
+    referenced continuous-W / interventions-MMD artefacts). Writes
+    eight new CSV files plus the statistics summary JSON. Does not
+    plot, rank methods, or write hypothesis verdicts.
+    """
+    if not isinstance(output_root, Path):
+        raise TypeError(
+            "output_root must be a pathlib.Path; got "
+            f"{type(output_root).__name__}."
+        )
+    if (
+        not isinstance(main_evaluation_run_hash12, str)
+        or len(main_evaluation_run_hash12) != 12
+    ):
+        raise ValueError(
+            "main_evaluation_run_hash12 must be a 12-character "
+            f"string; got {main_evaluation_run_hash12!r}."
+        )
+    readout_dir = main_evaluation_readout_dir(
+        output_root, main_evaluation_run_hash12
+    )
+    flat_csv_path = readout_dir / FLAT_RECORDS_CSV
+    if not flat_csv_path.exists():
+        raise FileNotFoundError(
+            "generate_hypothesis_statistics: the M-9a flat CSV "
+            f"{flat_csv_path!r} does not exist; run "
+            "generate_readout_foundation first."
+        )
+    flat_rows = load_flat_records_csv(flat_csv_path)
+
+    records_dir = main_evaluation_records_dir(
+        output_root, main_evaluation_run_hash12
+    )
+    records = load_main_evaluation_records(records_dir)
+
+    baseline_rows = compute_baseline_comparison(flat_rows)
+    paired_rows = compute_paired_seed_comparisons(
+        flat_rows,
+        n_bootstrap=int(n_bootstrap),
+        random_seed=int(random_seed),
+    )
+    correlation_rows = compute_metric_correlations(flat_rows)
+    degradation_rows = compute_degradation_summary(flat_rows)
+    engagement_summary_rows = (
+        compute_forbidden_edge_engagement_summary(flat_rows)
+    )
+    reference_comparison_rows = (
+        compute_reference_forbidden_edge_comparison(
+            records, flat_rows, base_dir=output_root,
+        )
+    )
+    per_intervention_long_rows: list[dict[str, Any]] = []
+    for rec in records:
+        per_intervention_long_rows.extend(
+            extract_per_intervention_mmd(rec, base_dir=output_root)
+        )
+    per_intervention_long_rows_t = tuple(per_intervention_long_rows)
+    per_intervention_summary_rows = (
+        compute_per_intervention_mmd_summary(
+            per_intervention_long_rows_t
+        )
+    )
+
+    readout_dir.mkdir(parents=True, exist_ok=True)
+    output_paths = {
+        BASELINE_COMPARISON_CSV: readout_dir / BASELINE_COMPARISON_CSV,
+        PAIRED_SEED_COMPARISONS_CSV: (
+            readout_dir / PAIRED_SEED_COMPARISONS_CSV
+        ),
+        METRIC_CORRELATIONS_CSV: readout_dir / METRIC_CORRELATIONS_CSV,
+        DEGRADATION_SUMMARY_CSV: readout_dir / DEGRADATION_SUMMARY_CSV,
+        FORBIDDEN_EDGE_ENGAGEMENT_SUMMARY_CSV: (
+            readout_dir / FORBIDDEN_EDGE_ENGAGEMENT_SUMMARY_CSV
+        ),
+        REFERENCE_FORBIDDEN_EDGE_COMPARISON_CSV: (
+            readout_dir / REFERENCE_FORBIDDEN_EDGE_COMPARISON_CSV
+        ),
+        PER_INTERVENTION_MMD_LONG_CSV: (
+            readout_dir / PER_INTERVENTION_MMD_LONG_CSV
+        ),
+        PER_INTERVENTION_MMD_SUMMARY_CSV: (
+            readout_dir / PER_INTERVENTION_MMD_SUMMARY_CSV
+        ),
+        STATISTICS_SUMMARY_JSON: readout_dir / STATISTICS_SUMMARY_JSON,
+    }
+    write_dict_rows_csv(
+        baseline_rows,
+        output_paths[BASELINE_COMPARISON_CSV],
+        _BASELINE_COMPARISON_COLUMNS,
+    )
+    write_dict_rows_csv(
+        paired_rows,
+        output_paths[PAIRED_SEED_COMPARISONS_CSV],
+        _PAIRED_COMPARISON_COLUMNS,
+    )
+    write_dict_rows_csv(
+        correlation_rows,
+        output_paths[METRIC_CORRELATIONS_CSV],
+        _METRIC_CORRELATIONS_COLUMNS,
+    )
+    write_dict_rows_csv(
+        degradation_rows,
+        output_paths[DEGRADATION_SUMMARY_CSV],
+        _DEGRADATION_COLUMNS,
+    )
+    write_dict_rows_csv(
+        engagement_summary_rows,
+        output_paths[FORBIDDEN_EDGE_ENGAGEMENT_SUMMARY_CSV],
+        _FORBIDDEN_ENGAGEMENT_SUMMARY_COLUMNS,
+    )
+    write_dict_rows_csv(
+        reference_comparison_rows,
+        output_paths[REFERENCE_FORBIDDEN_EDGE_COMPARISON_CSV],
+        _REFERENCE_FORBIDDEN_COMPARISON_COLUMNS,
+    )
+    write_dict_rows_csv(
+        per_intervention_long_rows_t,
+        output_paths[PER_INTERVENTION_MMD_LONG_CSV],
+        _PER_INTERVENTION_MMD_LONG_COLUMNS,
+    )
+    write_dict_rows_csv(
+        per_intervention_summary_rows,
+        output_paths[PER_INTERVENTION_MMD_SUMMARY_CSV],
+        _PER_INTERVENTION_MMD_SUMMARY_COLUMNS,
+    )
+    summary: dict[str, Any] = {
+        "main_evaluation_run_hash12": main_evaluation_run_hash12,
+        "input_flat_csv": str(
+            flat_csv_path.relative_to(output_root)
+        ).replace("\\", "/"),
+        "output_files": sorted(output_paths.keys()),
+        "n_flat_rows": int(len(flat_rows)),
+        "n_baseline_rows": int(len(baseline_rows)),
+        "n_paired_comparison_rows": int(len(paired_rows)),
+        "n_correlation_rows": int(len(correlation_rows)),
+        "n_degradation_rows": int(len(degradation_rows)),
+        "n_forbidden_engagement_rows": int(
+            len(engagement_summary_rows)
+        ),
+        "n_reference_forbidden_rows": int(
+            len(reference_comparison_rows)
+        ),
+        "n_per_intervention_mmd_rows": int(
+            len(per_intervention_long_rows_t)
+        ),
+        "n_per_intervention_mmd_summary_rows": int(
+            len(per_intervention_summary_rows)
+        ),
+        "no_plots_created": True,
+        "no_notebook_created": True,
+        "no_hypothesis_verdicts": True,
+    }
+    write_statistics_summary_json(
+        summary, output_paths[STATISTICS_SUMMARY_JSON]
+    )
+    return summary
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -1236,9 +2780,10 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         description=(
             "Build the main-evaluation readout foundation (flat "
             "records, cell summaries, status summary, validation "
-            "summary, forbidden-edge engagement). Read-only over "
-            "experiment records; no fitting, no metric recomputation, "
-            "no plots, no notebooks."
+            "summary, forbidden-edge engagement) and the M-9b "
+            "hypothesis-statistics tables. Read-only over experiment "
+            "records; no fitting, no metric recomputation, no plots, "
+            "no notebooks, no hypothesis verdicts."
         ),
     )
     parser.add_argument(
@@ -1267,6 +2812,32 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "summary instead of raising."
         ),
     )
+    parser.add_argument(
+        "--n-bootstrap",
+        type=int,
+        default=10000,
+        help=(
+            "Number of bootstrap replicates used for paired-difference "
+            "confidence intervals. Default 10000."
+        ),
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=90210,
+        help=(
+            "Deterministic seed for the paired bootstrap. Default "
+            "90210."
+        ),
+    )
+    parser.add_argument(
+        "--skip-hypothesis-statistics",
+        action="store_true",
+        help=(
+            "If set, skip the M-9b hypothesis-statistics stage and "
+            "produce only the M-9a foundation outputs."
+        ),
+    )
     return parser
 
 
@@ -1292,6 +2863,24 @@ def main(argv: Optional[list[str]] = None) -> int:
             f"{VALIDATION_SUMMARY_JSON}.\n"
         )
         return _EXIT_ERROR
+    if not args.skip_hypothesis_statistics:
+        try:
+            generate_hypothesis_statistics(
+                output_root=args.output_root,
+                main_evaluation_run_hash12=(
+                    args.main_evaluation_run_hash12
+                ),
+                n_bootstrap=int(args.n_bootstrap),
+                random_seed=int(args.random_seed),
+            )
+        except SystemExit:
+            raise
+        except BaseException as exc:
+            sys.stderr.write(
+                "readout: hypothesis-statistics error: "
+                f"{type(exc).__name__}: {exc}\n"
+            )
+            return _EXIT_ERROR
     return _EXIT_OK
 
 
@@ -1300,8 +2889,12 @@ if __name__ == "__main__":
 
 
 __all__ = [
+    "BASELINE_COMPARISON_CSV",
+    "BASELINE_CONDITION_LABELS",
     "CELL_SUMMARY_CSV",
     "CONTINUOUS_W_KEY",
+    "DEGRADATION_SUMMARY_CSV",
+    "DIFF_CONVENTION",
     "EVALUATION_SEED_VALUES",
     "EXPECTED_COUNTS_BY_METHOD",
     "EXPECTED_LAMBDA_PRIOR",
@@ -1312,28 +2905,59 @@ __all__ = [
     "FLAT_RECORDS_CSV",
     "FORBIDDEN_CALIBRATION_SEEDS",
     "FORBIDDEN_EDGE_ENGAGEMENT_CSV",
+    "FORBIDDEN_EDGE_ENGAGEMENT_SUMMARY_CSV",
     "FlatRecordRow",
+    "METRIC_COLUMNS",
+    "METRIC_CORRELATIONS_CSV",
+    "PAIRED_COMPARISON_PAIRS",
+    "PAIRED_SEED_COMPARISONS_CSV",
+    "PER_INTERVENTION_MMD_LONG_CSV",
+    "PER_INTERVENTION_MMD_SUMMARY_CSV",
     "PROJECT_THRESHOLD",
+    "REFERENCE_FORBIDDEN_EDGE_COMPARISON_CSV",
+    "STATISTICS_SUMMARY_JSON",
     "STATUS_SUMMARY_CSV",
     "THRESHOLDED_ADJACENCY_KEY",
     "VALIDATION_SUMMARY_JSON",
     "ValidationSummary",
+    "compute_baseline_comparison",
+    "compute_degradation_summary",
+    "compute_forbidden_edge_engagement_summary",
+    "compute_metric_correlations",
+    "compute_paired_seed_comparisons",
+    "compute_per_intervention_mmd_summary",
     "compute_prior_edge_engagement",
+    "compute_reference_forbidden_edge_comparison",
+    "condition_key",
+    "extract_per_intervention_mmd",
     "flatten_record",
     "forbidden_edges_from_record",
+    "generate_hypothesis_statistics",
     "generate_readout_foundation",
+    "kendall_tau_b",
+    "linear_slope",
+    "load_flat_records_csv",
     "load_main_evaluation_records",
     "load_npz_array",
     "main",
     "main_evaluation_readout_dir",
     "main_evaluation_records_dir",
     "off_diagonal_edge_count",
+    "paired_seed_difference",
+    "pearson_corr",
+    "rank_values_average_ties",
     "record_config_value",
+    "reference_forbidden_edges_by_seed",
     "resolve_artifact_path",
+    "select_condition",
+    "spearman_corr",
+    "summary_stats",
     "validate_flat_rows",
     "write_cell_summary_csv",
+    "write_dict_rows_csv",
     "write_flat_records_csv",
     "write_forbidden_edge_engagement_csv",
+    "write_statistics_summary_json",
     "write_status_summary_csv",
     "write_validation_summary_json",
 ]
