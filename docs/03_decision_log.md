@@ -3818,3 +3818,17 @@ For M-9/readout:
 ### Scope note
 
 This entry records an implementation verification and interpretation reminder. It does not introduce a new hypothesis, change the main-study protocol, alter metrics, or reopen the baseline suite.
+
+
+## Decision: Matched-L1 Calibration Protocol Frozen Before M-7 Execution
+
+**Status:** Frozen  
+**Scope:** Main-study matched-L1 calibration  
+**Applies to:** M-7 calibration only; no main-evaluation seed may be run before `matched_l1_lambda1` is frozen.
+
+### Decision
+
+The matched-L1 calibration protocol is frozen in:
+
+```text
+docs/10_matched_l1_calibration_plan.md
