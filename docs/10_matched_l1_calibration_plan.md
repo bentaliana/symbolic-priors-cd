@@ -186,11 +186,17 @@ The diagnostic grid is required as non-selection evidence and must be clearly la
 The M-7 calibration stage should produce both machine-readable and human-readable outputs.
 
 The calibration summary outputs are written under
-results/main_study/calibration/matched_l1/<calibration_run_hash12>/.
+`results/main_study/calibration/matched_l1/<calibration_run_hash12>/`.
+
 The per-run records and artefacts produced during calibration follow the
-standard main-study layout under results/main_study/<run_config_hash12>/.
-The calibration summary references each per-run record by its record_path
-and configuration_hash_full.
+standard main-study invocation layout under
+`results/main_study/<calibration_run_hash12>/records/` and
+`results/main_study/<calibration_run_hash12>/artifacts/`.
+
+Each per-run record remains individually identifiable through its stored
+`record_path`, `configuration_hash_full`, and `configuration_hash_prefix`.
+The calibration summary references these per-run records by `record_path`
+and `configuration_hash_full`.
 
 6.1 Machine-Readable Outputs
 
