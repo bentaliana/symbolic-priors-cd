@@ -1,0 +1,5 @@
+method_family,fit_status,metric_status,graph_status,sampler_status,count
+hard_exclusion,success,computed,valid_dag,available,35
+matched_l1,success,computed,valid_dag,available,7
+prior_free,success,computed,valid_dag,available,7
+soft_frobenius,success,computed,valid_dag,available,175
