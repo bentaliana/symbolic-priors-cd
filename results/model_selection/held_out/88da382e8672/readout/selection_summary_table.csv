@@ -1,0 +1,9 @@
+condition,metric,role,dagma_value,dcdi_value,lower_model
+centred_only,SID,primary,4.2,63.4,DAGMA
+centred_only,MMD,tie-breaker,0.0058144725739533,0.1158837861659679,DAGMA
+centred_only,SHD,diagnostic,1.0,30.4,DAGMA
+centred_only,runtime,feasibility,1.0513981799944303,976.6540220399968,DAGMA
+standardised,SID,primary,66.6,68.8,DAGMA
+standardised,MMD,tie-breaker,0.1213589812129696,0.1419722234063578,DAGMA
+standardised,SHD,diagnostic,25.8,29.6,DAGMA
+standardised,runtime,feasibility,1.4749967600102536,902.6897642000112,DAGMA

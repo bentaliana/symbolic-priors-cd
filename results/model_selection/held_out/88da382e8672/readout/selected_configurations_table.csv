@@ -1,0 +1,5 @@
+condition,model,configuration_hash_prefix,hyperparameters,calibration_mean_sid
+centred_only,dagma,06ee98d13852,lambda1=0.25,0.0
+centred_only,dcdi,dd39d6325e7d,reg_coeff=0.1,60.0
+standardised,dagma,7b345b1b2e85,lambda1=0.1,46.0
+standardised,dcdi,16f92df3d6af,reg_coeff=0.3,46.0
