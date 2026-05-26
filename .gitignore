@@ -115,3 +115,15 @@ results/main_study/main_evaluation/*
 !results/main_study/864fe6722256/records/*.json
 !results/main_study/864fe6722256/artifacts/
 !results/main_study/864fe6722256/artifacts/**
+
+# Keep evaluation readout artefacts.
+!results/main_study/main_evaluation/864fe6722256/readout/
+!results/main_study/main_evaluation/864fe6722256/readout/**
+
+# Keep prior structural relevance artefacts.
+!results/main_study/exploratory/
+results/main_study/exploratory/*
+!results/main_study/exploratory/prior_structural_relevance/
+results/main_study/exploratory/prior_structural_relevance/*
+!results/main_study/exploratory/prior_structural_relevance/1b46785b59a4/
+!results/main_study/exploratory/prior_structural_relevance/1b46785b59a4/**
