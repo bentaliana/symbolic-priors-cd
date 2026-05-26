@@ -3844,3 +3844,51 @@ docs/10_matched_l1_calibration_plan.md
 The matched-L1 baseline will use:
 
 matched_l1_lambda1 = 0.0625
+
+
+26/05/2026 — Prior structural relevance findings and next diagnostic step
+
+Decision:
+
+- The exploratory prior structural relevance analysis for main-evaluation run `864fe6722256` has been completed and recorded under analysis hash `1b46785b59a4`.
+- The analysis used existing saved records and artefacts only.
+- No model was refit, no new interventional samples were generated, no MMD counterfactuals were computed, and no protocol constants were changed.
+- The analysis does not replace the frozen M-8/M-9 primary result.
+
+Evidence:
+
+- The soft Frobenius prior reduced the fraction of reference forbidden edges predicted as edges from approximately `0.1286` under prior-free to approximately `0.0286` under the clean/confidence=1 soft-prior condition.
+- The prior therefore exerted measurable targeted structural pressure.
+- However, the selected reference forbidden-edge targets covered only a limited subset of prior-free false positives.
+- Across the seven prior-free fits, the average error profile was approximately:
+  - false positives: `10.1`;
+  - false negatives: `13.9`;
+  - targeted false positives: `1.3`.
+- The targeted false-positive fraction of all false positives ranged from approximately `0.077` to `0.273` across seeds.
+- Offline removal of the targeted forbidden edges from the prior-free thresholded adjacency produced a small mean SHD improvement (`mean ΔSHD ≈ -1.286`) but mixed SID changes (`mean ΔSID ≈ -0.5714`, with seed-level improvements, worsenings, and unchanged cases).
+
+Interpretation:
+
+- The M-10 relevance analysis supports treating prior relevance/error alignment as a plausible explanation for why mechanical forbidden-edge suppression did not translate into a clear clean-prior SID/MMD improvement.
+- The result does not show that semantic priors are ineffective in general, nor that `lambda_prior = 2e-4` was necessarily optimal or suboptimal.
+- The result does suggest that the randomly selected forbidden-edge prior targets had limited direct overlap with the dominant error modes of the prior-free DAGMA baseline.
+- False negatives were more common than false positives on average, and forbidden-edge priors cannot correct missing true edges by construction.
+
+Consequence:
+
+- Immediate lambda-prior sensitivity is not treated as the next default step, because the evidence suggests that prior-target relevance, not only prior strength, may be limiting the observed metric-level effect.
+- The next planned diagnostic is an offline alternative-prior relevance upper-bound analysis.
+- This diagnostic will estimate how much SID/SHD improvement would have been available if priors had targeted:
+  1. the actual false positives, through a forbidden-edge oracle; and
+  2. the actual false negatives, through a required-edge oracle with an acyclicity guard.
+- Both oracle analyses will include:
+  - a budget-matched ceiling using `k=10`, chosen to match the original forbidden-edge prior budget from the frozen main-evaluation protocol; and
+  - a class-ceiling variant using all correctable errors of that type.
+- The `k=10` comparison is a fair prior-budget comparison, not a claim that `k=10` is optimal for required-edge priors.
+- The class-ceiling comparison estimates the maximum direct leverage of the prior class without the budget constraint.
+
+Scope boundary:
+
+- The planned oracle diagnostic is the final scheduled exploratory investigation before thesis writing.
+- After the oracle diagnostic is completed and recorded, the project should move into thesis writing.
+- Any idea emerging from the oracle diagnostic, such as implementing required-edge priors, tuning `lambda_prior`, or running a new main study, should be recorded as future work unless the diagnostic reveals a genuine implementation bug affecting the existing M-8/M-9 evidence.
