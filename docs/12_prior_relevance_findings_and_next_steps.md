@@ -41,7 +41,7 @@ The fraction of reference forbidden edges predicted as edges was:
 
 This confirms that the soft Frobenius prior substantially reduced predictions at the targeted forbidden-edge positions relative to prior-free and matched-L1, while hard exclusion removed them completely.
 
-**Interpretation:** the soft prior was not inert; it exerted targeted structural pressure.
+**Interpretation:** the soft prior was not inert; it exerted measurable targeted structural pressure.
 
 ---
 
@@ -82,7 +82,7 @@ The primary thesis result should now be framed as follows:
 
 1. The clean soft-prior condition did not clearly improve SID/MMD over prior-free or matched-L1 in the frozen primary evaluation.
 2. The soft prior did mechanically suppress the intended forbidden-edge targets.
-3. The corruption grid remains suggestive evidence that soft constraints may be less brittle than hard exclusions under prior corruption.
+3. The corruption grid shows soft constraints degrading more slowly than hard exclusions on MMD, with mean slopes around `0.019` versus `0.027` at confidence `1.0`, though substantial seed-level variability limits the strength of this comparative observation.
 4. The prior relevance analysis explains why mechanism-level engagement did not become a clean metric-level improvement:
    - the prior targeted only a limited subset of false positives;
    - false negatives were more common than false positives;
@@ -91,7 +91,7 @@ The primary thesis result should now be framed as follows:
 
 A defensible thesis sentence is:
 
-> The soft forbidden-edge prior successfully exerted targeted structural pressure, but the selected prior targets covered only a limited subset of prior-free false positives and could not address the larger false-negative component of the base learner’s error profile. This helps explain why mechanical prior engagement did not translate into a clear clean-prior SID/MMD improvement.
+> The soft forbidden-edge prior exerted measurable targeted structural pressure on the predicted graph, reducing predicted edges at forbidden-edge positions from approximately 12.9% to 2.9%, but the selected prior targets covered only a limited subset of prior-free false positives, approximately 13% on average, and could not address the dominant false-negative component of the base learner’s error profile on this benchmark. This helps explain why mechanical prior engagement did not translate into a clear clean-prior SID/MMD improvement.
 
 ---
 
@@ -116,27 +116,49 @@ The next step should remain offline and exploratory.
 
 The goal is to ask whether more relevant prior targets or different prior classes would have had greater direct leverage over SID/SHD.
 
-### Forbidden-edge oracle diagnostic
+### Forbidden-edge oracle diagnostic: two-tier comparison
 
 For each prior-free seed:
 
-1. identify all false positives;
-2. remove either all false positives or a budget-matched subset of `k=10` false positives;
-3. recompute SID and SHD.
+#### Class ceiling
 
-This asks:
+Identify all false positives, remove all of them, and recompute SID and SHD.
+
+This gives the absolute upper bound on what any forbidden-edge prior could achieve by correcting all false-positive errors in the learned thresholded graph.
+
+#### Budget-matched ceiling
+
+Identify the 10 false positives whose removal produces the largest SID improvement, or all false positives if fewer than 10 exist, and recompute SID and SHD.
+
+This gives the upper bound for a `k=10` forbidden-edge prior with perfect target selection.
+
+The gap between the actual prior result and the budget-matched ceiling indicates how much may have been lost to suboptimal target selection. The gap between the budget-matched ceiling and the class ceiling indicates the cost of the `k=10` prior budget itself.
+
+This diagnostic asks:
 
 > If a forbidden-edge prior had targeted the right absent edges, what direct SID/SHD improvement was available?
 
-### Required-edge oracle diagnostic
+---
+
+### Required-edge oracle diagnostic: two-tier comparison with acyclicity guard
 
 For each prior-free seed:
 
-1. identify all false negatives;
-2. add either all false negatives or a budget-matched subset of `k=10` false negatives;
-3. recompute SID and SHD.
+#### Class ceiling
 
-This asks:
+Identify all false negatives. Add each missing true edge in turn, checking that the resulting graph remains acyclic before each addition. Skip any edge whose addition would create a cycle, and report the skipped count. Recompute SID and SHD on the resulting DAG.
+
+This gives an upper-bound estimate for what a required-edge prior could achieve while respecting the DAG constraint.
+
+#### Budget-matched ceiling
+
+Identify the 10 false negatives whose addition, in greedy order and respecting acyclicity, produces the largest SID improvement. Recompute SID and SHD.
+
+This gives the upper bound for a `k=10` required-edge prior with perfect target selection under the acyclicity constraint.
+
+If a substantial fraction of false negatives create cycles when added, the required-edge prior class has its own structural limits. That would itself be informative about the difficulty of repairing DAGMA’s learned graphs after training.
+
+This diagnostic asks:
 
 > If a required-edge prior had targeted missed true edges, would it have had more direct leverage than forbidden-edge priors?
 
@@ -148,11 +170,41 @@ This is especially relevant because the prior structural relevance analysis foun
 
 The current analysis indicates that the prior’s limitation may be one of information alignment, not simply regularisation strength.
 
-If oracle false-positive correction produces much larger SID/SHD improvements than the original forbidden-edge prior, then the issue is likely target selection within the forbidden-edge class.
+If the budget-matched false-positive oracle produces much larger SID/SHD improvements than the original forbidden-edge prior, then the issue is likely target selection within the forbidden-edge class.
 
-If oracle false-negative correction produces much larger improvements, then required-edge priors may be a more relevant future direction.
+If the required-edge oracle produces much larger improvements, then required-edge priors may be a more relevant future direction.
 
-If neither produces meaningful SID improvement, then the structural errors being corrected may not be the dominant drivers of SID in this benchmark, strengthening the structural/interventional non-equivalence discussion.
+If neither oracle produces meaningful SID improvement, then the structural errors being corrected may not be the dominant drivers of SID in this benchmark, strengthening the structural/interventional non-equivalence discussion.
+
+The diagnostic should report three levels clearly:
+
+| Diagnostic | What it tells us |
+|---|---|
+| Actual prior result | What the frozen forbidden-edge prior produced |
+| Budget-matched oracle | What a perfectly targeted prior with the same `k=10` budget could produce |
+| Class-ceiling oracle | What the full prior class could achieve if all relevant errors of that type were corrected |
+
+---
+
+## Reporting discipline
+
+The next diagnostic must be reported as exploratory and offline.
+
+It must not:
+
+- replace the primary M-8/M-9 result;
+- claim that oracle priors are realistic domain knowledge;
+- recompute MMD from edited graphs;
+- imply that an implemented prior-loss method would necessarily achieve the oracle effect;
+- tune `lambda_prior`;
+- present a new headline result.
+
+It may support future-work claims such as:
+
+- required-edge priors may better target false-negative-dominated error modes;
+- prior usefulness depends on alignment with model error structure;
+- randomly sampled true-negative forbidden-edge priors are not guaranteed to be interventionally useful;
+- future work should compare prior classes under matched prior budgets.
 
 ---
 
