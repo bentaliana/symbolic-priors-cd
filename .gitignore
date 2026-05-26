@@ -127,3 +127,10 @@ results/main_study/exploratory/*
 results/main_study/exploratory/prior_structural_relevance/*
 !results/main_study/exploratory/prior_structural_relevance/1b46785b59a4/
 !results/main_study/exploratory/prior_structural_relevance/1b46785b59a4/**
+
+
+# Keep oracle prior-relevance artefacts.
+!results/main_study/exploratory/oracle_prior_relevance/
+results/main_study/exploratory/oracle_prior_relevance/*
+!results/main_study/exploratory/oracle_prior_relevance/1b95c563db88/
+!results/main_study/exploratory/oracle_prior_relevance/1b95c563db88/**
