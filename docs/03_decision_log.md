@@ -3892,3 +3892,87 @@ Scope boundary:
 - The planned oracle diagnostic is the final scheduled exploratory investigation before thesis writing.
 - After the oracle diagnostic is completed and recorded, the project should move into thesis writing.
 - Any idea emerging from the oracle diagnostic, such as implementing required-edge priors, tuning `lambda_prior`, or running a new main study, should be recorded as future work unless the diagnostic reveals a genuine implementation bug affecting the existing M-8/M-9 evidence.
+
+
+## Decision: Exploratory diagnostic sequence complete
+
+**Status:** Recorded  
+**Applies to:** Main-study exploratory analysis phase  
+**Decision:** Final exploratory diagnostic completed; thesis writing begins
+
+### Summary
+
+The exploratory analysis sequence motivated by the M-9 readout has 
+concluded. Two diagnostics were conducted against the frozen main-
+evaluation data; both used existing saved artefacts only and did not 
+modify any protocol constant or replace the primary result.
+
+### Diagnostics conducted
+
+**Prior structural relevance analysis**
+
+```text
+analysis_hash12 = 1b46785b59a4
+output_dir = results/main_study/exploratory/prior_structural_relevance/1b46785b59a4/
+plan_doc = docs/11_prior_structural_relevance_investigation_plan.md
+```
+
+Established that the random forbidden-edge target selection from the 
+M-2 calibration covered approximately 13% of prior-free false positives 
+on average across seeds, and that offline removal of the targeted 
+edges produced only small SHD improvements and inconsistent SID changes.
+
+**Oracle prior-relevance diagnostic**
+
+```text
+analysis_hash12 = 1b95c563db88
+output_dir = results/main_study/exploratory/oracle_prior_relevance/1b95c563db88/
+parent_analysis = 1b46785b59a4 (cross-validation byte-for-byte confirmed)
+```
+
+Computed five offline structural counterfactual scenarios per seed: 
+actual reference forbidden-edge removal, exact budget-matched false-
+positive removal (k=10), full false-positive removal, greedy acyclicity-
+guarded false-negative addition (k=10), and greedy full-candidate 
+false-negative addition. The exact budget-matched false-positive 
+removal produced substantially larger mean ΔSID and ΔSHD improvements 
+than the actual prior at the same budget. Required-edge diagnostics 
+were structurally limited by acyclicity to approximately 3 additions 
+per seed.
+
+### Combined interpretation
+
+The primary limitation in the tested setup was prior target selection 
+within the forbidden-edge class, not prior penalty strength. The soft 
+prior mechanism engaged as designed but the randomly-sampled targets 
+did not consistently align with the SID-consequential structural errors 
+in the learned graphs. Full details are recorded in 
+docs/13_prior_relevance_oracle_findings.md.
+
+### Implications
+
+1. The frozen main-evaluation result remains the primary thesis finding.
+2. The thesis Discussion chapter will integrate the exploratory findings 
+   to explain why mechanism engagement did not translate to metric 
+   improvement.
+3. The Future Work section will frame prior target selection methods as 
+   the principal follow-up research direction.
+
+### Constraints satisfied
+
+- No new model fitting
+- No MMD recomputation
+- No new interventional sampling
+- No protocol constants modified
+- Frozen primary result not altered or reinterpreted
+
+### Stop condition
+
+This is the final scheduled exploratory diagnostic before thesis 
+writing. No further investigations are planned within the current 
+project timeline. Any further investigation requires a new pre-
+registration document and an explicit decision-log entry.
+
+### Next step
+
+Thesis writing.
