@@ -1,5 +1,7 @@
 # 13. Prior Relevance, Oracle Diagnostics, and Thesis Implications
 
+> **ADDENDUM (added 27/05/2026, post-implementation drift audit).** This document remains the **operative final interpretive document** for the exploratory phase. It is consistent with the implementation: the analyses recorded under hashes `1b46785b59a4` (M-10) and `1b95c563db88` (M-11) match the saved artefacts on disk. The "Stop condition" in Section 13 is in force and is formally recorded in docs/03 ("Decision: Exploratory diagnostic sequence complete"). A presentation-only visual readout of M-10 + M-11 has been produced at `results/main_study/exploratory/prior_relevance_diagnostics/` with `notebooks/prior_relevance_diagnostics.ipynb`. No content in the body of this document requires correction. The next step (thesis writing) is unchanged.
+
 ## Status
 
 This document records the logical development from the primary main-evaluation result to the exploratory prior-relevance diagnostics, and defines the resulting interpretation for the thesis.

@@ -1,5 +1,16 @@
 # Prior Relevance Findings and Next Steps
 
+> **ADDENDUM (added 27/05/2026, post-implementation drift audit).** The "next planned diagnostic step" described in Section "Next step" of this document — the alternative-prior relevance upper-bound diagnostic (forbidden-edge oracle + required-edge oracle) — has been completed.
+>
+> - **M-11 analysis hash:** `1b95c563db88`
+> - **M-11 output directory:** `results/main_study/exploratory/oracle_prior_relevance/1b95c563db88/`
+> - **M-11 readout:** [docs/13_prior_relevance_oracle_findings.md](docs/13_prior_relevance_oracle_findings.md)
+> - **Key M-11 finding:** under the same k = 10 prior budget, exact false-positive removal yielded mean dSID ≈ −24.86 vs −0.57 for actual reference removal; greedy acyclicity-guarded false-negative addition yielded mean dSID ≈ −5.29 with only ≈ 2.86 selected per seed (≈ 11.0 skipped due to acyclicity). The forbidden-edge prior class had substantial structural leverage available; the original randomly-sampled targets did not consistently exploit it.
+> - **Combined interpretation:** prior target selection, not prior strength, was the dominant limit in the tested setup.
+> - **Stop condition:** the exploratory diagnostic sequence is now closed (per docs/03 "Decision: Exploratory diagnostic sequence complete"). No further investigations are scheduled within the project timeline.
+>
+> The body of this document is preserved as the M-10 readout and the pre-registration of the (now-completed) M-11 diagnostic.
+
 ## Status
 
 This note records the outcome of the exploratory prior structural relevance analysis and defines the next planned diagnostic step.

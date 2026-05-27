@@ -1,5 +1,31 @@
 # 09 Main Study Implementation Plan
 
+> **ADDENDUM (added 27/05/2026, post-implementation drift audit).** This document is the **frozen pre-implementation protocol** as it stood at version 1.0. Its body below is preserved as a historical record. The status updates and corrections listed here reflect what was actually implemented; they are formally recorded in docs/03 ("27/05/2026 — Drift audit and retrospective closure of docs/01 amendments"). Read this addendum together with the body.
+>
+> **Implementation status (M-1 through M-11 are all IMPLEMENTED):**
+>
+> - M-1 Soft-prior injection: IMPLEMENTED (`src/symbolic_priors_cd/wrappers/_soft_prior_dagma.py`).
+> - M-2 Lambda_prior calibration: IMPLEMENTED. `lambda_prior = 2e-4`, frozen 24/05/2026 in docs/03. The Section 2 placeholder `lambda_prior = TBD` and the Section 7 candidate grid `(0.01, 0.05, 0.1, 0.5)` are superseded; see docs/09a for the supporting readout and docs/03 24/05/2026 for the frozen value and the rationale for the lower-grid revision `(2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3)`.
+> - M-3 Prior generation and corruption: IMPLEMENTED (`experiments/main_study/priors.py`).
+> - M-4 Hard-exclusion plumbing: IMPLEMENTED. See docs/03 24/05/2026 for verification and interpretation note (hard exclusion may redistribute edge weights at non-excluded positions; it is a distinct constrained-optimisation regime, not "soft prior at infinite confidence").
+> - M-5 Main-study schema and config factory: IMPLEMENTED. `schema_version = 2`.
+> - M-6 Main-study runner: IMPLEMENTED. Parent reference `parent_heldout_run_hash_full` embeds the full 64-char hash of `88da382e8672...`.
+> - M-7 Matched-L1 calibration: IMPLEMENTED. `matched_l1_lambda1 = 0.0625`, frozen in docs/03 from match-by-sparsity on main-calibration seeds 401, 402; target mean edge count 13.0; calibration hash `274cfe3fef32`. See docs/10 for the calibration protocol and `results/main_study/calibration/matched_l1/274cfe3fef32/` for the artefacts.
+> - M-8 Main evaluation runs: IMPLEMENTED. Run hash `864fe6722256`, 224 records under `results/main_study/864fe6722256/records/` (7 prior_free + 7 matched_l1 + 35 hard_exclusion + 175 soft_frobenius).
+> - M-9 Readout and figures: IMPLEMENTED. Outputs under `results/main_study/main_evaluation/864fe6722256/readout/` (8 figures plus `statistics_summary.json`, `paired_seed_comparisons.csv`, `baseline_comparison.csv`, `degradation_summary.csv`, `metric_correlations.csv`, `reference_forbidden_edge_comparison.csv`); notebook at `notebooks/main_evaluation.ipynb`.
+>
+> **Additions not in the original v1.0 plan (recorded retrospectively):**
+>
+> - **M-10 Prior structural relevance diagnostic.** Pre-registered in docs/11, completed under analysis hash `1b46785b59a4`, results recorded in docs/12. Offline structural diagnostic using saved adjacencies only; no model refitting, no MMD recomputation.
+> - **M-11 Oracle prior relevance diagnostic.** Completed under analysis hash `1b95c563db88`, results recorded in docs/13. Five scenarios over the seven evaluation seeds: actual reference forbidden removal, exact budget-matched FP removal (k=10), full FP removal, greedy acyclicity-guarded FN addition (k=10), greedy full-candidate FN addition. Pre-declared as the final scheduled exploratory diagnostic.
+> - **Presentation-only readout** for M-10 + M-11, under `results/main_study/exploratory/prior_relevance_diagnostics/`, with `notebooks/prior_relevance_diagnostics.ipynb`.
+>
+> **docs/01 amendments missed at Section 15 Step 0** (which said they should be recorded in docs/03 "before M-1 begins" but were not):
+>
+> All seven of the docs/01 amendments listed in Section 14 of this document, plus the H4 retirement, are now formally recorded in docs/03 under the 27/05/2026 drift-audit entry. The implementation proceeded without the procedurally-required record; this is a procedural-discipline finding only and does not affect any saved result.
+>
+> **The body below is the original v1.0 plan and is not edited by this addendum (except to substitute the frozen calibration values in Section 2 for clarity; the original `TBD` markers are noted in this addendum).**
+
 ## Status
 
 Protocol document for the prior-loss main study.
@@ -102,12 +128,17 @@ confidence_grid           = (0.0, 0.25, 0.5, 0.75, 1.0)
 corruption_grid           = (0.0, 0.20, 0.40, 0.60, 0.80)
 
 # Prior loss
-# lambda_prior: NOT YET FROZEN. Set by M-2 calibration. Frozen in docs/03 after M-2.
-lambda_prior              = TBD        # placeholder; do not use until docs/03 entry confirms
+# lambda_prior: FROZEN 24/05/2026 in docs/03 from the M-2 lower-grid calibration.
+# Original Section 7 grid (0.01, 0.05, 0.1, 0.5) was rejected (all-too-strong); the
+# lower-grid (2e-5, 5e-5, 1e-4, 2e-4, 5e-4, 1e-3) selected 2e-4 as the smallest passing value.
+lambda_prior              = 2e-4       # frozen; see docs/03 24/05/2026 and docs/09a
 
 # Matched-L1
-# matched_l1_lambda1: NOT YET FROZEN. Set by M-7 sparsity matching. Frozen in docs/03 after M-7.
-matched_l1_lambda1        = TBD        # placeholder; do not use until docs/03 entry confirms
+# matched_l1_lambda1: FROZEN in docs/03 from the M-7 match-by-sparsity calibration on
+# main-calibration seeds 401, 402. Target mean edge count 13.0 (per-seed [14, 12] from
+# soft_frobenius clean/conf=1.0); selected value produces mean edge count 12.5
+# (absolute_gap = 0.5). Calibration hash: 274cfe3fef32; see docs/10.
+matched_l1_lambda1        = 0.0625     # frozen; see docs/03 and results/main_study/calibration/matched_l1/274cfe3fef32/
 ```
 
 ---

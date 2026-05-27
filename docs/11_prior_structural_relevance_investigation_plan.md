@@ -1,5 +1,14 @@
 # Investigation Plan: Structural Relevance of Forbidden-Edge Priors to DAGMA Error Modes
 
+> **ADDENDUM (added 27/05/2026, post-implementation drift audit).** The investigation pre-registered by this document has been completed. The plan body below is preserved as the pre-registered protocol.
+>
+> - **Analysis hash:** `1b46785b59a4`
+> - **Output directory:** `results/main_study/exploratory/prior_structural_relevance/1b46785b59a4/`
+> - **Readout document:** [docs/12_prior_relevance_findings_and_next_steps.md](docs/12_prior_relevance_findings_and_next_steps.md)
+> - **Outcome category (Section 6 of this plan):** Outcome 2 (low coverage and small mean dSID under removal). Mean false-positive coverage ≈ 0.13; mean dSID under offline removal of reference forbidden edges ≈ −0.57; mean dSHD ≈ −1.29. The "Candidate C" structural-orthogonality explanation is partially supported.
+> - **Follow-up (M-11, pre-registered in docs/12 Section "Next step"):** the oracle prior-relevance diagnostic was completed under analysis hash `1b95c563db88` and is recorded in [docs/13_prior_relevance_oracle_findings.md](docs/13_prior_relevance_oracle_findings.md). It refined the M-10 interpretation: false-positive removal carries substantially more SID leverage than false-negative addition, but the original prior targets did not consistently align with the SID-consequential false positives.
+> - **Stop condition:** the M-10 + M-11 sequence is closed; the "Decision: Exploratory diagnostic sequence complete" entry in docs/03 sets the stop condition.
+
 ## Status
 
 - Document version: 1.1 (revised draft, pre-investigation)

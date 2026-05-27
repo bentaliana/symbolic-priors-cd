@@ -3976,3 +3976,61 @@ registration document and an explicit decision-log entry.
 ### Next step
 
 Thesis writing.
+
+
+27/05/2026 — Drift audit and retrospective closure of docs/01 amendments
+
+### Status
+
+This entry closes out a procedural drift identified during pre-submission verification of the RQ -> H -> O thesis scaffolding. docs/09 Section 15 Step 0 specified that a docs/03 entry must formally record a set of docs/01 amendments "before M-1 begins"; that entry was never written, and the project proceeded through M-1 to M-11 without the procedurally-required record. This entry is the missing record, written retrospectively with no claim that it changes any frozen result or alters any past code path.
+
+### Decision
+
+The following docs/01 amendments are formally recorded as in force, with effect from the dates the corresponding implementation decisions were taken:
+
+1. **H4 (instability as diagnostic signal) is retired as a formal hypothesis of the main study.** Rationale: docs/01 v1.1 Section 4 deferred the operational instability measure to docs/02, and docs/02 was closed without freezing such a measure. No readout artefact computes per-condition cross-seed graph variability against unseen-intervention error. H4 is recorded as a scope cut, not a finding. Cross-seed structural variability remains computable offline from the 224 saved adjacencies under `results/main_study/864fe6722256/records/` if a future investigator wishes to operationalise H4 as exploratory work; no such work is scheduled within the current project timeline.
+
+2. **Random-prior control demoted from core baseline to conditional sensitivity addendum.** Rationale: as recorded in docs/09 Section 1.2 and Section 14, the random-prior control was demoted to a sensitivity addendum conditional on core pipeline completion; the core pipeline was completed but the sensitivity addendum was not implemented. No `random_prior` method family appears in `results/main_study/864fe6722256/records/` or in the source under `src/symbolic_priors_cd/` and `experiments/main_study/` (grep confirms). Future-work scope.
+
+3. **Global-Frobenius sensitivity addendum not implemented.** Same status as the random-prior control: docs/09 Section 1.2 listed it as conditional; it was not implemented. No `global_frobenius` method family appears in the saved records or the source.
+
+4. **Ordering priors deferred.** docs/01 v1.1 Section 7.4 specified two prior families (forbidden edges, ordering); only forbidden-edge priors were implemented. Ordering-prior implementation is future-work scope.
+
+5. **10-node ER4 and 20-node ER2 ablation cells deferred.** docs/01 v1.1 Section 10.2 specified these as required ablation cells; only the 10-node ER2 primary benchmark cell was evaluated. The frozen graph constants `n_nodes = 10` and `expected_edges = 20` reflect this scope.
+
+6. **Oracle-prior upper bound (training-time) dropped.** docs/09 Section 1.2 and Section 14 record this. Note: this refers to a training-time oracle-prior method, not the post-hoc offline oracle structural diagnostic implemented as M-11 under analysis hash `1b95c563db88`. The M-11 oracle diagnostic edits saved adjacencies offline using ground-truth information; it does not fit a model with an oracle-informed prior. The two are distinct and the latter does not reopen the former.
+
+7. **L1-style default soft-prior objective superseded by targeted Frobenius (L2) form.** docs/06 Section 18 originally exemplified an L1-form soft prior; the implemented soft prior uses a targeted Frobenius (squared) penalty per docs/09 Section 4. Literature motivation is recorded in docs/prior_loss_research.md.
+
+8. **DAGMA selected as sole main-study model.** DCDI is not carried forward into the main study. Recorded in docs/08h adjudication and reaffirmed here for completeness.
+
+### Scope of this entry
+
+This entry is documentary. It does not modify any source code, test, configuration, schema, frozen constant, or saved result. It does not reopen any past decision. It closes a procedural gap that was identified after the fact.
+
+### Inconsistencies found and either resolved or flagged
+
+- **docs/01 v1.1 still lists H4 as a falsifiable hypothesis** in Section 4 and the change-control rule. Resolution: the body of docs/01 is preserved as the historical pre-registered contract; a top-of-file addendum has been added pointing to this docs/03 entry. The original H4 wording is not deleted because docs/01 is the frozen pre-registration record.
+
+- **docs/01 v1.1 still lists random-prior, 20-node ER2, and 10-node ER4 as scope-frozen items.** Same resolution: preserved in the body, addendum added.
+
+- **docs/09 Section 2 still records `lambda_prior = TBD` and `matched_l1_lambda1 = TBD`** even though both are frozen (`lambda_prior = 2e-4` per the 24/05/2026 entry; `matched_l1_lambda1 = 0.0625` per the M-7 calibration entry). Resolution: the docs/09 in-body values are updated to the frozen values, with a top-of-file addendum recording the update and pointing to the original calibration entries.
+
+- **docs/09 Section 1.2 lists "M-9 readout" as in scope** but does not name M-10 (prior structural relevance) or M-11 (oracle prior relevance). Both are now implemented under analysis hashes `1b46785b59a4` and `1b95c563db88`. Resolution: docs/09 addendum records the M-10 and M-11 additions; the body of docs/09 is preserved for historical fidelity.
+
+- **CLAUDE.md was significantly out of date** (claimed M-9 "IN PROGRESS", reported ~1229 tests vs actual 2430, marked lambda_prior and matched_l1_lambda1 as TBD, said `results/main_study/` and `experiments/main_study/` did not yet exist). Resolution: CLAUDE.md updated separately in the same session.
+
+- **Two documents referenced by an external review prompt (`docs/heldout_readout.md`, `docs/calibration_readout.md`) do not exist.** Resolution: the corresponding evidence lives in docs/08h, docs/09a, docs/10, `results/model_selection/held_out/88da382e8672/readout/`, and `results/main_study/calibration/matched_l1/274cfe3fef32/`. The thesis methodology must cite the actual paths, not the non-existent files.
+
+### What does NOT change
+
+- No source code, no test, no configuration file, no schema, no frozen constant.
+- No saved result under `results/`.
+- The frozen primary main-evaluation result (run hash `864fe6722256`) is unchanged.
+- The two exploratory diagnostic analyses (hashes `1b46785b59a4` and `1b95c563db88`) are unchanged.
+- The selection-study adjudication (DAGMA as base model, hash `88da382e8672`) is unchanged.
+- The stop condition recorded by the "Decision: Exploratory diagnostic sequence complete" entry above is unchanged: no further investigations are scheduled within the current project timeline.
+
+### Forward note
+
+The thesis Discussion chapter will record the H4 retirement and the random-prior / global-Frobenius / ordering-prior / ablation-cell scope cuts in the Limitations section. The thesis Methods chapter will name the frozen constants (`lambda_prior = 2e-4`, `matched_l1_lambda1 = 0.0625`) and the frozen intervention policy (`all_nodes_plus_minus_2_v1`).

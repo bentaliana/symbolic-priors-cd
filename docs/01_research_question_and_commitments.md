@@ -1,5 +1,20 @@
 # 01_research_question_and_commitments
 
+> **ADDENDUM (added 27/05/2026, post-implementation drift audit).** This document is the **frozen pre-registered scientific contract** as it stood at version 1.1. Its body below is preserved verbatim as a historical record. The amendments listed here were taken during M-1 through M-11 implementation and are formally recorded in docs/03 ("27/05/2026 — Drift audit and retrospective closure of docs/01 amendments"). Read this addendum together with the body of the document.
+>
+> **Amendments in force (effective from the dates the implementation decisions were taken):**
+>
+> 1. **H4 (Section 4, "Instability as diagnostic signal") is retired** as a formal main-study hypothesis. The instability measure deferred at Section 4 to docs/02 was never frozen in docs/02. H4 is recorded as a scope cut, not a finding. The data on disk supports computing cross-seed graph variability offline if a future investigator wishes to operationalise it as exploratory work; no such work is scheduled.
+> 2. **Random-prior control (Section 6 and 8) demoted** from core baseline to conditional sensitivity addendum; the addendum was not implemented. The four implemented method families are `prior_free`, `matched_l1`, `soft_frobenius`, `hard_exclusion`.
+> 3. **Ordering priors (Section 7.4) deferred.** Only forbidden-edge priors were implemented. RQ1, RQ2, and H1, H2 in the thesis scaffolding read as "soft forbidden-edge priors," not "soft structural priors in general."
+> 4. **20-node ER2 and 10-node ER4 ablation cells (Section 10.2) deferred.** Only the 10-node ER2 primary benchmark cell was evaluated. The frozen graph constants `n_nodes = 10`, `expected_edges = 20` reflect this scope.
+> 5. **ATE-error tertiary metric (Section 12.3) not used.** SID is the primary interventional metric; MMD is the secondary distributional metric; SHD is a structural diagnostic.
+> 6. **DAGMA selected as sole base model** (docs/08h adjudication). DCDI is not carried forward.
+> 7. **Primary result is mixed by the pre-registered positive-result criteria of Section 13.** Per the negative-result plan at Section 14, the thesis remains scientifically valid. Two scheduled exploratory diagnostics (M-10 prior structural relevance, hash `1b46785b59a4`; M-11 oracle prior relevance, hash `1b95c563db88`) explain why mechanism-level engagement did not translate into metric-level improvement; they do not replace the primary result.
+> 8. **Frozen calibrated constants** (set post-Section 19 and recorded in docs/03): `lambda_prior = 2e-4`, `matched_l1_lambda1 = 0.0625`, intervention policy `all_nodes_plus_minus_2_v1`.
+>
+> The body below is the original v1.1 pre-registration and is not edited by this addendum. Where the body conflicts with this addendum on points 1-8 above, the addendum and the corresponding docs/03 entry take precedence.
+
 ## Status
 
 Frozen design contract for the main thesis study.  
