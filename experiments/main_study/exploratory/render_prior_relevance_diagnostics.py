@@ -38,9 +38,9 @@ import matplotlib.pyplot as plt  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-MAIN_EVALUATION_RUN_HASH_PREFIX: str = "864fe6722256"
-PRIOR_RELEVANCE_ANALYSIS_HASH_PREFIX: str = "1b46785b59a4"
-ORACLE_ANALYSIS_HASH_PREFIX: str = "1b95c563db88"
+MAIN_EVALUATION_RUN_HASH_PREFIX: str = "166c792c43bc"
+PRIOR_RELEVANCE_ANALYSIS_HASH_PREFIX: str = "6f660aaeef3d"
+ORACLE_ANALYSIS_HASH_PREFIX: str = "079fda7ac4f4"
 
 METHOD_FAMILY_COLOURS: dict[str, str] = {
     "prior_free": "#7A7A7A",

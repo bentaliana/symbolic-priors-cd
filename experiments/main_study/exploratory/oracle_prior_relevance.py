@@ -1334,7 +1334,7 @@ def run_oracle_prior_relevance_analysis(
     *,
     output_root: Path,
     main_evaluation_run_hash12: str,
-    prior_relevance_analysis_hash12: str = "1b46785b59a4",
+    prior_relevance_analysis_hash12: str = "6f660aaeef3d",
     budget_k: int = ORACLE_BUDGET_K,
 ) -> dict[str, Any]:
     """End-to-end oracle-diagnostic analysis. Returns the manifest dict."""
@@ -1477,7 +1477,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--prior-relevance-analysis-hash12",
-        type=str, default="1b46785b59a4",
+        type=str, default="6f660aaeef3d",
         help=(
             "12-character prior structural relevance analysis hash. "
             "Used only as a provenance reference; this analysis "

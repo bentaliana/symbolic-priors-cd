@@ -58,6 +58,10 @@ from experiments.main_study.schema import (
     FROZEN_LAMBDA_PRIOR,
     MainStudyConfig,
     METHOD_FAMILIES,
+    PROTOCOL_DAGMA_LAMBDA1,
+    PROTOCOL_DAGMA_MAX_ITER,
+    PROTOCOL_DAGMA_WARM_ITER,
+    build_protocol_dagma_config,
 )
 from experiments.main_study.workloads import (
     PlannedRun,
@@ -77,7 +81,7 @@ EVALUATION_SEED_VALUES: tuple[int, ...] = (
 )
 FORBIDDEN_CALIBRATION_SEEDS: tuple[int, ...] = (401, 402)
 
-MATCHED_L1_LAMBDA1: float = 0.0625
+MATCHED_L1_LAMBDA1: float = 0.10
 
 EXPECTED_WORKLOAD_COUNT: int = 224
 EXPECTED_COUNTS_BY_METHOD: dict[str, int] = {
@@ -220,12 +224,17 @@ def compute_main_evaluation_run_hash12(
     method_families: tuple[str, ...] = tuple(METHOD_FAMILIES),
     expected_counts_by_method: dict[str, int] = EXPECTED_COUNTS_BY_METHOD,
     expected_total: int = EXPECTED_WORKLOAD_COUNT,
+    protocol_dagma_lambda1: float = PROTOCOL_DAGMA_LAMBDA1,
+    protocol_dagma_warm_iter: int = PROTOCOL_DAGMA_WARM_ITER,
+    protocol_dagma_max_iter: int = PROTOCOL_DAGMA_MAX_ITER,
 ) -> str:
     """Deterministic 12-char hex hash over scientific protocol identity.
 
     Inputs covered: protocol version, parent provenance, evaluation
     seeds, frozen matched-L1 lambda1, frozen lambda_prior, method-
-    family grid definition, and the expected workload counts.
+    family grid definition, the expected workload counts, and the
+    DAGMA backbone hyperparameters (``lambda1``, ``warm_iter``,
+    ``max_iter``) that define every method-family's underlying fit.
     ``code_version`` is intentionally excluded.
     """
     payload = {
@@ -239,6 +248,9 @@ def compute_main_evaluation_run_hash12(
             k: int(v) for k, v in expected_counts_by_method.items()
         },
         "expected_total": int(expected_total),
+        "protocol_dagma_lambda1": float(protocol_dagma_lambda1),
+        "protocol_dagma_warm_iter": int(protocol_dagma_warm_iter),
+        "protocol_dagma_max_iter": int(protocol_dagma_max_iter),
     }
     serialised = json.dumps(
         payload, sort_keys=True, separators=(",", ":")
@@ -284,7 +296,8 @@ def build_main_evaluation_planned_runs(
     raises ``ValueError`` naming the offending family or total.
     """
     if base_dagma_config is None:
-        base_dagma_config = DAGMAConfig()
+        base_dagma_config = build_protocol_dagma_config()
+    _verify_dagma_config_at_protocol(base_dagma_config)
     for s in seed_values:
         if s in FORBIDDEN_CALIBRATION_SEEDS:
             raise ValueError(
@@ -334,6 +347,41 @@ def _verify_plan_counts(planned: tuple[PlannedRun, ...]) -> None:
             )
 
 
+def _verify_dagma_config_at_protocol(cfg: DAGMAConfig) -> None:
+    """Refuse to proceed unless DAGMA hyperparameters match the protocol.
+
+    Specifically: ``lambda1 == PROTOCOL_DAGMA_LAMBDA1``,
+    ``warm_iter == PROTOCOL_DAGMA_WARM_ITER``, and
+    ``max_iter == PROTOCOL_DAGMA_MAX_ITER``. The wrapper-level
+    DAGMAConfig defaults would silently produce
+    an off-protocol main-study run, this gate is the safety net.
+    """
+    if not isinstance(cfg, DAGMAConfig):
+        raise TypeError(
+            "base_dagma_config must be a DAGMAConfig instance; got "
+            f"{type(cfg).__name__}."
+        )
+    if float(cfg.lambda1) != float(PROTOCOL_DAGMA_LAMBDA1):
+        raise ValueError(
+            "main-evaluation requires "
+            f"dagma_config.lambda1 == {PROTOCOL_DAGMA_LAMBDA1!r}; got "
+            f"{cfg.lambda1!r}. Construct the config via "
+            "build_protocol_dagma_config()."
+        )
+    if int(cfg.warm_iter) != int(PROTOCOL_DAGMA_WARM_ITER):
+        raise ValueError(
+            "main-evaluation requires "
+            f"dagma_config.warm_iter == {PROTOCOL_DAGMA_WARM_ITER!r}; "
+            f"got {cfg.warm_iter!r}."
+        )
+    if int(cfg.max_iter) != int(PROTOCOL_DAGMA_MAX_ITER):
+        raise ValueError(
+            "main-evaluation requires "
+            f"dagma_config.max_iter == {PROTOCOL_DAGMA_MAX_ITER!r}; "
+            f"got {cfg.max_iter!r}."
+        )
+
+
 def _verify_no_calibration_seeds(planned: tuple[PlannedRun, ...]) -> None:
     for p in planned:
         seed = int(p.config.seed_value)
@@ -347,12 +395,40 @@ def _verify_no_calibration_seeds(planned: tuple[PlannedRun, ...]) -> None:
 def _verify_method_specific_invariants(
     planned: tuple[PlannedRun, ...]
 ) -> None:
-    """Check matched-L1 / hard-exclusion / soft-Frobenius axis rules."""
+    """Check matched-L1 / hard-exclusion / soft-Frobenius axis rules.
+
+    Also verifies, on every planned run except matched_l1 (whose
+    ``lambda1`` is the calibrated matched value, not the protocol
+    backbone), that the per-config DAGMA hyperparameters match the
+    protocol values. matched_l1 still has its ``warm_iter`` and
+    ``max_iter`` checked.
+    """
     hard_per_seed: dict[int, int] = {}
     hard_confidences: set[Optional[float]] = set()
     for p in planned:
         cfg = p.config
         family = cfg.method_family
+        d = cfg.dagma_config
+        if family != "matched_l1":
+            if float(d.lambda1) != float(PROTOCOL_DAGMA_LAMBDA1):
+                raise ValueError(
+                    f"planned run {p.run_id!r} (family={family!r}) must "
+                    "carry "
+                    f"dagma_config.lambda1 == {PROTOCOL_DAGMA_LAMBDA1!r}"
+                    f"; got {d.lambda1!r}."
+                )
+        if int(d.warm_iter) != int(PROTOCOL_DAGMA_WARM_ITER):
+            raise ValueError(
+                f"planned run {p.run_id!r} must carry "
+                f"dagma_config.warm_iter == {PROTOCOL_DAGMA_WARM_ITER!r}"
+                f"; got {d.warm_iter!r}."
+            )
+        if int(d.max_iter) != int(PROTOCOL_DAGMA_MAX_ITER):
+            raise ValueError(
+                f"planned run {p.run_id!r} must carry "
+                f"dagma_config.max_iter == {PROTOCOL_DAGMA_MAX_ITER!r}"
+                f"; got {d.max_iter!r}."
+            )
         if family == "matched_l1":
             if cfg.matched_l1_lambda1 is None or float(
                 cfg.matched_l1_lambda1

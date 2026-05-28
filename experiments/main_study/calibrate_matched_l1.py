@@ -67,7 +67,11 @@ from experiments.main_study.schema import (
     CONFIDENCE_GRID,
     EVALUATION_SEEDS,
     FROZEN_LAMBDA_PRIOR,
+    PROTOCOL_DAGMA_LAMBDA1,
+    PROTOCOL_DAGMA_MAX_ITER,
+    PROTOCOL_DAGMA_WARM_ITER,
     MainStudyConfig,
+    build_protocol_dagma_config,
     canonicalize_for_json,
     make_main_study_config,
 )
@@ -245,14 +249,19 @@ def compute_calibration_run_hash12(
     target_confidence: float = TARGET_CONFIDENCE,
     confidence_grid: tuple[float, ...] = CONFIDENCE_GRID,
     corruption_grid: tuple[float, ...] = CORRUPTION_GRID,
+    protocol_dagma_lambda1: float = PROTOCOL_DAGMA_LAMBDA1,
+    protocol_dagma_warm_iter: int = PROTOCOL_DAGMA_WARM_ITER,
+    protocol_dagma_max_iter: int = PROTOCOL_DAGMA_MAX_ITER,
 ) -> str:
     """Deterministic 12-char hex hash from scientific protocol identity.
 
     ``code_version`` is intentionally not included. The hash covers
     only inputs that change the experimental contract: protocol
     version, parent provenance, calibration seeds, Stage-1 grid,
-    target soft-prior cell, and the diagnostic confidence/corruption
-    grid.
+    target soft-prior cell, the diagnostic confidence/corruption
+    grid, and the DAGMA backbone hyperparameters that define the
+    soft-prior reference baseline (``lambda1``, ``warm_iter``,
+    ``max_iter``).
     """
     payload = {
         "protocol_version": protocol_version,
@@ -263,6 +272,9 @@ def compute_calibration_run_hash12(
         "target_confidence": float(target_confidence),
         "diagnostic_confidence_grid": [float(x) for x in confidence_grid],
         "diagnostic_corruption_grid": [float(x) for x in corruption_grid],
+        "protocol_dagma_lambda1": float(protocol_dagma_lambda1),
+        "protocol_dagma_warm_iter": int(protocol_dagma_warm_iter),
+        "protocol_dagma_max_iter": int(protocol_dagma_max_iter),
     }
     serialised = json.dumps(
         payload, sort_keys=True, separators=(",", ":")
@@ -1219,7 +1231,25 @@ def run_matched_l1_calibration(
         code_version = capture_code_version()
 
     if base_dagma_config is None:
-        base_dagma_config = DAGMAConfig()
+        base_dagma_config = build_protocol_dagma_config()
+    if (
+        float(base_dagma_config.lambda1) != float(PROTOCOL_DAGMA_LAMBDA1)
+        or int(base_dagma_config.warm_iter)
+        != int(PROTOCOL_DAGMA_WARM_ITER)
+        or int(base_dagma_config.max_iter)
+        != int(PROTOCOL_DAGMA_MAX_ITER)
+    ):
+        raise ValueError(
+            "matched_l1 calibration requires base_dagma_config to "
+            "carry the main-study protocol values "
+            f"(lambda1={PROTOCOL_DAGMA_LAMBDA1!r}, "
+            f"warm_iter={PROTOCOL_DAGMA_WARM_ITER!r}, "
+            f"max_iter={PROTOCOL_DAGMA_MAX_ITER!r}); got "
+            f"(lambda1={base_dagma_config.lambda1!r}, "
+            f"warm_iter={base_dagma_config.warm_iter!r}, "
+            f"max_iter={base_dagma_config.max_iter!r}). "
+            "Build the config via build_protocol_dagma_config()."
+        )
 
     if data_loader is None or fit_backend is None or metric_backend is None:
         data_loader, fit_backend, metric_backend = _build_default_backends(

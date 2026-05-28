@@ -52,7 +52,7 @@ from experiments.main_study.schema import (
 # ---------------------------------------------------------------------------
 
 
-EXPECTED_MAIN_EVALUATION_RUN_HASH12: str = "864fe6722256"
+EXPECTED_MAIN_EVALUATION_RUN_HASH12: str = "166c792c43bc"
 
 EXPECTED_RECORD_COUNT: int = 224
 
@@ -66,7 +66,7 @@ EXPECTED_COUNTS_BY_METHOD: dict[str, int] = {
 EVALUATION_SEED_VALUES: tuple[int, ...] = tuple(EVALUATION_SEEDS)
 FORBIDDEN_CALIBRATION_SEEDS: tuple[int, ...] = tuple(CALIBRATION_SEEDS)
 
-EXPECTED_MATCHED_L1_LAMBDA1: float = 0.0625
+EXPECTED_MATCHED_L1_LAMBDA1: float = 0.10
 EXPECTED_LAMBDA_PRIOR: float = float(FROZEN_LAMBDA_PRIOR)
 
 PROJECT_THRESHOLD: float = 0.3

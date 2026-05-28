@@ -57,6 +57,38 @@ EVALUATION_SEEDS: tuple[int, ...] = (501, 502, 503, 504, 505, 506, 507)
 
 FROZEN_LAMBDA_PRIOR: float = 2e-4
 
+# Protocol-frozen DAGMA hyperparameters for the main study. These
+# values come from the frozen tactical-constants block inherited
+# from the closed selection study, and from the held-out
+# adjudication that selected DAGMA-standardised at hash
+# 7b345b1b2e85 with lambda1=0.10. The wrapper-level DAGMAConfig
+# defaults (lambda1=0.05, warm_iter=30000, max_iter=60000) are the
+# DAGMA-paper reproduction anchor for the wrapper's own contract
+# and are intentionally NOT changed; the main-study entry points
+# are responsible for overriding them with the protocol values
+# below.
+PROTOCOL_DAGMA_LAMBDA1: float = 0.1
+PROTOCOL_DAGMA_WARM_ITER: int = 20000
+PROTOCOL_DAGMA_MAX_ITER: int = 70000
+
+
+def build_protocol_dagma_config() -> DAGMAConfig:
+    """Return the DAGMAConfig at the main-study protocol point.
+
+    The wrapper-level :class:`DAGMAConfig` defaults are the
+    DAGMA-paper reproduction anchor (``lambda1=0.05``,
+    ``warm_iter=30000``, ``max_iter=60000``) and must not be relied
+    on by the main study. Every call site that needs a base
+    configuration for main-study workloads must obtain it through
+    this factory so the protocol values are always honoured.
+    """
+    return DAGMAConfig(
+        lambda1=PROTOCOL_DAGMA_LAMBDA1,
+        warm_iter=PROTOCOL_DAGMA_WARM_ITER,
+        max_iter=PROTOCOL_DAGMA_MAX_ITER,
+    )
+
+
 CONFIDENCE_GRID: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)
 
 
@@ -633,6 +665,10 @@ __all__ = [
     "CALIBRATION_SEEDS",
     "EVALUATION_SEEDS",
     "FROZEN_LAMBDA_PRIOR",
+    "PROTOCOL_DAGMA_LAMBDA1",
+    "PROTOCOL_DAGMA_WARM_ITER",
+    "PROTOCOL_DAGMA_MAX_ITER",
+    "build_protocol_dagma_config",
     "CONFIDENCE_GRID",
     "PRIOR_K",
     "CORRUPTION_GRID",

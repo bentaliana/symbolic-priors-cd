@@ -41,7 +41,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 # ---------------------------------------------------------------------------
 
 
-EXPECTED_MAIN_EVALUATION_RUN_HASH12: str = "864fe6722256"
+EXPECTED_MAIN_EVALUATION_RUN_HASH12: str = "166c792c43bc"
 
 # Predeclared baseline conditions.
 BASELINE_LABEL_PRIOR_FREE: str = "prior_free"
@@ -62,7 +62,7 @@ METRIC_LOWER_IS_BETTER: tuple[str, ...] = ("sid", "shd", "mmd")
 METRIC_EDGE_COUNT: str = "edge_count_from_thresholded_adjacency"
 
 # Frozen protocol constants for caveats text only.
-MATCHED_L1_LAMBDA1: float = 0.0625
+MATCHED_L1_LAMBDA1: float = 0.10
 LAMBDA_PRIOR: float = 2e-4
 N_EVALUATION_SEEDS: int = 7
 
