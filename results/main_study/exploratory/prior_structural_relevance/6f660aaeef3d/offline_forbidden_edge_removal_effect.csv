@@ -1,0 +1,8 @@
+seed_value,sid_original,sid_after_removing_reference_forbidden_edges,sid_delta,shd_original,shd_after_removing_reference_forbidden_edges,shd_delta,n_reference_edges_predicted_before_removal,n_reference_edges_removed
+501,78,78,0,28,26,-2,2,2
+502,50,44,-6,15,14,-1,1,1
+503,79,79,0,23,23,0,0,0
+504,44,44,0,13,13,0,0,0
+505,79,79,0,22,22,0,0,0
+506,74,74,0,21,20,-1,1,1
+507,56,56,0,24,23,-1,1,1
