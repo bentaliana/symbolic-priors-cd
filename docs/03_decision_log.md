@@ -4033,4 +4033,67 @@ This entry is documentary. It does not modify any source code, test, configurati
 
 ### Forward note
 
-The thesis Discussion chapter will record the H4 retirement and the random-prior / global-Frobenius / ordering-prior / ablation-cell scope cuts in the Limitations section. The thesis Methods chapter will name the frozen constants (`lambda_prior = 2e-4`, `matched_l1_lambda1 = 0.0625`) and the frozen intervention policy (`all_nodes_plus_minus_2_v1`).
+The thesis Discussion chapter will record the H4 retirement and the random-prior / global-Frobenius / ordering-prior / ablation-cell scope cuts in the Limitations section. The thesis Methods chapter will name the frozen constants (`lambda_prior = 2e-4`, `matched_l1_lambda1 = 0.10`) and the frozen intervention policy (`all_nodes_plus_minus_2_v1`).
+
+
+28/05/2026 — DAGMA backbone default-leak defect, corrected re-run, and supersession of the lambda1=0.05 main-study artefact tree
+
+### Context
+
+A defect was identified in two main-study entry points: `experiments/main_study/run_main_evaluation.py` and `experiments/main_study/calibrate_matched_l1.py` each constructed their base DAGMA configuration as `DAGMAConfig()` with no overrides. The wrapper-level `DAGMAConfig` defaults are the Phase-A paper anchor (`lambda1 = 0.05`, `warm_iter = 30000`, `max_iter = 60000`), not the protocol values the selection study calibrated and the held-out adjudication confirmed (`lambda1 = 0.10`, `warm_iter = 20000`, `max_iter = 70000`). As a result, the entire main-study artefact tree at `results/main_study/864fe6722256/` was produced on the off-protocol Phase-A anchor configuration rather than the protocol backbone fixed by the selection-study winner (`7b345b1b2e85`, DAGMA-standardised, `lambda1 = 0.10`). The matched-L1 calibration at `results/main_study/calibration/matched_l1/274cfe3fef32/` was similarly produced on the off-protocol backbone, so its selected `matched_l1_lambda1 = 0.0625` reflects a soft-prior reference baseline measured at the wrong operating point.
+
+The defect did not affect:
+- the selection study (every selection-study fit explicitly overrides `lambda1` from its candidate grid),
+- the held-out adjudication artefact (`88da382e8672`, parent reference unchanged),
+- the lambda_prior calibration (`calibration_lambda_prior.py` uses an explicit `DAGMA_LAMBDA1 = 0.1` and the frozen value `lambda_prior = 2e-4` remains correct under the protocol backbone).
+
+### Decision
+
+The defect is corrected by routing both main-study entry points and the matched-L1 calibration through a single neutral factory `build_protocol_dagma_config()` defined in `experiments/main_study/schema.py`, which constructs `DAGMAConfig(lambda1=0.10, warm_iter=20000, max_iter=70000)`. The wrapper-level `DAGMAConfig` defaults are unchanged: they remain the Phase-A paper anchor (`lambda1 = 0.05`, `warm_iter = 30000`, `max_iter = 60000`) and continue to be regression-pinned by `tests/test_dagma_wrapper_interface.py::test_dagma_config_default_lambda1_matches_phase_a_anchor` and the associated `warm_iter` / `max_iter` defaults pins.
+
+Three additional safety nets are added:
+1. A preflight gate `_verify_dagma_config_at_protocol` in `run_main_evaluation.py` refuses any base config that does not match the three protocol values.
+2. The per-planned-run invariant `_verify_method_specific_invariants` is extended to assert `dagma_config.lambda1 == 0.10` on every planned run except `matched_l1` (which legitimately replaces `lambda1` with `matched_l1_lambda1`) and `warm_iter == 20000`, `max_iter == 70000` on every planned run unconditionally.
+3. `calibrate_matched_l1.py` carries a matching gate that rejects any caller-supplied `base_dagma_config` whose three core values do not equal the protocol.
+
+To make the supersession auditable and to give each re-run a distinct deterministic identity, the two run-hash functions are extended:
+- `compute_calibration_run_hash12` now includes `protocol_dagma_lambda1`, `protocol_dagma_warm_iter`, and `protocol_dagma_max_iter` in its hash payload.
+- `compute_main_evaluation_run_hash12` does the same.
+These extensions guarantee that any future re-run at a different backbone produces a different identity hash, preventing accidental contamination of the canonical output directories.
+
+### Outcome
+
+The matched-L1 calibration and main evaluation were re-executed under the corrected protocol backbone on 28/05/2026. All 224 main-evaluation fits returned `fit_status = success` and `metric_status = computed`. Both exploratory diagnostics were re-run on the new records.
+
+| Artefact | Old hash (lambda1=0.05) | New hash (lambda1=0.10) |
+| --- | --- | --- |
+| Main evaluation | `864fe6722256` | `166c792c43bc` |
+| Matched-L1 calibration | `274cfe3fef32` | `71bfe6629b9d` |
+| Prior structural relevance | `1b46785b59a4` | `6f660aaeef3d` |
+| Oracle prior relevance | `1b95c563db88` | `079fda7ac4f4` |
+| `matched_l1_lambda1` (frozen) | `0.0625` | `0.10` |
+
+Selection inputs to the corrected matched-L1 calibration (`71bfe6629b9d`): target soft-prior clean/conf=1.0 mean edge count `11.5` (per-seed `[12, 11]`), Stage-1 grid `(0.025, 0.05, 0.075, 0.1, 0.15, 0.2, 0.25)`, Stage-2 interval `[0.075, 0.15]`. Selected `matched_l1_lambda1 = 0.10` with candidate mean edge count `12.0`, absolute gap `0.5`, valid-DAG count `2`, halt status `completed`. Evaluation seeds were not used; SID / SHD / MMD were not used for selection.
+
+The earlier artefact trees at `results/main_study/864fe6722256/`, `results/main_study/calibration/matched_l1/274cfe3fef32/`, `results/main_study/exploratory/prior_structural_relevance/1b46785b59a4/`, and `results/main_study/exploratory/oracle_prior_relevance/1b95c563db88/` are superseded but not deleted. They remain on disk under their original paths as provenance for this entry; the active code, docs, and notebooks reference the new hashes exclusively.
+
+### Implications
+
+1. The corrected main-evaluation artefact at `166c792c43bc` is now the operative thesis-primary record. All thesis writing must cite this hash, not `864fe6722256`.
+2. `matched_l1_lambda1 = 0.10` is the value carried into all main-evaluation `matched_l1` records under the new hash; the matched-L1 baseline matches the soft-prior clean reference at backbone `lambda1 = 0.10`.
+3. The qualitative finding of the earlier exploratory diagnostics (M-10, M-11) is consistent under the new run: mechanism-level engagement at the targeted forbidden edges remains visible while clean-grid SID/MMD parity with prior-free, matched-L1, and hard-exclusion baselines persists. The thesis Discussion will adopt the new analysis hashes verbatim.
+4. The hand-off sensitivity check under `results/main_study/exploratory/lambda1_sensitivity/` was produced before the calibration was re-run and remains a useful intermediate provenance artefact; it is not a substitute for the full re-run at `166c792c43bc`.
+5. No new hypothesis is added. The H1-H3 framing from docs/01 is unchanged; only the operating-point identity it is evaluated against has been corrected.
+
+### Constraints satisfied
+
+- No selection-study artefact modified.
+- Held-out parent (`88da382e8672`) unchanged.
+- No new model or metric introduced.
+- Wrapper-level DAGMA defaults unchanged (Phase-A regression pins remain green).
+- `lambda_prior = 2e-4` unchanged (its calibration was already done at the correct backbone).
+- All 224 new records carry `dagma_config.lambda1 = 0.10`, `warm_iter = 20000`, `max_iter = 70000` verified from the persisted JSON.
+
+### Forward note
+
+The thesis Methods chapter will state the corrected backbone explicitly. Section 4.4 of the methodology and the appendix listing the run hashes both refer to `166c792c43bc`, `71bfe6629b9d`, `6f660aaeef3d`, and `079fda7ac4f4`. Earlier hashes are mentioned only in this docs/03 entry and in the README placed alongside each superseded artefact directory.

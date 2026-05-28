@@ -1,5 +1,16 @@
 # 13. Prior Relevance, Oracle Diagnostics, and Thesis Implications
 
+> **ADDENDUM 2 (added 28/05/2026, DAGMA backbone correction).** The analyses interpreted in this document were originally produced on top of the M-8 main evaluation hash `864fe6722256`, which used the wrapper-level Phase-A DAGMA defaults (`lambda1 = 0.05`, `warm_iter = 30000`, `max_iter = 60000`) rather than the protocol backbone (`lambda1 = 0.10`, `warm_iter = 20000`, `max_iter = 70000`) calibrated and selected by the held-out adjudication. The defect, its correction, and the new authoritative hashes are formally recorded in docs/03 ("28/05/2026 — DAGMA backbone default-leak defect ..."). The current operative hashes are:
+>
+> ```text
+> main_evaluation_run_hash12             = 166c792c43bc
+> prior_structural_relevance_hash12      = 6f660aaeef3d
+> oracle_prior_relevance_hash12          = 079fda7ac4f4
+> matched_l1_lambda1                     = 0.10  (calibration hash 71bfe6629b9d)
+> ```
+>
+> The thesis-level interpretations in this document — that mechanism-level engagement of the soft prior at the targeted forbidden-edge positions does not translate into a clear SID/MMD gain over the matched baselines at the protocol operating point, that the principal limit is prior-target selection rather than penalty strength, and that future work should focus on target-selection methods — are robust under the corrected backbone. The new artefacts should be read in place of the superseded hashes wherever they appear in the body.
+>
 > **ADDENDUM (added 27/05/2026, post-implementation drift audit).** This document remains the **operative final interpretive document** for the exploratory phase. It is consistent with the implementation: the analyses recorded under hashes `1b46785b59a4` (M-10) and `1b95c563db88` (M-11) match the saved artefacts on disk. The "Stop condition" in Section 13 is in force and is formally recorded in docs/03 ("Decision: Exploratory diagnostic sequence complete"). A presentation-only visual readout of M-10 + M-11 has been produced at `results/main_study/exploratory/prior_relevance_diagnostics/` with `notebooks/prior_relevance_diagnostics.ipynb`. No content in the body of this document requires correction. The next step (thesis writing) is unchanged.
 
 ## Status

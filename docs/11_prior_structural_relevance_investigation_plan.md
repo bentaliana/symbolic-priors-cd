@@ -1,5 +1,7 @@
 # Investigation Plan: Structural Relevance of Forbidden-Edge Priors to DAGMA Error Modes
 
+> **ADDENDUM 2 (added 28/05/2026, DAGMA backbone correction).** The analysis hash `1b46785b59a4` quoted in Addendum 1 below was computed over the off-protocol-backbone M-8 run `864fe6722256`. The corrected M-8 run `166c792c43bc` was completed on 28/05/2026; the M-10 investigation has been re-run on the corrected records and now lives under analysis hash `6f660aaeef3d` at `results/main_study/exploratory/prior_structural_relevance/6f660aaeef3d/`. The pre-registered protocol in the body below is unchanged; only the underlying main-evaluation records and the resulting analysis hash differ. The Section-6 outcome category and the M-11 follow-up still hold under the corrected backbone (M-11 is now `079fda7ac4f4`).
+>
 > **ADDENDUM (added 27/05/2026, post-implementation drift audit).** The investigation pre-registered by this document has been completed. The plan body below is preserved as the pre-registered protocol.
 >
 > - **Analysis hash:** `1b46785b59a4`

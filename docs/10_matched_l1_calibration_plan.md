@@ -1,5 +1,39 @@
     # Matched-L1 Calibration Plan
 
+## Addendum (2026-05-28): re-calibration under the corrected DAGMA backbone
+
+The first execution of this plan ran with a default DAGMA backbone
+of `lambda1 = 0.05`, `warm_iter = 30000`, `max_iter = 60000`
+(wrapper-level Phase-A defaults). The plan and the held-out
+selection both fix the backbone at `lambda1 = 0.10`,
+`warm_iter = 20000`, `max_iter = 70000`, so the original
+calibration ran on a soft-prior target measured at off-protocol
+backbone settings.
+
+The calibration has been re-executed under the protocol backbone.
+The earlier artefact tree at
+`results/main_study/calibration/matched_l1/274cfe3fef32/` is
+superseded; the new calibration is at
+`results/main_study/calibration/matched_l1/71bfe6629b9d/`.
+
+Outcome (new):
+
+- soft-prior target mean edge count: `11.5` (per-seed `[12, 11]`)
+- selected `matched_l1_lambda1`: `0.10`
+- selected candidate mean edge count: `12.0`
+- absolute gap: `0.5` (within the one-edge tolerance)
+- valid-DAG count: `2`
+- halt status: `completed`
+- evaluation seeds used: `false`
+- SID / SHD / MMD used for selection: `false`
+
+The procedure described in Sections 1-9 below is unchanged; the
+calibration script enforces every selection guardrail. The
+selected value `0.10` carried forward into the main evaluation
+plan supersedes the prior frozen value `0.0625`.
+
+---
+
 ## 1. Purpose
 
 The main study compares confidence-weighted soft forbidden-edge priors against prior-free DAGMA, hard exclusion, and a matched generic sparsity baseline. The matched-L1 baseline is included to control for generic regularisation pressure: it asks whether any observed benefit of the soft Frobenius prior is due to its targeted edge-specific structure, or whether a comparable amount of untargeted global L1 regularisation would produce similar behaviour.

@@ -1,5 +1,15 @@
 # 09 Main Study Implementation Plan
 
+> **ADDENDUM 2 (added 28/05/2026, DAGMA backbone correction).** The artefact hashes recorded in the 27/05/2026 addendum below — `864fe6722256` (M-8), `274cfe3fef32` (M-7), `1b46785b59a4` (M-10), `1b95c563db88` (M-11), and `matched_l1_lambda1 = 0.0625` — were produced on an off-protocol DAGMA backbone: the runner and the matched-L1 calibration both constructed `DAGMAConfig()` with no overrides, picking up the wrapper-level Phase-A paper anchor `lambda1 = 0.05`, `warm_iter = 30000`, `max_iter = 60000` instead of the protocol values `lambda1 = 0.10`, `warm_iter = 20000`, `max_iter = 70000` listed in Section 2.1 of this plan and confirmed by the held-out adjudication. The defect, its correction, and the new authoritative hashes are formally recorded in docs/03 ("28/05/2026 — DAGMA backbone default-leak defect ..."). Current operative hashes for the implementation status given by Addendum 1 are:
+>
+> - M-7 matched-L1 calibration: `71bfe6629b9d` (selected `matched_l1_lambda1 = 0.10`, target mean edge count `11.5`).
+> - M-8 main evaluation: `166c792c43bc` (224 records, all `success_computed`).
+> - M-9 readout and figures: `results/main_study/main_evaluation/166c792c43bc/readout/`.
+> - M-10 prior structural relevance: `6f660aaeef3d`.
+> - M-11 oracle prior relevance: `079fda7ac4f4`.
+>
+> The bodies of Addendum 1 and the original plan below are preserved verbatim as historical record; whenever they cite a superseded hash, the corresponding current hash is the one listed above. Do not re-edit those historical bodies.
+>
 > **ADDENDUM (added 27/05/2026, post-implementation drift audit).** This document is the **frozen pre-implementation protocol** as it stood at version 1.0. Its body below is preserved as a historical record. The status updates and corrections listed here reflect what was actually implemented; they are formally recorded in docs/03 ("27/05/2026 — Drift audit and retrospective closure of docs/01 amendments"). Read this addendum together with the body.
 >
 > **Implementation status (M-1 through M-11 are all IMPLEMENTED):**

@@ -1,5 +1,13 @@
 # Prior Relevance Findings and Next Steps
 
+> **ADDENDUM 2 (added 28/05/2026, DAGMA backbone correction).** The analyses described in this document were originally produced on top of the M-8 main evaluation hash `864fe6722256`, which was generated on an off-protocol DAGMA backbone (`lambda1 = 0.05`, `warm_iter = 30000`, `max_iter = 60000` — the wrapper-level Phase-A defaults, not the protocol values `0.10 / 20000 / 70000`). The defect, its correction, and the new authoritative hashes are formally recorded in docs/03 ("28/05/2026 — DAGMA backbone default-leak defect ..."). The current operative analysis hashes are:
+>
+> - **M-10 prior structural relevance:** `6f660aaeef3d` (output directory `results/main_study/exploratory/prior_structural_relevance/6f660aaeef3d/`).
+> - **M-11 oracle prior relevance:** `079fda7ac4f4` (output directory `results/main_study/exploratory/oracle_prior_relevance/079fda7ac4f4/`).
+> - **Underlying M-8 main evaluation:** `166c792c43bc`.
+>
+> The qualitative findings recorded below — that mechanism-level forbidden-edge suppression engages but that the originally-sampled prior targets are not the dominant source of DAGMA's errors at the protocol operating point — are robust under the corrected backbone. The new artefacts should be read in place of the superseded hashes wherever they appear in the body and in Addendum 1.
+>
 > **ADDENDUM (added 27/05/2026, post-implementation drift audit).** The "next planned diagnostic step" described in Section "Next step" of this document — the alternative-prior relevance upper-bound diagnostic (forbidden-edge oracle + required-edge oracle) — has been completed.
 >
 > - **M-11 analysis hash:** `1b95c563db88`
