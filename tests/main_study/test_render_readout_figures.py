@@ -150,7 +150,7 @@ def _build_synthetic_flat() -> pd.DataFrame:
             method_family="matched_l1", seed=seed,
             sid=7.0 + (seed - 501) * 0.5,
             shd=4.5, mmd=0.035, edge_count=18,
-            matched_l1_lambda1=0.0625,
+            matched_l1_lambda1=0.10,
         ))
         # hard_exclusion across corruption
         for cf in _CORRUPTIONS:
