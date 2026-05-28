@@ -74,7 +74,7 @@ from symbolic_priors_cd.wrappers.dagma import DAGMAConfig
 # ---------------------------------------------------------------------------
 
 
-_RUN_HASH12 = "864fe6722256"
+_RUN_HASH12 = "166c792c43bc"
 _PARENT_HASH = "a" * 64
 _N_NODES = 10
 _GENERATED_AT = "2026-05-27T00:00:00Z"
@@ -125,7 +125,7 @@ def _make_config(*, method_family: str, seed: int,
             corruption_index=corruption_index,
         )
     elif method_family == "matched_l1":
-        kwargs["matched_l1_lambda1"] = 0.0625
+        kwargs["matched_l1_lambda1"] = 0.10
     return make_main_study_config(**kwargs)
 
 
@@ -653,15 +653,15 @@ def test_summarise_oracle_diagnostics_grouped_stats():
 
 def test_analysis_hash12_uses_only_declared_payload_fields():
     h_a, payload_a = compute_analysis_hash12(
-        main_evaluation_run_hash12="864fe6722256",
-        prior_relevance_analysis_hash12="1b46785b59a4",
+        main_evaluation_run_hash12="166c792c43bc",
+        prior_relevance_analysis_hash12="6f660aaeef3d",
         budget_k=10,
         sorted_input_run_ids=["b", "a", "c"],
         sorted_input_configuration_hashes=["xyz", "abc"],
     )
     h_b, payload_b = compute_analysis_hash12(
-        main_evaluation_run_hash12="864fe6722256",
-        prior_relevance_analysis_hash12="1b46785b59a4",
+        main_evaluation_run_hash12="166c792c43bc",
+        prior_relevance_analysis_hash12="6f660aaeef3d",
         budget_k=10,
         sorted_input_run_ids=["a", "b", "c"],
         sorted_input_configuration_hashes=["abc", "xyz"],
@@ -683,15 +683,15 @@ def test_analysis_hash12_uses_only_declared_payload_fields():
 
 def test_analysis_hash12_changes_with_budget_k():
     h_10, _ = compute_analysis_hash12(
-        main_evaluation_run_hash12="864fe6722256",
-        prior_relevance_analysis_hash12="1b46785b59a4",
+        main_evaluation_run_hash12="166c792c43bc",
+        prior_relevance_analysis_hash12="6f660aaeef3d",
         budget_k=10,
         sorted_input_run_ids=["a"],
         sorted_input_configuration_hashes=["x"],
     )
     h_5, _ = compute_analysis_hash12(
-        main_evaluation_run_hash12="864fe6722256",
-        prior_relevance_analysis_hash12="1b46785b59a4",
+        main_evaluation_run_hash12="166c792c43bc",
+        prior_relevance_analysis_hash12="6f660aaeef3d",
         budget_k=5,
         sorted_input_run_ids=["a"],
         sorted_input_configuration_hashes=["x"],

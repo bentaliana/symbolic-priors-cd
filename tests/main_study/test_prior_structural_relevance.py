@@ -71,7 +71,7 @@ from symbolic_priors_cd.wrappers.dagma import DAGMAConfig
 # ---------------------------------------------------------------------------
 
 
-_RUN_HASH12 = "864fe6722256"
+_RUN_HASH12 = "166c792c43bc"
 _PARENT_HASH = "a" * 64
 _N_NODES = 10
 _GENERATED_AT = "2026-05-26T00:00:00Z"
@@ -114,8 +114,12 @@ def _make_config(
     corruption_index: Optional[int] = None,
     matched_l1: Optional[float] = None,
 ) -> MainStudyConfig:
+    # Both the matched_l1 family and the rest of the main study now
+    # share the protocol backbone lambda1=0.10. The branch is kept
+    # for symmetry with earlier protocol versions where the values
+    # differed.
     dagma_lambda1 = (
-        0.0625 if method_family == "matched_l1" else 0.05
+        0.10 if method_family == "matched_l1" else 0.10
     )
     base_dagma = DAGMAConfig(lambda1=dagma_lambda1)
     kwargs: dict[str, Any] = dict(
@@ -140,7 +144,7 @@ def _make_config(
         )
     elif method_family == "matched_l1":
         kwargs["matched_l1_lambda1"] = (
-            matched_l1 if matched_l1 is not None else 0.0625
+            matched_l1 if matched_l1 is not None else 0.10
         )
     return make_main_study_config(**kwargs)
 
@@ -737,12 +741,12 @@ def test_baseline_condition_extraction_rejects_missing(tmp_path):
 
 def test_analysis_hash12_deterministic_and_uses_only_declared_inputs():
     h_a, payload_a = compute_analysis_hash12(
-        main_evaluation_run_hash12="864fe6722256",
+        main_evaluation_run_hash12="166c792c43bc",
         input_run_ids=["b", "a", "c"],
         input_configuration_hashes=["xyz", "abc"],
     )
     h_b, payload_b = compute_analysis_hash12(
-        main_evaluation_run_hash12="864fe6722256",
+        main_evaluation_run_hash12="166c792c43bc",
         input_run_ids=["a", "b", "c"],
         input_configuration_hashes=["abc", "xyz"],
     )

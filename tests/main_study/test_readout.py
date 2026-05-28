@@ -117,7 +117,7 @@ from symbolic_priors_cd.wrappers.dagma import DAGMAConfig
 
 
 _PARENT_HASH = "a" * 64
-_RUN_HASH12 = EXPECTED_MAIN_EVALUATION_RUN_HASH12  # "864fe6722256"
+_RUN_HASH12 = EXPECTED_MAIN_EVALUATION_RUN_HASH12  # "166c792c43bc"
 _N_NODES = 10
 _EXPECTED_EDGES = 20
 _GENERATED_AT = "2026-05-25T12:00:00Z"
@@ -767,7 +767,7 @@ def test_validate_flat_rows_rejects_matched_l1_lambda_mismatch(tmp_path):
     for i, r in enumerate(rows):
         if r.method_family == "matched_l1":
             rows[i] = dataclasses_replace(
-                r, matched_l1_lambda1=0.1, dagma_lambda1=0.1
+                r, matched_l1_lambda1=0.5, dagma_lambda1=0.5
             )
             break
     with pytest.raises(ValueError, match="matched_l1"):
