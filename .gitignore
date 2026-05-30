@@ -16,6 +16,7 @@ dist/
 # Virtual environments
 .venv/
 venv/
+.venv-ci/
 env/
 .env
 
@@ -139,10 +140,7 @@ results/main_study/exploratory/oracle_prior_relevance/*
 !results/main_study/exploratory/prior_relevance_diagnostics/
 !results/main_study/exploratory/prior_relevance_diagnostics/**
 
-# superseded lambda1=0.05 trees. The
-# underlying data directories remain ignored only the README files
-# at the top of each superseded tree are tracked so the supersession
-# trail is visible in version control.
+# superseded lambda1=0.05 trees 
 !results/main_study/_superseded_lambda1_0p05_864fe6722256/
 results/main_study/_superseded_lambda1_0p05_864fe6722256/*
 !results/main_study/_superseded_lambda1_0p05_274cfe3fef32/
@@ -155,3 +153,6 @@ results/main_study/calibration/matched_l1/_superseded_lambda1_0p05_274cfe3fef32/
 results/main_study/exploratory/prior_structural_relevance/_superseded_lambda1_0p05_1b46785b59a4/*
 !results/main_study/exploratory/oracle_prior_relevance/_superseded_lambda1_0p05_1b95c563db88/
 results/main_study/exploratory/oracle_prior_relevance/_superseded_lambda1_0p05_1b95c563db88/*
+
+
+*.bak
