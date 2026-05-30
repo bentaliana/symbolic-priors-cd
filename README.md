@@ -7,7 +7,8 @@
 
 BSc thesis project (University of Malta, 2026) that adds **confidence-weighted soft structural priors** to **differentiable causal discovery**. The implementation is a soft forbidden-edge prior wrapper around **DAGMA**-linear, compared against three baselines on a 10-node ER2 linear-Gaussian regime under observational-only training: prior-free DAGMA, matched-L1 DAGMA (sparsity-matched generic regulariser), and hard-exclusion DAGMA (DAGMA's native `exclude_edges` projection). The corruption axis sweeps a 5x5 grid of `(confidence, corruption_fraction)`; metrics are SID (primary), MMD (secondary, distributional), SHD, and thresholded edge count.
 
-Author: **Ben Taliana** (`ben.taliana.23@um.edu.mt`). Supervisor: **Prof. Alexiei Dingli**.
+Author: **Ben Taliana** (`ben.taliana.23@um.edu.mt`). 
+Supervisor: **Prof. Alexiei Dingli**.
 
 ---
 
@@ -15,17 +16,17 @@ Author: **Ben Taliana** (`ben.taliana.23@um.edu.mt`). Supervisor: **Prof. Alexie
 
 The soft prior is added to DAGMA's hand-coded gradient as a single extra term per Adam iteration; the rest of DAGMA's path-following optimisation is unchanged. The penalty form is
 
-```
-L_prior(W) = lambda_prior * sum_{(i,j) in F} c_ij * W_ij^2
-```
+$$
+\mathcal{L}_{\text{prior}}(W) \;=\; \lambda_{\text{prior}} \sum_{(i,j)\,\in\,\mathcal{F}} c_{ij}\, W_{ij}^{2}
+$$
 
 and its gradient, added to DAGMA's assembled `Gobj` immediately before the Adam update, is
 
-```
-G_prior(W) = 2 * lambda_prior * (C o W)
-```
+$$
+\nabla_{W}\,\mathcal{L}_{\text{prior}}(W) \;=\; 2\,\lambda_{\text{prior}}\,\bigl(C \odot W\bigr)
+$$
 
-where `W` is the continuous weighted adjacency matrix learned by DAGMA, `F` is the seed-specific forbidden-edge set, `C` is the per-entry confidence mask (`C[i,j] = c` on `(i,j) in F`, zero elsewhere, zero on the diagonal), and `c in [0, 1]` is the global confidence value for the run.
+where $W$ is the continuous weighted adjacency matrix learned by DAGMA, $\mathcal{F}$ is the seed-specific forbidden-edge set, $C$ is the per-entry confidence mask ($C_{ij} = c$ on $(i,j) \in \mathcal{F}$, zero elsewhere, zero on the diagonal), $c \in [0, 1]$ is the global confidence value for the run, and $\odot$ is the elementwise (Hadamard) product.
 
 Three properties govern the interpretation of the results:
 
