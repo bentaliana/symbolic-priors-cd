@@ -5,9 +5,9 @@
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-1f6feb)](https://www.python.org/downloads/release/python-3120/)
 [![License MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-BSc thesis project (University of Malta, 2026) that adds **confidence-weighted soft structural priors** to **differentiable causal discovery**. The implementation is a soft forbidden-edge prior wrapper around **DAGMA**-linear, compared against three baselines on a 10-node ER2 linear-Gaussian regime under observational-only training: prior-free DAGMA, matched-L1 DAGMA (sparsity-matched generic regulariser), and hard-exclusion DAGMA (DAGMA's native `exclude_edges` projection). The corruption axis sweeps a 5x5 grid of `(confidence, corruption_fraction)`; metrics are SID (primary), MMD (secondary, distributional), SHD, and thresholded edge count.
+B.Sc. I.T. (Hons.) in Artificial Intelligence thesis project that adds **confidence-weighted soft structural priors** to **differentiable causal discovery**. The implementation is a soft forbidden-edge prior wrapper around **DAGMA**-linear, compared against three baselines on a 10-node ER2 linear-Gaussian regime under observational-only training: prior-free DAGMA, matched-L1 DAGMA (sparsity-matched generic regulariser), and hard-exclusion DAGMA (DAGMA's native `exclude_edges` projection). The corruption axis sweeps a 5x5 grid of `(confidence, corruption_fraction)`, metrics are SID (primary), MMD (secondary, distributional), SHD, and thresholded edge count.
 
-Author: **Ben Taliana** (`ben.taliana.23@um.edu.mt`). 
+Author: **Ben Taliana** (`ben.taliana.23@um.edu.mt`)<br>
 Supervisor: **Prof. Alexiei Dingli**.
 
 ---
@@ -16,17 +16,13 @@ Supervisor: **Prof. Alexiei Dingli**.
 
 The soft prior is added to DAGMA's hand-coded gradient as a single extra term per Adam iteration; the rest of DAGMA's path-following optimisation is unchanged. The penalty form is
 
-$$
-\mathcal{L}_{\text{prior}}(W) \;=\; \lambda_{\text{prior}} \sum_{(i,j)\,\in\,\mathcal{F}} c_{ij}\, W_{ij}^{2}
-$$
+$$L_{\text{prior}}(W) = \lambda_{\text{prior}} \sum_{(i,j) \in F} c_{ij} W_{ij}^2$$
 
 and its gradient, added to DAGMA's assembled `Gobj` immediately before the Adam update, is
 
-$$
-\nabla_{W}\,\mathcal{L}_{\text{prior}}(W) \;=\; 2\,\lambda_{\text{prior}}\,\bigl(C \odot W\bigr)
-$$
+$$\nabla_W L_{\text{prior}}(W) = 2\lambda_{\text{prior}} (C \odot W)$$
 
-where $W$ is the continuous weighted adjacency matrix learned by DAGMA, $\mathcal{F}$ is the seed-specific forbidden-edge set, $C$ is the per-entry confidence mask ($C_{ij} = c$ on $(i,j) \in \mathcal{F}$, zero elsewhere, zero on the diagonal), $c \in [0, 1]$ is the global confidence value for the run, and $\odot$ is the elementwise (Hadamard) product.
+where $W$ is the continuous weighted adjacency matrix learned by DAGMA, $F$ is the seed-specific forbidden-edge set, $C$ is the per-entry confidence mask ($C_{ij} = c$ on $(i,j) \in F$, zero elsewhere, zero on the diagonal), $c \in [0, 1]$ is the global confidence value for the run, and $\odot$ is the elementwise (Hadamard) product.
 
 Three properties govern the interpretation of the results:
 
@@ -36,16 +32,16 @@ Three properties govern the interpretation of the results:
 
 Frozen protocol values used by the main study (set by held-out adjudication and matched-L1 calibration):
 
-| constant | value | source |
-|---|---:|---|
-| DAGMA `lambda1` (backbone) | `0.10` | held-out selection at `lambda1 = 0.10` |
-| DAGMA `warm_iter` | `20000` | DAGMA paper anchor (Section C.1.1) |
-| DAGMA `max_iter` | `70000` | same |
-| project threshold | `0.30` | applied as `abs(W) >= 0.30` |
-| `lambda_prior` | `2e-4` | smallest non-degenerate value from the lambda_prior calibration |
-| `matched_l1_lambda1` | `0.10` | match-by-sparsity calibration `71bfe6629b9d` |
-| evaluation seeds | `501..507` | main-study pool |
-| calibration seeds | `401, 402` | main-study pool |
+| constant                   |      value | source                                                          |
+| -------------------------- | ---------: | --------------------------------------------------------------- |
+| DAGMA `lambda1` (backbone) |     `0.10` | held-out selection at `lambda1 = 0.10`                          |
+| DAGMA `warm_iter`          |    `20000` | DAGMA paper anchor (Section C.1.1)                              |
+| DAGMA `max_iter`           |    `70000` | same                                                            |
+| project threshold          |     `0.30` | applied as `abs(W) >= 0.30`                                     |
+| `lambda_prior`             |     `2e-4` | smallest non-degenerate value from the lambda_prior calibration |
+| `matched_l1_lambda1`       |     `0.10` | match-by-sparsity calibration `71bfe6629b9d`                    |
+| evaluation seeds           | `501..507` | main-study pool                                                 |
+| calibration seeds          | `401, 402` | main-study pool                                                 |
 
 ---
 
@@ -250,10 +246,10 @@ jupyter nbconvert --to notebook --execute --inplace notebooks/prior_relevance_di
 
 Notebook -> output mapping:
 
-| notebook | reads from | regenerates |
-|---|---|---|
-| `base_model_selection.ipynb` | `88da382e8672`, `4a67117a10b1` | 7 base-model selection figures and 2 side tables |
-| `main_evaluation.ipynb` | `166c792c43bc` | `fig01..fig08`, baseline / paired / degradation / correlation tables |
+| notebook                            | reads from                                     | regenerates                                                                        |
+| ----------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `base_model_selection.ipynb`        | `88da382e8672`, `4a67117a10b1`                 | 7 base-model selection figures and 2 side tables                                   |
+| `main_evaluation.ipynb`             | `166c792c43bc`                                 | `fig01..fig08`, baseline / paired / degradation / correlation tables               |
 | `prior_relevance_diagnostics.ipynb` | `166c792c43bc`, `6f660aaeef3d`, `079fda7ac4f4` | `fig01..fig11`, prior-target overlap, error decomposition, oracle scenario summary |
 
 Executing these three notebooks regenerates every thesis figure and table from saved artefacts without re-running Stages 1-5.
@@ -404,17 +400,17 @@ Consequences:
 
 What every successful main-study fit stores (per `experiments/main_study/executor.py`):
 
-| artefact | content |
-|---|---|
-| record JSON | full config, run hashes, run_id, statuses, SID/SHD/MMD, runtime, code_version, paths |
-| `continuous_w.npz` | DAGMA pre-threshold continuous adjacency `W` |
-| `thresholded_adjacency.npz` | bool, `abs(W) >= 0.3` |
-| `true_adjacency.npz` | ground-truth SCM adjacency |
-| `interventions_mmd.json` | per-intervention MMD + bandwidth sweep |
-| `confidence_mask.npz` (soft_frobenius only) | the actual `C` used in the fit |
-| `prior_edge_set_clean.json` (soft / hard) | reconstructed clean `F` |
-| `prior_edge_set_corrupted.json` (soft / hard) | actually-applied `F_corrupted` |
-| `per_edge_labels.json` (soft / hard) | per-edge `true_negative_retained` or `true_positive_corrupted_replacement` |
+| artefact                                      | content                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------ |
+| record JSON                                   | full config, run hashes, run_id, statuses, SID/SHD/MMD, runtime, code_version, paths |
+| `continuous_w.npz`                            | DAGMA pre-threshold continuous adjacency `W`                                         |
+| `thresholded_adjacency.npz`                   | bool, `abs(W) >= 0.3`                                                                |
+| `true_adjacency.npz`                          | ground-truth SCM adjacency                                                           |
+| `interventions_mmd.json`                      | per-intervention MMD + bandwidth sweep                                               |
+| `confidence_mask.npz` (soft_frobenius only)   | the actual `C` used in the fit                                                       |
+| `prior_edge_set_clean.json` (soft / hard)     | reconstructed clean `F`                                                              |
+| `prior_edge_set_corrupted.json` (soft / hard) | actually-applied `F_corrupted`                                                       |
+| `per_edge_labels.json` (soft / hard)          | per-edge `true_negative_retained` or `true_positive_corrupted_replacement`           |
 
 Records are loaded by `record_from_json` in `experiments/main_study/records.py`; the loader validates the full schema and rejects unknown or missing fields.
 
@@ -452,13 +448,13 @@ Continuous integration runs the full suite from a fresh clone on Ubuntu Python 3
 
 Every stochastic component is explicitly seeded. Seed pools (disjoint by construction):
 
-| pool | seeds | use |
-|---|---|---|
-| reproduction (selection study) | `101, 102, 103` | reproduction pass |
-| calibration (selection study) | `201, 202` | base-model calibration |
-| held-out (selection study) | `301..305` | held-out adjudication |
-| main-study calibration | `401, 402` | lambda_prior + matched-L1 |
-| main-study evaluation | `501..507` | headline grid |
+| pool                           | seeds           | use                       |
+| ------------------------------ | --------------- | ------------------------- |
+| reproduction (selection study) | `101, 102, 103` | reproduction pass         |
+| calibration (selection study)  | `201, 202`      | base-model calibration    |
+| held-out (selection study)     | `301..305`      | held-out adjudication     |
+| main-study calibration         | `401, 402`      | lambda_prior + matched-L1 |
+| main-study evaluation          | `501..507`      | headline grid             |
 
 Derived seeds inside a run:
 
